@@ -96,6 +96,60 @@ struct Task: Identifiable, Codable, Equatable {
     var createdAt: Date
 }
 
+// MARK: - Toast
+
+enum ToastKind {
+    case success
+    case error
+}
+
+struct AppToast: Identifiable, Equatable {
+    let id = UUID()
+    let kind: ToastKind
+    let message: String
+}
+
+private struct ToastBanner: View {
+    let toast: AppToast
+
+    private var icon: String {
+        switch toast.kind {
+        case .success: return "checkmark.circle.fill"
+        case .error: return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch toast.kind {
+        case .success: return .green
+        case .error: return .red
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundColor(tint)
+            Text(toast.message)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(tint.opacity(0.25), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 8)
+        .padding(.horizontal, 16)
+    }
+}
+
 // MARK: - App State
 
 class AppState: ObservableObject {
@@ -117,6 +171,17 @@ class AppState: ObservableObject {
                 UserDefaults.standard.set(id.uuidString, forKey: "lastUserId")
             } else {
                 UserDefaults.standard.removeObject(forKey: "lastUserId")
+            }
+        }
+    }
+    
+    @Published var toast: AppToast? = nil
+    
+    func showToast(_ kind: ToastKind, _ message: String) {
+        toast = AppToast(kind: kind, message: message)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            if self?.toast?.message == message {
+                self?.toast = nil
             }
         }
     }
@@ -248,7 +313,29 @@ class AppState: ObservableObject {
             uiErrorMessage = "Kein Benutzer angemeldet."
             return false
         }
+        // Standard: Mitarbeiter legt für sich selbst an (Urlaub = Offen, Krankheit = direkt)
+        return createLeaveRequest(start: start, end: end, type: type, for: user, approveImmediately: false)
+    }
 
+    /// Admin kann Anträge für andere Benutzer anlegen.
+    /// - Urlaub: optional sofort genehmigen.
+    /// - Krankheit: wird immer sofort eingetragen (Genehmigt), unabhängig vom Toggle.
+    @discardableResult
+    func createLeaveRequest(start: Date,
+                            end: Date,
+                            type: LeaveType,
+                            for user: User,
+                            approveImmediately: Bool) -> Bool {
+
+        if type == .vacation {
+            let requestedDays = workingDays(from: start, to: end)
+            let available = availableVacationDaysForRequests(for: user)
+            if requestedDays > available {
+                uiErrorMessage = "Nicht genügend Resturlaub. Verfügbar: \(available) Tag(e), angefragt: \(requestedDays) Tag(e)."
+                return false
+            }
+        }
+        
         // Validierung: Überschneidungen prüfen
         if hasOverlappingLeave(for: user.id, start: start, end: end, newType: type) {
             switch type {
@@ -264,8 +351,15 @@ class AppState: ObservableObject {
             return false
         }
 
-        // Krankheit wird sofort genehmigt, alles andere zunächst "Offen"
-        let initialStatus: LeaveStatus = (type == .sick) ? .approved : .pending
+        // Status:
+        // - Krankheit: immer direkt eingetragen
+        // - Urlaub: entweder offen oder direkt genehmigt (Admin-Option)
+        let initialStatus: LeaveStatus
+        if type == .sick {
+            initialStatus = .approved
+        } else {
+            initialStatus = approveImmediately ? .approved : .pending
+        }
 
         let request = LeaveRequest(
             id: UUID(),
@@ -277,6 +371,13 @@ class AppState: ObservableObject {
             status: initialStatus
         )
         leaveRequests.append(request)
+        let successText: String
+        if type == .sick {
+            successText = "Krankmeldung erfolgreich gespeichert."
+        } else {
+            successText = (initialStatus == .approved) ? "Urlaub erfolgreich eingetragen." : "Urlaubsantrag erfolgreich erstellt."
+        }
+        showToast(.success, successText)
         uiErrorMessage = nil
         return true
     }
@@ -315,7 +416,16 @@ class AppState: ObservableObject {
 
     @discardableResult
     func updateLeaveRequest(_ updated: LeaveRequest) -> Bool {
+        if updated.type == .vacation {
+            let requestedDays = workingDays(from: updated.startDate, to: updated.endDate)
+            let available = availableVacationDaysForRequests(for: updated.user, excludingRequestId: updated.id)
+            if requestedDays > available {
+                uiErrorMessage = "Nicht genügend Resturlaub. Verfügbar: \(available) Tag(e), angefragt: \(requestedDays) Tag(e)."
+                return false
+            }
+        }
         // Validierung: nach Bearbeitung darf es keine Überschneidung mit anderen Einträgen geben
+        
         if hasOverlappingLeave(for: updated.user.id,
                               start: updated.startDate,
                               end: updated.endDate,
@@ -395,6 +505,24 @@ class AppState: ObservableObject {
         let used = usedVacationDays(for: user)
         return max(user.annualLeaveDays - used, 0)
     }
+    
+    func reservedVacationDays(for user: User, excludingRequestId: UUID? = nil) -> Int {
+        let requestsForUser = leaveRequests.filter {
+            $0.user.id == user.id &&
+            $0.type == .vacation &&
+            $0.status != .rejected &&
+            (excludingRequestId == nil || $0.id != excludingRequestId!)
+        }
+
+        return requestsForUser.reduce(0) { partial, req in
+            partial + max(workingDays(from: req.startDate, to: req.endDate), 0)
+        }
+    }
+
+    func availableVacationDaysForRequests(for user: User, excludingRequestId: UUID? = nil) -> Int {
+        let reserved = reservedVacationDays(for: user, excludingRequestId: excludingRequestId)
+        return max(user.annualLeaveDays - reserved, 0)
+    }
 }
 
 
@@ -471,13 +599,23 @@ struct ContentView: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
-        Group {
-            if appState.currentUser == nil {
-                LoginView()
-            } else {
-                MainView()
+        ZStack(alignment: .top) {
+            Group {
+                if appState.currentUser == nil {
+                    LoginView()
+                } else {
+                    MainView()
+                }
+            }
+
+            if let toast = appState.toast {
+                ToastBanner(toast: toast)
+                    .padding(.top, 10)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(999)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: appState.toast)
     }
 }
 
@@ -1720,12 +1858,15 @@ private struct MyLeaveRequestCard: View {
 // MARK: - New Leave Request Form
 
 struct NewLeaveRequestView: View {
+    
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
 
     @State private var startDate = Date()
     @State private var endDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
     @State private var selectedType: LeaveType = .vacation
+    @State private var selectedUserId: UUID? = nil
+    @State private var approveImmediately: Bool = true
     @State private var inlineError: String? = nil
 
     private var buttonTitle: String {
@@ -1751,6 +1892,18 @@ struct NewLeaveRequestView: View {
         return max(days, 1)
     }
 
+    private var isAdmin: Bool {
+        appState.currentUser?.role == .admin
+    }
+
+    private var selectedUser: User? {
+        if let id = selectedUserId {
+            return appState.users.first(where: { $0.id == id })
+        }
+        // Default: aktueller User
+        return appState.currentUser
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             Form {
@@ -1773,7 +1926,7 @@ struct NewLeaveRequestView: View {
 
                 // Überblick
                 Section(header: Text("Überblick")) {
-                    if let user = appState.currentUser {
+                    if let user = selectedUser {
                         HStack(spacing: 12) {
                             InitialsAvatarView(name: user.name, color: user.color)
                             VStack(alignment: .leading, spacing: 4) {
@@ -1798,6 +1951,21 @@ struct NewLeaveRequestView: View {
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
+                    }
+                }
+
+                // Admin: Mitarbeiter-Auswahl
+                if isAdmin {
+                    Section(header: Text("Mitarbeiter")) {
+                        Picker("Für", selection: Binding(
+                            get: { selectedUserId ?? appState.currentUser?.id },
+                            set: { selectedUserId = $0 }
+                        )) {
+                            ForEach(appState.users) { u in
+                                Text(u.name).tag(Optional(u.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
                     }
                 }
 
@@ -1834,14 +2002,24 @@ struct NewLeaveRequestView: View {
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    if isAdmin && selectedType == .vacation {
+                        Toggle("Direkt genehmigen", isOn: $approveImmediately)
+                    }
                 }
 
                 // Aktion
                 Section {
                     Button(buttonTitle) {
+                        guard let targetUser = selectedUser else {
+                            inlineError = "Bitte einen Mitarbeiter auswählen."
+                            return
+                        }
+
                         let ok = appState.createLeaveRequest(start: startDate,
                                                              end: endDate,
-                                                             type: selectedType)
+                                                             type: selectedType,
+                                                             for: targetUser,
+                                                             approveImmediately: (selectedType == .vacation) ? (isAdmin && approveImmediately) : false)
                         if ok {
                             inlineError = nil
                             dismiss()
@@ -1873,10 +2051,22 @@ struct NewLeaveRequestView: View {
             .onChange(of: selectedType) { _ in
                 inlineError = nil
                 appState.uiErrorMessage = nil
+                if selectedType == .sick {
+                    approveImmediately = false
+                }
             }
         }
         .navigationTitle("Neuer Antrag")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if selectedUserId == nil {
+                selectedUserId = appState.currentUser?.id
+            }
+            // Bei Krankheit macht "Direkt genehmigen" keinen Sinn
+            if selectedType == .sick {
+                approveImmediately = false
+            }
+        }
     }
 }
 
