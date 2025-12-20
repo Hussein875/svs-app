@@ -109,6 +109,7 @@ class AppState: ObservableObject {
     @Published var tasks: [Task] = [] {
         didSet { saveTasks() }
     }
+    @Published var uiErrorMessage: String? = nil
 
     @Published var lastUserId: UUID? = nil {
         didSet {
@@ -204,8 +205,64 @@ class AppState: ObservableObject {
         users.removeAll { $0.id == user.id }
     }
 
-    func createLeaveRequest(start: Date, end: Date, type: LeaveType) {
-        guard let user = currentUser else { return }
+    private func normalizeDay(_ date: Date) -> Date {
+        Calendar.current.startOfDay(for: date)
+    }
+
+    private func rangesOverlap(_ aStart: Date, _ aEnd: Date, _ bStart: Date, _ bEnd: Date) -> Bool {
+        let aS = normalizeDay(aStart)
+        let aE = normalizeDay(aEnd)
+        let bS = normalizeDay(bStart)
+        let bE = normalizeDay(bEnd)
+        return aS <= bE && bS <= aE
+    }
+
+    /// Prüft, ob für den Benutzer im Zeitraum bereits ein kollidierender Antrag existiert.
+    /// Regeln:
+    /// - Abgelehnte Einträge blockieren nie.
+    /// - Urlaub darf sich nicht mit anderem Urlaub überschneiden (Status != .rejected).
+    /// - Krankheit darf Urlaub überlappen, aber nicht mit anderer Krankheit am selben Zeitraum (Status != .rejected).
+    /// Optional kann ein `excludingRequestId` gesetzt werden (z. B. beim Bearbeiten).
+    private func hasOverlappingLeave(for userId: UUID,
+                                    start: Date,
+                                    end: Date,
+                                    newType: LeaveType,
+                                    excludingRequestId: UUID? = nil) -> Bool {
+        return leaveRequests.contains { req in
+            guard req.user.id == userId else { return false }
+            if let ex = excludingRequestId, req.id == ex { return false }
+
+            // Abgelehnte Einträge blockieren nie
+            guard req.status != .rejected else { return false }
+
+            // Nur gleiche Typen blockieren (Urlaub blockt Urlaub, Krankheit blockt Krankheit)
+            guard req.type == newType else { return false }
+
+            return rangesOverlap(req.startDate, req.endDate, start, end)
+        }
+    }
+
+    @discardableResult
+    func createLeaveRequest(start: Date, end: Date, type: LeaveType) -> Bool {
+        guard let user = currentUser else {
+            uiErrorMessage = "Kein Benutzer angemeldet."
+            return false
+        }
+
+        // Validierung: Überschneidungen prüfen
+        if hasOverlappingLeave(for: user.id, start: start, end: end, newType: type) {
+            switch type {
+            case .sick:
+                if Calendar.current.isDate(start, inSameDayAs: end) {
+                    uiErrorMessage = "Für diesen Tag haben Sie sich bereits krank gemeldet."
+                } else {
+                    uiErrorMessage = "In diesem Zeitraum haben Sie sich bereits krank gemeldet."
+                }
+            case .vacation:
+                uiErrorMessage = "Dieser Zeitraum überschneidet sich mit einem bestehenden Urlaubsantrag."
+            }
+            return false
+        }
 
         // Krankheit wird sofort genehmigt, alles andere zunächst "Offen"
         let initialStatus: LeaveStatus = (type == .sick) ? .approved : .pending
@@ -220,6 +277,8 @@ class AppState: ObservableObject {
             status: initialStatus
         )
         leaveRequests.append(request)
+        uiErrorMessage = nil
+        return true
     }
 
     func requests(for date: Date) -> [LeaveRequest] {
@@ -241,15 +300,39 @@ class AppState: ObservableObject {
         }
     }
 
+    /// Bearbeitungs-/Löschrechte für Abwesenheiten:
+    /// - Admin: darf immer bearbeiten/löschen
+    /// - Mitarbeiter/Sachverständige: nur eigene *Urlaubs*-Anträge solange sie **Offen** sind
+    ///   (genehmigte/abgelehnte Anträge sowie Krankheitseinträge sind für Nicht-Admins nicht mehr änderbar)
     func canEditOrDelete(_ request: LeaveRequest, by user: User?) -> Bool {
         guard let user = user else { return false }
-        return user.role == .admin || user.id == request.user.id
+        if user.role == .admin { return true }
+
+        // Nicht-Admins dürfen nur eigene offenen Urlaubsanträge ändern
+        guard user.id == request.user.id else { return false }
+        return request.type == .vacation && request.status == .pending
     }
 
-    func updateLeaveRequest(_ updated: LeaveRequest) {
+    @discardableResult
+    func updateLeaveRequest(_ updated: LeaveRequest) -> Bool {
+        // Validierung: nach Bearbeitung darf es keine Überschneidung mit anderen Einträgen geben
+        if hasOverlappingLeave(for: updated.user.id,
+                              start: updated.startDate,
+                              end: updated.endDate,
+                              newType: updated.type,
+                              excludingRequestId: updated.id) {
+            uiErrorMessage = "Dieser Zeitraum überschneidet sich mit einer bestehenden Abwesenheit. Änderungen wurden nicht gespeichert."
+            return false
+        }
+
         if let index = leaveRequests.firstIndex(where: { $0.id == updated.id }) {
             leaveRequests[index] = updated
+            uiErrorMessage = nil
+            return true
         }
+
+        uiErrorMessage = "Der Antrag konnte nicht gefunden werden."
+        return false
     }
 
     func deleteLeaveRequest(_ request: LeaveRequest) {
@@ -312,6 +395,74 @@ class AppState: ObservableObject {
         let used = usedVacationDays(for: user)
         return max(user.annualLeaveDays - used, 0)
     }
+}
+
+
+
+// MARK: - Shared UI Helpers
+
+struct PrimaryCapsuleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.horizontal, 4)
+            .background(Color.accentColor)
+            .foregroundColor(.white)
+            .clipShape(Capsule())
+            .opacity(configuration.isPressed ? 0.92 : 1.0)
+            .scaleEffect(configuration.isPressed ? 0.99 : 1.0)
+    }
+}
+
+struct SecondaryTextActionStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .frame(minHeight: 44)
+            .padding(.horizontal, 8)
+            .foregroundColor(.secondary)
+            .opacity(configuration.isPressed ? 0.7 : 1.0)
+    }
+}
+
+fileprivate func shortDateString(_ date: Date) -> String {
+    let df = DateFormatter()
+    df.dateStyle = .short
+    return df.string(from: date)
+}
+
+fileprivate func mediumDateString(_ date: Date) -> String {
+    let df = DateFormatter()
+    df.dateStyle = .medium
+    return df.string(from: date)
+}
+
+fileprivate func dateRangeString(_ start: Date, _ end: Date) -> String {
+    if Calendar.current.isDate(start, inSameDayAs: end) {
+        return shortDateString(start)
+    } else {
+        return "\(shortDateString(start)) – \(shortDateString(end))"
+    }
+}
+
+fileprivate func colorForLeaveStatus(_ status: LeaveStatus) -> Color {
+    switch status {
+    case .approved: return .green
+    case .pending:  return .orange
+    case .rejected: return .red
+    }
+}
+
+fileprivate func statusBadgeView(_ status: LeaveStatus) -> some View {
+    Text(status.rawValue)
+        .font(.caption2)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            Capsule().fill(colorForLeaveStatus(status).opacity(0.15))
+        )
+        .foregroundColor(colorForLeaveStatus(status))
 }
 
 // MARK: - Root View
@@ -516,20 +667,15 @@ struct MainView: View {
 
             MyRequestsScreen()
                 .tabItem {
-                    Label("Urlaubsanträge", systemImage: "list.bullet")
+                    Label("Meine Anträge", systemImage: "doc.text")
                 }
 
             // Admin-spezifische Tabs
             if let user = appState.currentUser {
                 if user.role == .admin {
-                    AdminRequestsScreen()
+                    AdminConsoleView()
                         .tabItem {
-                            Label("Alle Anträge", systemImage: "person.3")
-                        }
-
-                    AdminUsersScreen()
-                        .tabItem {
-                            Label("Mitarbeiter", systemImage: "person.2")
+                            Label("Admin", systemImage: "shield.lefthalf.filled")
                         }
                 }
 
@@ -564,49 +710,128 @@ struct MainView: View {
 
 // MARK: - Edit Leave Request View
 
+// MARK: - Admin Console
+
+struct AdminConsoleView: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section(header: Text("Übersicht")) {
+                    NavigationLink {
+                        AdminRequestsScreen()
+                            .environmentObject(appState)
+                    } label: {
+                        Label("Anträge", systemImage: "doc.text.magnifyingglass")
+                    }
+
+                    NavigationLink {
+                        AdminUsersScreen()
+                            .environmentObject(appState)
+                    } label: {
+                        Label("Mitarbeiter", systemImage: "person.2")
+                    }
+                }
+            }
+            .navigationTitle("Admin")
+        }
+    }
+}
+
 struct EditLeaveRequestView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
 
     @State var request: LeaveRequest
+    @State private var inlineError: String? = nil
 
     var body: some View {
-        Form {
-            Section(header: Text("Zeitraum")) {
-                DatePicker("Von", selection: $request.startDate, displayedComponents: .date)
-                DatePicker("Bis", selection: $request.endDate, in: request.startDate..., displayedComponents: .date)
-            }
+        ScrollViewReader { proxy in
+            Form {
+                if let inlineError {
+                    Section {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                            Text(inlineError)
+                                .font(.footnote)
+                                .foregroundColor(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .id("errorBanner")
+                }
 
-            Section(header: Text("Art der Abwesenheit")) {
-                // Nur Urlaub und Krankheit zur Auswahl anbieten
-                let allowedTypes: [LeaveType] = [.vacation, .sick]
+                Section(header: Text("Zeitraum")) {
+                    DatePicker("Von", selection: $request.startDate, displayedComponents: .date)
+                    DatePicker("Bis", selection: $request.endDate, in: request.startDate..., displayedComponents: .date)
+                }
 
-                Picker("Art", selection: $request.type) {
-                    ForEach(allowedTypes, id: \.self) { type in
-                        Text(type.rawValue).tag(type)
+                Section(header: Text("Art der Abwesenheit")) {
+                    // Nur Urlaub und Krankheit zur Auswahl anbieten
+                    let allowedTypes: [LeaveType] = [.vacation, .sick]
+
+                    Picker("Art", selection: $request.type) {
+                        ForEach(allowedTypes, id: \.self) { type in
+                            Text(type.rawValue).tag(type)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+
+                Section {
+                    if appState.canEditOrDelete(request, by: appState.currentUser) {
+                        Button("Änderungen speichern") {
+                            let ok = appState.updateLeaveRequest(request)
+                            if ok {
+                                inlineError = nil
+                                dismiss()
+                            } else {
+                                inlineError = appState.uiErrorMessage
+                            }
+                        }
+
+                        Button("Antrag löschen", role: .destructive) {
+                            appState.deleteLeaveRequest(request)
+                            dismiss()
+                        }
+                    } else {
+                        Text("Dieser Antrag wurde bereits entschieden und kann nicht mehr bearbeitet werden.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
                     }
                 }
-                .pickerStyle(.menu)
             }
-
-
-            Section {
-                Button("Änderungen speichern") {
-                    appState.updateLeaveRequest(request)
-                    dismiss()
+            .onChange(of: inlineError) { value in
+                guard value != nil else { return }
+                withAnimation(.easeInOut) {
+                    proxy.scrollTo("errorBanner", anchor: .top)
                 }
-
-                if appState.canEditOrDelete(request, by: appState.currentUser) {
-                    Button("Antrag löschen", role: .destructive) {
-                        appState.deleteLeaveRequest(request)
-                        dismiss()
-                    }
-                }
+            }
+            .onChange(of: request.startDate) { _ in
+                inlineError = nil
+                appState.uiErrorMessage = nil
+            }
+            .onChange(of: request.endDate) { _ in
+                inlineError = nil
+                appState.uiErrorMessage = nil
+            }
+            .onChange(of: request.type) { _ in
+                inlineError = nil
+                appState.uiErrorMessage = nil
             }
         }
         .navigationTitle("Antrag bearbeiten")
+        .onAppear {
+            if request.type == .sick {
+                request.status = .approved
+            }
+        }
     }
 }
+
 
 // MARK: - Admin Requests Screen
 
@@ -614,82 +839,70 @@ struct AdminRequestsScreen: View {
     @EnvironmentObject var appState: AppState
     @State private var editingRequest: LeaveRequest?
 
+    private var openRequests: [LeaveRequest] {
+        appState.leaveRequests
+            .filter { $0.type == .vacation && $0.status == .pending }
+            .sorted { $0.startDate > $1.startDate }
+    }
+
+    // Beantwortete Anträge (inkl. Krankheit) – nach Monat gruppiert
+    private var answeredRequests: [LeaveRequest] {
+        appState.leaveRequests
+            .filter { !($0.type == .vacation && $0.status == .pending) }
+            .sorted { $0.startDate > $1.startDate }
+    }
+
+    private var answeredRequestsByMonth: [(monthStart: Date, requests: [LeaveRequest])] {
+        let cal = Calendar.current
+        let grouped = Dictionary(grouping: answeredRequests) { req in
+            let comps = cal.dateComponents([.year, .month], from: req.startDate)
+            return cal.date(from: comps) ?? cal.startOfDay(for: req.startDate)
+        }
+
+        let sortedKeys = grouped.keys.sorted(by: >)
+        return sortedKeys.map { key in
+            let items = (grouped[key] ?? []).sorted { $0.startDate > $1.startDate }
+            return (monthStart: key, requests: items)
+        }
+    }
+
+    private func monthTitle(_ date: Date) -> String {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "de_DE")
+        df.dateFormat = "LLLL yyyy"
+        return df.string(from: date).capitalized
+    }
+
     var body: some View {
         NavigationView {
             List {
-                Section(header: Text("Alle Anträge")) {
-                    if appState.leaveRequests.isEmpty {
+                if openRequests.isEmpty && answeredRequests.isEmpty {
+                    Section {
                         Text("Keine Anträge vorhanden")
                             .foregroundColor(.secondary)
-                    } else {
-                        ForEach(appState.leaveRequests) { request in
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text(request.user.name)
-                                        .font(.headline)
-                                        .foregroundColor(request.user.color)
-                                    Spacer()
-                                    // Status-Badge nur für Nicht-Krankheit anzeigen
-                                    if request.type != .sick {
-                                        Text(request.status.rawValue)
-                                            .font(.caption2)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(
-                                                Capsule()
-                                                    .fill(colorForStatus(request.status).opacity(0.15))
-                                            )
-                                            .foregroundColor(colorForStatus(request.status))
-                                    }
-                                }
-                                Text("\(dateRange(request.startDate, request.endDate))")
-                                    .font(.subheadline)
-                                Text(request.type.rawValue)
-                                    .font(.caption)
-                                if request.type != .sick {
-                                    HStack {
-                                        Button("Genehmigen") {
-                                            appState.updateStatus(for: request.id, to: .approved)
-                                        }
-                                        Button("Ablehnen") {
-                                            appState.updateStatus(for: request.id, to: .rejected)
-                                        }
-                                    }
-                                    .buttonStyle(.bordered)
-                                }
+                    }
+                } else {
+                    if !openRequests.isEmpty {
+                        Section(header: Text("Offen")) {
+                            ForEach(openRequests) { request in
+                                adminRequestRow(for: request)
                             }
-                            .padding(10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(.secondarySystemBackground))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(
-                                        (request.type == .sick ? Color.gray : colorForStatus(request.status))
-                                            .opacity(0.2),
-                                        lineWidth: 1
-                                    )
-                            )
-                            .swipeActions {
-                                if appState.canEditOrDelete(request, by: appState.currentUser) {
-                                    Button {
-                                        editingRequest = request
-                                    } label: {
-                                        Label("Bearbeiten", systemImage: "pencil")
-                                    }
-                                    Button(role: .destructive) {
-                                        appState.deleteLeaveRequest(request)
-                                    } label: {
-                                        Label("Löschen", systemImage: "trash")
-                                    }
+                        }
+                    }
+
+                    if !answeredRequestsByMonth.isEmpty {
+                        ForEach(answeredRequestsByMonth, id: \.monthStart) { group in
+                            Section(header: Text(monthTitle(group.monthStart))) {
+                                ForEach(group.requests) { request in
+                                    adminRequestRow(for: request)
                                 }
                             }
                         }
                     }
                 }
             }
-            .navigationTitle("Alle Anträge")
+            .listStyle(.insetGrouped)
+            .navigationTitle("Freigaben")
             .sheet(item: $editingRequest) { request in
                 NavigationView {
                     EditLeaveRequestView(request: request)
@@ -698,22 +911,121 @@ struct AdminRequestsScreen: View {
         }
     }
 
-    private func dateRange(_ start: Date, _ end: Date) -> String {
-        let df = DateFormatter()
-        df.dateStyle = .short
-        if Calendar.current.isDate(start, inSameDayAs: end) {
-            return df.string(from: start)
-        } else {
-            return "\(df.string(from: start)) – \(df.string(from: end))"
+    @ViewBuilder
+    private func adminRequestRow(for request: LeaveRequest) -> some View {
+        AdminLeaveRequestCard(
+            request: request,
+            onApprove: { appState.updateStatus(for: request.id, to: .approved) },
+            onReject: { appState.updateStatus(for: request.id, to: .rejected) },
+            onResetToOpen: { appState.updateStatus(for: request.id, to: .pending) },
+            onEdit: { editingRequest = request },
+            onDelete: { appState.deleteLeaveRequest(request) }
+        )
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+        .swipeActions {
+            if appState.canEditOrDelete(request, by: appState.currentUser) {
+                Button {
+                    editingRequest = request
+                } label: {
+                    Label("Bearbeiten", systemImage: "pencil")
+                }
+
+                Button(role: .destructive) {
+                    appState.deleteLeaveRequest(request)
+                } label: {
+                    Label("Löschen", systemImage: "trash")
+                }
+            }
         }
     }
+}
 
-    private func colorForStatus(_ status: LeaveStatus) -> Color {
-        switch status {
-        case .approved: return .green
-        case .pending: return .orange
-        case .rejected: return .red
+private struct AdminLeaveRequestCard: View {
+    let request: LeaveRequest
+    let onApprove: () -> Void
+    let onReject: () -> Void
+    let onResetToOpen: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    private var isVacation: Bool { request.type == .vacation }
+    private var accent: Color {
+        request.type == .sick ? Color.gray : colorForLeaveStatus(request.status)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(accent.opacity(0.9))
+                    .frame(width: 6)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(request.user.name)
+                            .font(.headline)
+                            .foregroundColor(request.user.color)
+
+                        Spacer()
+
+                        // Krankheit: kein Status-Badge
+                        if request.type != .sick {
+                            statusBadgeView(request.status)
+                        }
+                    }
+
+                    Text(dateRangeString(request.startDate, request.endDate))
+                        .font(.subheadline)
+
+                    HStack(spacing: 8) {
+                        Image(systemName: request.type == .sick ? "cross.case" : "beach.umbrella")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(request.type.rawValue)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                }
+            }
+
+            // Aktionen:
+            if isVacation {
+                if request.status == .pending {
+                    HStack(spacing: 8) {
+                        Button("Genehmigen", action: onApprove)
+                            .buttonStyle(.borderedProminent)
+                            .tint(.green)
+
+                        Button("Ablehnen", action: onReject)
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                    }
+                } else {
+                    Button {
+                        onResetToOpen()
+                    } label: {
+                        Label("Auf Offen setzen", systemImage: "arrow.uturn.backward")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 2)
+                }
+            }
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(accent.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.06), radius: 10, x: 0, y: 6)
     }
 }
 
@@ -909,7 +1221,6 @@ struct CalendarScreen: View {
     @EnvironmentObject var appState: AppState
     @State private var currentMonth: Date = Date()
     @State private var selectedDate: Date = Date()
-    @State private var editingRequest: LeaveRequest?
 
     var body: some View {
         NavigationView {
@@ -956,12 +1267,6 @@ struct CalendarScreen: View {
                                             .font(.caption2)
                                     }
                                 }
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    if appState.canEditOrDelete(r, by: appState.currentUser) {
-                                        editingRequest = r
-                                    }
-                                }
                             }
                         }
                     }
@@ -976,28 +1281,15 @@ struct CalendarScreen: View {
                     }
                 }
             }
-            .sheet(item: $editingRequest) { request in
-                NavigationView {
-                    EditLeaveRequestView(request: request)
-                }
-            }
         }
     }
 
     func formatted(_ date: Date) -> String {
-        let df = DateFormatter()
-        df.dateStyle = .medium
-        return df.string(from: date)
+        mediumDateString(date)
     }
 
     func dateRange(_ start: Date, _ end: Date) -> String {
-        let df = DateFormatter()
-        df.dateStyle = .short
-        if Calendar.current.isDate(start, inSameDayAs: end) {
-            return df.string(from: start)
-        } else {
-            return "\(df.string(from: start)) – \(df.string(from: end))"
-        }
+        dateRangeString(start, end)
     }
 }
 
@@ -1278,22 +1570,12 @@ struct MyRequestsScreen: View {
     @EnvironmentObject var appState: AppState
     @State private var editingRequest: LeaveRequest?
 
-    // Helper to get color for status
-    private func statusColor(_ status: LeaveStatus) -> Color {
-        switch status {
-        case .approved:
-            return .green
-        case .pending:
-            return .orange
-        case .rejected:
-            return .red
-        }
+    private var myRequests: [LeaveRequest] {
+        appState.myRequests()
     }
 
-    // Helper to get counts of each Status (Krankheit wird nicht mitgezählt)
-    private func statusCounts(_ requests: [LeaveRequest]) -> (pending: Int, approved: Int, rejected: Int) {
-        // Krankheit nicht in der Urlaubs-Statistik berücksichtigen
-        let vacationRequests = requests.filter { $0.type != .sick }
+    private var counts: (pending: Int, approved: Int, rejected: Int) {
+        let vacationRequests = myRequests.filter { $0.type != .sick }
         let pending = vacationRequests.filter { $0.status == .pending }.count
         let approved = vacationRequests.filter { $0.status == .approved }.count
         let rejected = vacationRequests.filter { $0.status == .rejected }.count
@@ -1303,71 +1585,17 @@ struct MyRequestsScreen: View {
     var body: some View {
         NavigationView {
             List {
-                let my = appState.myRequests()
-                let counts = statusCounts(my)
-
-                Section(header:
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Meine Anträge")
-                            .font(.headline)
-                        HStack(spacing: 8) {
-                            if counts.pending > 0 {
-                                Text("Offen: \(counts.pending)")
-                            }
-                            if counts.approved > 0 {
-                                Text("Genehmigt: \(counts.approved)")
-                            }
-                            if counts.rejected > 0 {
-                                Text("Abgelehnt: \(counts.rejected)")
-                            }
-                            if counts.pending == 0 && counts.approved == 0 && counts.rejected == 0 {
-                                Text("Noch keine Anträge")
-                            }
-                        }
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    }
-                ) {
-                    if my.isEmpty {
+                Section(header: MyRequestsHeaderView(counts: counts)) {
+                    if myRequests.isEmpty {
                         Text("Noch keine Anträge")
                             .foregroundColor(.secondary)
                     } else {
-                        ForEach(my) { r in
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text(dateRange(r.startDate, r.endDate))
-                                        .font(.headline)
-                                    Spacer()
-                                    // Status nur anzeigen, wenn es kein Krankheits-Eintrag ist
-                                    if r.type != .sick {
-                                        Text(r.status.rawValue)
-                                            .font(.caption2)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(
-                                                Capsule()
-                                                    .fill(statusColor(r.status).opacity(0.15))
-                                            )
-                                            .foregroundColor(statusColor(r.status))
-                                    }
+                        ForEach(myRequests) { r in
+                            MyLeaveRequestCard(request: r) {
+                                if appState.canEditOrDelete(r, by: appState.currentUser) {
+                                    editingRequest = r
                                 }
-                                HStack {
-                                    Text(r.type.rawValue)
-                                        .font(.subheadline)
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                }
-
                             }
-                            .padding(10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(.secondarySystemBackground))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(statusColor(r.status).opacity(0.2), lineWidth: 1)
-                            )
                             .swipeActions {
                                 if appState.canEditOrDelete(r, by: appState.currentUser) {
                                     Button {
@@ -1383,16 +1611,16 @@ struct MyRequestsScreen: View {
                                     }
                                 }
                             }
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if appState.canEditOrDelete(r, by: appState.currentUser) {
-                                    editingRequest = r
-                                }
-                            }
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                         }
                     }
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Urlaubsanträge")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
@@ -1408,15 +1636,84 @@ struct MyRequestsScreen: View {
             }
         }
     }
+}
 
-    func dateRange(_ start: Date, _ end: Date) -> String {
-        let df = DateFormatter()
-        df.dateStyle = .short
-        if Calendar.current.isDate(start, inSameDayAs: end) {
-            return df.string(from: start)
-        } else {
-            return "\(df.string(from: start)) – \(df.string(from: end))"
+private struct MyRequestsHeaderView: View {
+    let counts: (pending: Int, approved: Int, rejected: Int)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Meine Anträge")
+                .font(.headline)
+
+            HStack(spacing: 8) {
+                if counts.pending > 0 { Text("Offen: \(counts.pending)") }
+                if counts.approved > 0 { Text("Genehmigt: \(counts.approved)") }
+                if counts.rejected > 0 { Text("Abgelehnt: \(counts.rejected)") }
+                if counts.pending == 0 && counts.approved == 0 && counts.rejected == 0 {
+                    Text("Noch keine Anträge")
+                }
+            }
+            .font(.caption)
+            .foregroundColor(.secondary)
         }
+    }
+}
+
+private struct MyLeaveRequestCard: View {
+    let request: LeaveRequest
+    let onTap: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                // Farb-Leiste links
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(request.type == .sick ? Color.gray.opacity(0.35) : colorForLeaveStatus(request.status).opacity(0.9))
+                    .frame(width: 6)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(dateRangeString(request.startDate, request.endDate))
+                            .font(.headline)
+
+                        Spacer()
+
+                        // Status nur bei Urlaub anzeigen
+                        if request.type != .sick {
+                            statusBadgeView(request.status)
+                        }
+                    }
+
+                    HStack(spacing: 8) {
+                        Image(systemName: request.type == .sick ? "cross.case" : "beach.umbrella")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Text(request.type.rawValue)
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+
+                        Spacer()
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(
+                    (request.type == .sick ? Color.gray : colorForLeaveStatus(request.status)).opacity(0.18),
+                    lineWidth: 1
+                )
+        )
+        .shadow(color: Color.black.opacity(0.06), radius: 10, x: 0, y: 6)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
     }
 }
 
@@ -1429,6 +1726,7 @@ struct NewLeaveRequestView: View {
     @State private var startDate = Date()
     @State private var endDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
     @State private var selectedType: LeaveType = .vacation
+    @State private var inlineError: String? = nil
 
     private var buttonTitle: String {
         switch selectedType {
@@ -1453,23 +1751,49 @@ struct NewLeaveRequestView: View {
         return max(days, 1)
     }
 
-    private func shortDate(_ date: Date) -> String {
-        let df = DateFormatter()
-        df.dateStyle = .short
-        return df.string(from: date)
-    }
-
     var body: some View {
-        Form {
-            // Überblick
-            Section(header: Text("Überblick")) {
-                if let user = appState.currentUser {
+        ScrollViewReader { proxy in
+            Form {
+                // Fehlerhinweis immer oben anzeigen
+                if let inlineError {
+                    Section {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.red)
+                            Text(inlineError)
+                                .font(.footnote)
+                                .foregroundColor(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 4)
+                        .listRowSeparator(.hidden)
+                    }
+                    .id("errorBanner")
+                }
+
+                // Überblick
+                Section(header: Text("Überblick")) {
+                    if let user = appState.currentUser {
+                        HStack(spacing: 12) {
+                            InitialsAvatarView(name: user.name, color: user.color)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(user.name)
+                                    .font(.subheadline.weight(.semibold))
+                                Text("stellt einen neuen Abwesenheitsantrag.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                        }
+                    }
+
                     HStack(spacing: 12) {
-                        InitialsAvatarView(name: user.name, color: user.color)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(user.name)
+                        Image(systemName: "calendar")
+                            .foregroundColor(.accentColor)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(dayCount) Tag\(dayCount == 1 ? "" : "e")")
                                 .font(.subheadline.weight(.semibold))
-                            Text("stellt einen neuen Abwesenheitsantrag.")
+                            Text("von \(shortDateString(startDate)) bis \(shortDateString(endDate))")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -1477,64 +1801,78 @@ struct NewLeaveRequestView: View {
                     }
                 }
 
-                HStack(spacing: 12) {
-                    Image(systemName: "calendar")
-                        .foregroundColor(.accentColor)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(dayCount) Tag\(dayCount == 1 ? "" : "e")")
-                            .font(.subheadline.weight(.semibold))
-                        Text("von \(shortDate(startDate)) bis \(shortDate(endDate))")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                }
-            }
+                // Zeitraum
+                Section(header: Text("Zeitraum")) {
+                    DatePicker("Von", selection: $startDate, displayedComponents: .date)
+                        .onChange(of: startDate) { newStart in
+                            if endDate < newStart {
+                                endDate = newStart
+                            }
+                        }
+                    DatePicker("Bis", selection: $endDate, in: startDate..., displayedComponents: .date)
 
-            // Zeitraum
-            Section(header: Text("Zeitraum")) {
-                DatePicker("Von", selection: $startDate, displayedComponents: .date)
-                DatePicker("Bis", selection: $endDate, in: startDate..., displayedComponents: .date)
-
-                Text("Dauer: \(dayCount) Tag\(dayCount == 1 ? "" : "e")")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            // Art der Abwesenheit
-            Section(header: Text("Art der Abwesenheit")) {
-                // Nur Urlaub und Krankheit zur Auswahl anbieten
-                let allowedTypes: [LeaveType] = [.vacation, .sick]
-
-                Picker("Art", selection: $selectedType) {
-                    ForEach(allowedTypes, id: \.self) { type in
-                        Text(type.rawValue).tag(type)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                if !typeHint.isEmpty {
-                    Text(typeHint)
+                    Text("Dauer: \(dayCount) Tag\(dayCount == 1 ? "" : "e")")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // Art der Abwesenheit
+                Section(header: Text("Art der Abwesenheit")) {
+                    // Nur Urlaub und Krankheit zur Auswahl anbieten
+                    let allowedTypes: [LeaveType] = [.vacation, .sick]
+
+                    Picker("Art", selection: $selectedType) {
+                        ForEach(allowedTypes, id: \.self) { type in
+                            Text(type.rawValue).tag(type)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    if !typeHint.isEmpty {
+                        Text(typeHint)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                // Aktion
+                Section {
+                    Button(buttonTitle) {
+                        let ok = appState.createLeaveRequest(start: startDate,
+                                                             end: endDate,
+                                                             type: selectedType)
+                        if ok {
+                            inlineError = nil
+                            dismiss()
+                        } else {
+                            inlineError = appState.uiErrorMessage
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Abbrechen", role: .cancel) {
+                        dismiss()
+                    }
                 }
             }
-
-
-            // Aktion
-            Section {
-                Button(buttonTitle) {
-                    appState.createLeaveRequest(start: startDate,
-                                                end: endDate,
-                                                type: selectedType)
-                    dismiss()
+            .onChange(of: inlineError) { value in
+                guard value != nil else { return }
+                withAnimation(.easeInOut) {
+                    proxy.scrollTo("errorBanner", anchor: .top)
                 }
-                .buttonStyle(.borderedProminent)
-
-                Button("Abbrechen", role: .cancel) {
-                    dismiss()
-                }
+            }
+            .onChange(of: startDate) { _ in
+                inlineError = nil
+                appState.uiErrorMessage = nil
+            }
+            .onChange(of: endDate) { _ in
+                inlineError = nil
+                appState.uiErrorMessage = nil
+            }
+            .onChange(of: selectedType) { _ in
+                inlineError = nil
+                appState.uiErrorMessage = nil
             }
         }
         .navigationTitle("Neuer Antrag")
@@ -1563,8 +1901,6 @@ struct ProvisionenView: View {
         }
     }
 }
-
-// MARK: - Tasks
 
 // MARK: - Tasks
 
@@ -1704,6 +2040,8 @@ struct TasksView: View {
                         }
                     }
                     .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
+                    .background(Color(.systemGroupedBackground))
                 }
             }
             .navigationTitle("Aufgaben")
