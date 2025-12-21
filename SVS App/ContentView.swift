@@ -910,55 +910,52 @@ struct MainView: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
-        NavigationStack {
-            
-            TabView {
-                // Urlaub
-                CalendarScreen()
-                    .tabItem {
-                        Label("Kalender", systemImage: "calendar")
-                    }
-                
-                MyRequestsScreen()
-                    .tabItem {
-                        Label("Meine Anträge", systemImage: "doc.text")
-                    }
-                
-                // Admin-spezifische Tabs
-                if let user = appState.currentUser {
-                    if user.role == .admin {
-                        AdminConsoleView()
-                            .tabItem {
-                                Label("Admin", systemImage: "shield.lefthalf.filled")
-                            }
-                    }
-                    
-                    // Provisionen nur für Admin & Sachverständige
-                    if user.role == .admin || user.role == .expert {
-                        ProvisionenView()
-                            .tabItem {
-                                Label("Provisionen", systemImage: "eurosign")
-                            }
-                    }
+        TabView {
+            // Urlaub
+            CalendarScreen()
+                .tabItem {
+                    Label("Kalender", systemImage: "calendar")
                 }
-                
-                // Für alle sichtbar
-                TasksView()
-                    .tabItem {
-                        Label("Aufgaben", systemImage: "checklist")
-                    }
-                
-                DashboardView()
-                    .tabItem {
-                        Label("Dashboard", systemImage: "chart.bar.doc.horizontal")
-                    }
-                
-                // Menü Tab
-                MenuView()
-                    .tabItem {
-                        Label("Menü", systemImage: "gearshape")
-                    }
+
+            MyRequestsScreen()
+                .tabItem {
+                    Label("Meine Anträge", systemImage: "doc.text")
+                }
+
+            // Admin-spezifische Tabs
+            if let user = appState.currentUser {
+                if user.role == .admin {
+                    AdminConsoleView()
+                        .tabItem {
+                            Label("Admin", systemImage: "shield.lefthalf.filled")
+                        }
+                }
+
+                // Provisionen nur für Admin & Sachverständige
+                if user.role == .admin || user.role == .expert {
+                    ProvisionenView()
+                        .tabItem {
+                            Label("Provisionen", systemImage: "eurosign")
+                        }
+                }
             }
+
+            // Für alle sichtbar
+            TasksView()
+                .tabItem {
+                    Label("Aufgaben", systemImage: "checklist")
+                }
+
+            DashboardView()
+                .tabItem {
+                    Label("Dashboard", systemImage: "chart.bar.doc.horizontal")
+                }
+
+            // Menü Tab
+            MenuView()
+                .tabItem {
+                    Label("Menü", systemImage: "gearshape")
+                }
         }
     }
 }
@@ -2000,54 +1997,89 @@ struct MyRequestsScreen: View {
     }
 
     var body: some View {
-        NavigationView {
-            List {
-                Section(header: MyRequestsHeaderView(counts: counts)) {
-                    if myRequests.isEmpty {
-                        Text("Noch keine Anträge")
-                            .foregroundColor(.secondary)
-                    } else {
-                        ForEach(myRequests) { r in
-                            MyLeaveRequestCard(request: r) {
-                                if appState.canEditOrDelete(r, by: appState.currentUser) {
-                                    editingRequest = r
-                                }
-                            }
-                            .swipeActions {
-                                if appState.canEditOrDelete(r, by: appState.currentUser) {
-                                    Button {
-                                        editingRequest = r
-                                    } label: {
-                                        Label("Bearbeiten", systemImage: "pencil")
-                                    }
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                // Header (match Kalender style)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Meine Anträge")
+                        .font(.largeTitle.weight(.bold))
 
-                                    Button(role: .destructive) {
-                                        appState.deleteLeaveRequest(r)
-                                    } label: {
-                                        Label("Löschen", systemImage: "trash")
+                    Spacer()
+
+                    NavigationLink(destination: NewLeaveRequestView()) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(Color(.secondarySystemBackground)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Neuen Antrag erstellen")
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+
+                Group {
+                    if myRequests.isEmpty {
+                        // Clean empty state (no List top inset / no huge header gap)
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("Noch keine Anträge")
+                                .font(.headline)
+                                .foregroundColor(.secondary)
+
+                            RoundedRectangle(cornerRadius: 18)
+                                .fill(Color(.secondarySystemBackground))
+                                .frame(height: 68)
+                                .overlay(
+                                    HStack {
+                                        Text("Noch keine Anträge")
+                                            .foregroundColor(.secondary)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 18)
+                                )
+
+                            Spacer()
+                        }
+                        .padding(.horizontal, 18)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .background(Color(.systemGroupedBackground))
+                    } else {
+                        List {
+                            ForEach(myRequests) { r in
+                                MyLeaveRequestCard(request: r) {
+                                    if appState.canEditOrDelete(r, by: appState.currentUser) {
+                                        editingRequest = r
                                     }
                                 }
+                                .swipeActions {
+                                    if appState.canEditOrDelete(r, by: appState.currentUser) {
+                                        Button {
+                                            editingRequest = r
+                                        } label: {
+                                            Label("Bearbeiten", systemImage: "pencil")
+                                        }
+
+                                        Button(role: .destructive) {
+                                            appState.deleteLeaveRequest(r)
+                                        } label: {
+                                            Label("Löschen", systemImage: "trash")
+                                        }
+                                    }
+                                }
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                             }
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                         }
+                        .listStyle(.insetGrouped)
+                        .scrollContentBackground(.hidden)
+                        .background(Color(.systemGroupedBackground))
                     }
                 }
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Meine Anträge")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    NavigationLink(destination: NewLeaveRequestView()) {
-                        Image(systemName: "plus.circle.fill")
-                    }
-                }
-            }
             .sheet(item: $editingRequest) { request in
-                NavigationView {
+                NavigationStack {
                     EditLeaveRequestView(request: request)
                 }
             }
@@ -2067,9 +2099,6 @@ private struct MyRequestsHeaderView: View {
                 if counts.pending > 0 { Text("Offen: \(counts.pending)") }
                 if counts.approved > 0 { Text("Genehmigt: \(counts.approved)") }
                 if counts.rejected > 0 { Text("Abgelehnt: \(counts.rejected)") }
-                if counts.pending == 0 && counts.approved == 0 && counts.rejected == 0 {
-                    Text("Noch keine Anträge")
-                }
             }
             .font(.caption)
             .foregroundColor(.secondary)
@@ -2355,18 +2384,29 @@ struct ProvisionenView: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
-        NavigationView {
-            VStack(spacing: 12) {
-                Text("Provisionen")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Text("Dieser Bereich wird später erweitert.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Provisionen")
+                        .font(.largeTitle.weight(.bold))
+
+                    Spacer()
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+
+                VStack(spacing: 12) {
+                    Text("Provisionen")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Text("Dieser Bereich wird später erweitert.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemGroupedBackground))
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Provisionen")
         }
     }
 }
@@ -2410,119 +2450,132 @@ struct TasksView: View {
     }
 
     var body: some View {
-        NavigationView {
-            Group {
-                // Leer, wenn wirklich gar keine Aufgaben existieren
-                if myOpenTasks.isEmpty && otherOpenTasks.isEmpty && myDoneTasks.isEmpty && otherDoneTasks.isEmpty {
-                    VStack(spacing: 12) {
-                        Text("Noch keine Aufgaben")
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                        Text("Erstellen Sie eine neue Aufgabe mit dem Plus-Button oben rechts.")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Aufgaben")
+                        .font(.largeTitle.weight(.bold))
+
+                    Spacer()
+
+                    Button {
+                        showNewTask = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(Color(.secondarySystemBackground)))
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.systemGroupedBackground))
-                } else {
-                    List {
-                        if let user = currentUser, user.role == .admin {
-                            // Admin: Meine offenen Aufgaben
-                            if !myOpenTasks.isEmpty {
-                                Section(header: Text("Meine Aufgaben – Offen")) {
-                                    ForEach(myOpenTasks) { task in
-                                        TaskRow(
-                                            task: task,
-                                            isAdmin: true,
-                                            assignedUserName: appState.userName(for: task.assignedUserId),
-                                            onEdit: { editingTask = task },
-                                            onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                            onDelete: { appState.deleteTask(task) }
-                                        )
-                                    }
-                                }
-                            }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Neue Aufgabe")
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
 
-                            // Admin: Offene Aufgaben anderer
-                            if !otherOpenTasks.isEmpty {
-                                Section(header: Text("Andere Aufgaben – Offen")) {
-                                    ForEach(otherOpenTasks) { task in
-                                        TaskRow(
-                                            task: task,
-                                            isAdmin: true,
-                                            assignedUserName: appState.userName(for: task.assignedUserId),
-                                            onEdit: { editingTask = task },
-                                            onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                            onDelete: { appState.deleteTask(task) }
-                                        )
-                                    }
-                                }
-                            }
-
-                            // Link zu erledigten Aufgaben (nur wenn es welche gibt)
-                            if !myDoneTasks.isEmpty || !otherDoneTasks.isEmpty {
-                                Section {
-                                    NavigationLink {
-                                        CompletedTasksView()
-                                            .environmentObject(appState)
-                                    } label: {
-                                        HStack {
-                                            Image(systemName: "checkmark.circle")
-                                            Text("Erledigte Aufgaben anzeigen")
+                Group {
+                    // Leer, wenn wirklich gar keine Aufgaben existieren
+                    if myOpenTasks.isEmpty && otherOpenTasks.isEmpty && myDoneTasks.isEmpty && otherDoneTasks.isEmpty {
+                        VStack(spacing: 12) {
+                            Text("Noch keine Aufgaben")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                            Text("Erstellen Sie eine neue Aufgabe mit dem Plus-Button oben rechts.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(.systemGroupedBackground))
+                    } else {
+                        List {
+                            if let user = currentUser, user.role == .admin {
+                                // Admin: Meine offenen Aufgaben
+                                if !myOpenTasks.isEmpty {
+                                    Section(header: Text("Meine Aufgaben – Offen")) {
+                                        ForEach(myOpenTasks) { task in
+                                            TaskRow(
+                                                task: task,
+                                                isAdmin: true,
+                                                assignedUserName: appState.userName(for: task.assignedUserId),
+                                                onEdit: { editingTask = task },
+                                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
+                                                onDelete: { appState.deleteTask(task) }
+                                            )
                                         }
                                     }
                                 }
-                            }
-                        } else {
-                            // Mitarbeiter / Sachverständige: nur eigene offene Aufgaben
-                            if !myOpenTasks.isEmpty {
-                                Section(header: Text("Offen")) {
-                                    ForEach(myOpenTasks) { task in
-                                        TaskRow(
-                                            task: task,
-                                            isAdmin: false,
-                                            assignedUserName: appState.userName(for: task.assignedUserId),
-                                            onEdit: { editingTask = task },
-                                            onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                            onDelete: { appState.deleteTask(task) }
-                                        )
+
+                                // Admin: Offene Aufgaben anderer
+                                if !otherOpenTasks.isEmpty {
+                                    Section(header: Text("Andere Aufgaben – Offen")) {
+                                        ForEach(otherOpenTasks) { task in
+                                            TaskRow(
+                                                task: task,
+                                                isAdmin: true,
+                                                assignedUserName: appState.userName(for: task.assignedUserId),
+                                                onEdit: { editingTask = task },
+                                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
+                                                onDelete: { appState.deleteTask(task) }
+                                            )
+                                        }
                                     }
                                 }
-                            }
 
-                            // Link zu eigenen erledigten Aufgaben
-                            if !myDoneTasks.isEmpty {
-                                Section {
-                                    NavigationLink {
-                                        CompletedTasksView()
-                                            .environmentObject(appState)
-                                    } label: {
-                                        HStack {
-                                            Image(systemName: "checkmark.circle")
-                                            Text("Erledigte Aufgaben anzeigen")
+                                // Link zu erledigten Aufgaben (nur wenn es welche gibt)
+                                if !myDoneTasks.isEmpty || !otherDoneTasks.isEmpty {
+                                    Section {
+                                        NavigationLink {
+                                            CompletedTasksView()
+                                                .environmentObject(appState)
+                                        } label: {
+                                            HStack {
+                                                Image(systemName: "checkmark.circle")
+                                                Text("Erledigte Aufgaben anzeigen")
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Mitarbeiter / Sachverständige: nur eigene offene Aufgaben
+                                if !myOpenTasks.isEmpty {
+                                    Section(header: Text("Offen")) {
+                                        ForEach(myOpenTasks) { task in
+                                            TaskRow(
+                                                task: task,
+                                                isAdmin: false,
+                                                assignedUserName: appState.userName(for: task.assignedUserId),
+                                                onEdit: { editingTask = task },
+                                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
+                                                onDelete: { appState.deleteTask(task) }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Link zu eigenen erledigten Aufgaben
+                                if !myDoneTasks.isEmpty {
+                                    Section {
+                                        NavigationLink {
+                                            CompletedTasksView()
+                                                .environmentObject(appState)
+                                        } label: {
+                                            HStack {
+                                                Image(systemName: "checkmark.circle")
+                                                Text("Erledigte Aufgaben anzeigen")
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                    .listStyle(.insetGrouped)
-                    .scrollContentBackground(.hidden)
-                    .background(Color(.systemGroupedBackground))
-                }
-            }
-            .navigationTitle("Aufgaben")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showNewTask = true
-                    } label: {
-                        Image(systemName: "plus")
+                        .listStyle(.insetGrouped)
+                        .scrollContentBackground(.hidden)
+                        .background(Color(.systemGroupedBackground))
                     }
                 }
             }
+            .background(Color(.systemGroupedBackground))
             .sheet(isPresented: $showNewTask) {
                 NewTaskView(mode: .new, task: nil)
                     .environmentObject(appState)
@@ -2833,9 +2886,19 @@ struct NewTaskView: View {
 
 struct DashboardView: View {
     var body: some View {
-        NavigationView {
-            DashboardWebView(url: URL(string: "https://dashboard.sv-souleiman.de")!)
-                .navigationTitle("Dashboard")
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Dashboard")
+                        .font(.largeTitle.weight(.bold))
+                    Spacer()
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+
+                DashboardWebView(url: URL(string: "https://dashboard.sv-souleiman.de")!)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 }
@@ -2906,44 +2969,57 @@ struct MenuView: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
-        NavigationView {
-            List {
-                Section(header: Text("Benutzer")) {
-                    if let user = appState.currentUser {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Menü")
+                        .font(.largeTitle.weight(.bold))
+                    Spacer()
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+
+                List {
+                    Section(header: Text("Benutzer")) {
+                        if let user = appState.currentUser {
+                            HStack {
+                                Text("Eingeloggt als:")
+                                Spacer()
+                                Text(user.name)
+                                    .foregroundColor(.accentColor)
+                            }
+                        }
+                    }
+
+                    Section(header: Text("Aktionen")) {
+                        Button(role: .destructive) {
+                            appState.currentUser = nil
+                            appState.sessionUserId = nil
+                        } label: {
+                            Label("Ausloggen", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                    }
+
+                    Section(header: Text("App-Info")) {
                         HStack {
-                            Text("Eingeloggt als:")
+                            Text("Version")
                             Spacer()
-                            Text(user.name)
-                                .foregroundColor(.accentColor)
+                            Text("1.0")
+                                .foregroundColor(.secondary)
+                        }
+                        HStack {
+                            Text("Entwickelt für")
+                            Spacer()
+                            Text("SV Souleiman")
+                                .foregroundColor(.secondary)
                         }
                     }
                 }
-
-                Section(header: Text("Aktionen")) {
-                    Button(role: .destructive) {
-                        appState.currentUser = nil
-                        appState.sessionUserId = nil
-                    } label: {
-                        Label("Ausloggen", systemImage: "rectangle.portrait.and.arrow.right")
-                    }
-                }
-
-                Section(header: Text("App-Info")) {
-                    HStack {
-                        Text("Version")
-                        Spacer()
-                        Text("1.0")
-                            .foregroundColor(.secondary)
-                    }
-                    HStack {
-                        Text("Entwickelt für")
-                        Spacer()
-                        Text("SV Souleiman")
-                            .foregroundColor(.secondary)
-                    }
-                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(Color(.systemGroupedBackground))
             }
-            .navigationTitle("Menü")
+            .background(Color(.systemGroupedBackground))
         }
     }
 }
