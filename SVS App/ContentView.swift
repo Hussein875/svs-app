@@ -218,6 +218,17 @@ class AppState: ObservableObject {
     }
     @Published var uiErrorMessage: String? = nil
 
+    // Session: keep user logged in across app launches
+    @Published var sessionUserId: UUID? = nil {
+        didSet {
+            if let id = sessionUserId {
+                UserDefaults.standard.set(id.uuidString, forKey: "sessionUserId")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "sessionUserId")
+            }
+        }
+    }
+    
     @Published var lastUserId: UUID? = nil {
         didSet {
             if let id = lastUserId {
@@ -277,6 +288,20 @@ class AppState: ObservableObject {
             self.lastUserId = id
         } else {
             self.lastUserId = nil
+        }
+        
+        // Session-Login laden (User bleibt eingeloggt)
+        if let sessionIdString = UserDefaults.standard.string(forKey: "sessionUserId"),
+           let sessionId = UUID(uuidString: sessionIdString) {
+            self.sessionUserId = sessionId
+        } else {
+            self.sessionUserId = nil
+        }
+
+        // Auto-Restore: wenn Session vorhanden, direkt einloggen
+        if let sid = self.sessionUserId,
+           let u = self.users.first(where: { $0.id == sid }) {
+            self.currentUser = u
         }
     }
 
@@ -690,59 +715,121 @@ struct LoginView: View {
     @State private var showError: Bool = false
 
     var body: some View {
-        ZStack {
-            Color(.systemGroupedBackground)
-                .ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack {
+                Color(.systemGroupedBackground)
+                    .ignoresSafeArea()
 
-            VStack(spacing: 16) {
-                // Logo + Titel
-                VStack(spacing: 8) {
-                    Image("svs_logo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(height: 70)
-                        .padding(.horizontal, 40)
+                VStack(spacing: 14) {
+                    // Header (kompakt)
+                    VStack(spacing: 8) {
+                        Image("svs_logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(height: 54)
+                            .padding(.top, 8)
 
-                    Text("SVS Mitarbeiter-App")
-                        .font(.title2)
-                        .fontWeight(.semibold)
+                        Text("SVS Mitarbeiter-App")
+                            .font(.title3.weight(.semibold))
 
-                    Text("Mitarbeiter wählen und mit PIN bestätigen.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 32)
-                }
-                .padding(.top, 16)
-
-                // Zuletzt verwendeter Benutzer (optional)
-                if let lastId = appState.lastUserId,
-                   let lastUser = appState.users.first(where: { $0.id == lastId }) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Zuletzt verwendet")
-                            .font(.subheadline)
+                        Text("Mitarbeiter auswählen und mit PIN anmelden")
+                            .font(.footnote)
                             .foregroundColor(.secondary)
-                            .padding(.horizontal)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 18)
+                    }
 
-                        Button {
-                            selectedUser = lastUser
-                            pin = ""
-                        } label: {
+                    // Selected User Card + PIN (immer sichtbar, sobald gewählt)
+                    if let selected = selectedUser {
+                        VStack(spacing: 10) {
                             HStack(spacing: 12) {
-                                InitialsAvatarView(name: lastUser.name, color: lastUser.color)
+                                InitialsAvatarView(name: selected.name, color: selected.color)
+
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(lastUser.name)
-                                        .font(.body.weight(.semibold))
-                                    Text(roleLabel(for: lastUser.role))
+                                    Text(selected.name)
+                                        .font(.headline)
+                                    Text(roleLabel(for: selected.role))
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                 }
+
                                 Spacer()
-                                Image(systemName: "arrow.right.circle.fill")
-                                    .foregroundColor(.accentColor)
+
+                                Button {
+                                    // Auswahl zurücksetzen
+                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                        selectedUser = nil
+                                        pin = ""
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.title3)
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
                             }
+
+                            HStack(spacing: 10) {
+                                SecureField("PIN", text: $pin)
+                                    .keyboardType(.numberPad)
+                                    .textFieldStyle(.roundedBorder)
+
+                                Button {
+                                    if pin == selected.pin {
+                                        appState.currentUser = selected
+                                        appState.lastUserId = selected.id
+                                        appState.sessionUserId = selected.id
+                                        pin = ""
+                                        selectedUser = nil
+                                    } else {
+                                        showError = true
+                                    }
+                                } label: {
+                                    Text("Anmelden")
+                                        .font(.subheadline.weight(.semibold))
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 10)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(pin.isEmpty)
+                            }
+                        }
+                        .padding(14)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.accentColor.opacity(0.18), lineWidth: 1)
+                        )
+                        .padding(.horizontal)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+
+                    // Schnellzugriff: zuletzt verwendet (kompakt)
+                    if let lastId = appState.lastUserId,
+                       let lastUser = appState.users.first(where: { $0.id == lastId }),
+                       selectedUser == nil {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                selectedUser = lastUser
+                                pin = ""
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .foregroundColor(.secondary)
+                                Text("Zuletzt: ")
+                                    .foregroundColor(.secondary)
+                                Text(lastUser.name)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 14)
                             .padding(.vertical, 10)
-                            .padding(.horizontal, 12)
                             .background(
                                 RoundedRectangle(cornerRadius: 14)
                                     .fill(Color(.secondarySystemBackground))
@@ -751,103 +838,68 @@ struct LoginView: View {
                         .buttonStyle(.plain)
                         .padding(.horizontal)
                     }
-                }
 
-                // Mitarbeiterliste
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Mitarbeiter")
-                        .font(.headline)
-                        .padding(.horizontal)
-
-                    ScrollView {
-                        VStack(spacing: 8) {
-                            ForEach(appState.users) { user in
-                                Button {
-                                    selectedUser = user
-                                    pin = ""
-                                } label: {
-                                    let selected = selectedUser?.id == user.id
-                                    HStack(spacing: 12) {
-                                        InitialsAvatarView(name: user.name, color: user.color)
-
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(user.name)
-                                                .font(.body.weight(selected ? .semibold : .regular))
-                                            Text(roleLabel(for: user.role))
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                        Spacer()
-                                        if selected {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundColor(.accentColor)
-                                        }
-                                    }
-                                    .padding(.vertical, 10)
-                                    .padding(.horizontal, 12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(selected ? Color.accentColor.opacity(0.15) : Color(.secondarySystemBackground))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 2)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.vertical, 4)
-                    }
-                    .frame(maxHeight: 260)
-                }
-
-                // PIN-Bereich
-                if let selected = selectedUser {
+                    // Mitarbeiter-Auswahl (2 Spalten, scrollt nur bei Bedarf)
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("PIN eingeben")
+                        Text("Mitarbeiter")
                             .font(.headline)
+                            .padding(.horizontal)
 
-                        Text("Für \(selected.name)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        let columns = [GridItem(.flexible()), GridItem(.flexible())]
 
-                        SecureField("PIN", text: $pin)
-                            .keyboardType(.numberPad)
-                            .textFieldStyle(.roundedBorder)
-
-                        Button {
-                            if pin == selected.pin {
-                                appState.currentUser = selected
-                                appState.lastUserId = selected.id
-                                pin = ""
-                                selectedUser = nil
-                            } else {
-                                showError = true
+                        ScrollView {
+                            LazyVGrid(columns: columns, spacing: 10) {
+                                ForEach(appState.users) { user in
+                                    Button {
+                                        withAnimation(.easeInOut(duration: 0.15)) {
+                                            selectedUser = user
+                                            pin = ""
+                                        }
+                                    } label: {
+                                        let selected = selectedUser?.id == user.id
+                                        HStack(spacing: 10) {
+                                            InitialsAvatarView(name: user.name, color: user.color)
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(user.name)
+                                                    .font(.subheadline.weight(selected ? .semibold : .regular))
+                                                    .foregroundColor(.primary)
+                                                Text(roleLabel(for: user.role))
+                                                    .font(.caption2)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            Spacer(minLength: 0)
+                                        }
+                                        .padding(.vertical, 10)
+                                        .padding(.horizontal, 12)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 14)
+                                                .fill(selected ? Color.accentColor.opacity(0.14) : Color(.secondarySystemBackground))
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 14)
+                                                .stroke(selected ? Color.accentColor.opacity(0.7) : Color.clear, lineWidth: 1.5)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
-                        } label: {
-                            Text("Anmelden")
-                                .fontWeight(.semibold)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
+                            .padding(.horizontal)
+                            .padding(.bottom, 6)
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(pin.isEmpty)
+                        .frame(maxHeight: max(220, geo.size.height * 0.36))
                     }
-                    .padding(.horizontal)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 6)
+                }
+                .padding(.top, 6)
             }
-        }
-        .alert("Falsche PIN", isPresented: $showError) {
-            Button("OK", role: .cancel) {
-                pin = ""
+            .alert("Falsche PIN", isPresented: $showError) {
+                Button("OK", role: .cancel) {
+                    pin = ""
+                }
+            } message: {
+                Text("Die eingegebene PIN ist nicht korrekt.")
             }
-        } message: {
-            Text("Die eingegebene PIN ist nicht korrekt.")
         }
     }
 }
@@ -2870,8 +2922,9 @@ struct MenuView: View {
                 Section(header: Text("Aktionen")) {
                     Button(role: .destructive) {
                         appState.currentUser = nil
+                        appState.sessionUserId = nil
                     } label: {
-                        Label("Logout", systemImage: "rectangle.portrait.and.arrow.right")
+                        Label("Ausloggen", systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 }
 
