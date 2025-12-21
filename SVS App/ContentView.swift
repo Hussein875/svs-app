@@ -76,6 +76,59 @@ struct LeaveRequest: Identifiable, Codable {
     var type: LeaveType
     var reason: String
     var status: LeaveStatus
+
+    // Audit
+    var createdAt: Date
+    var createdByUserId: UUID
+    var updatedAt: Date?
+    var updatedByUserId: UUID?
+
+    enum CodingKeys: String, CodingKey {
+        case id, user, startDate, endDate, type, reason, status
+        case createdAt, createdByUserId, updatedAt, updatedByUserId
+    }
+
+    // Backward-compatible decoding for older stored entries
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        user = try c.decode(User.self, forKey: .user)
+        startDate = try c.decode(Date.self, forKey: .startDate)
+        endDate = try c.decode(Date.self, forKey: .endDate)
+        type = try c.decode(LeaveType.self, forKey: .type)
+        reason = (try c.decodeIfPresent(String.self, forKey: .reason)) ?? ""
+        status = try c.decode(LeaveStatus.self, forKey: .status)
+
+        // If missing, default to the user as creator and now as creation date
+        createdAt = (try c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? Date()
+        createdByUserId = (try c.decodeIfPresent(UUID.self, forKey: .createdByUserId)) ?? user.id
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt)
+        updatedByUserId = try c.decodeIfPresent(UUID.self, forKey: .updatedByUserId)
+    }
+
+    init(id: UUID,
+         user: User,
+         startDate: Date,
+         endDate: Date,
+         type: LeaveType,
+         reason: String,
+         status: LeaveStatus,
+         createdAt: Date,
+         createdByUserId: UUID,
+         updatedAt: Date? = nil,
+         updatedByUserId: UUID? = nil) {
+        self.id = id
+        self.user = user
+        self.startDate = startDate
+        self.endDate = endDate
+        self.type = type
+        self.reason = reason
+        self.status = status
+        self.createdAt = createdAt
+        self.createdByUserId = createdByUserId
+        self.updatedAt = updatedAt
+        self.updatedByUserId = updatedByUserId
+    }
 }
 
 // MARK: - Tasks Models
@@ -361,6 +414,7 @@ class AppState: ObservableObject {
             initialStatus = approveImmediately ? .approved : .pending
         }
 
+        let creatorId = currentUser?.id ?? user.id
         let request = LeaveRequest(
             id: UUID(),
             user: user,
@@ -368,7 +422,11 @@ class AppState: ObservableObject {
             endDate: end,
             type: type,
             reason: "",
-            status: initialStatus
+            status: initialStatus,
+            createdAt: Date(),
+            createdByUserId: creatorId,
+            updatedAt: nil,
+            updatedByUserId: nil
         )
         leaveRequests.append(request)
         let successText: String
@@ -398,6 +456,8 @@ class AppState: ObservableObject {
     func updateStatus(for requestID: UUID, to newStatus: LeaveStatus) {
         if let index = leaveRequests.firstIndex(where: { $0.id == requestID }) {
             leaveRequests[index].status = newStatus
+            leaveRequests[index].updatedAt = Date()
+            leaveRequests[index].updatedByUserId = currentUser?.id
         }
     }
 
@@ -425,7 +485,6 @@ class AppState: ObservableObject {
             }
         }
         // Validierung: nach Bearbeitung darf es keine Überschneidung mit anderen Einträgen geben
-        
         if hasOverlappingLeave(for: updated.user.id,
                               start: updated.startDate,
                               end: updated.endDate,
@@ -436,7 +495,10 @@ class AppState: ObservableObject {
         }
 
         if let index = leaveRequests.firstIndex(where: { $0.id == updated.id }) {
-            leaveRequests[index] = updated
+            var patched = updated
+            patched.updatedAt = Date()
+            patched.updatedByUserId = currentUser?.id
+            leaveRequests[index] = patched
             uiErrorMessage = nil
             return true
         }
@@ -796,52 +858,55 @@ struct MainView: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
-        TabView {
-            // Urlaub
-            CalendarScreen()
-                .tabItem {
-                    Label("Kalender", systemImage: "calendar")
+        NavigationStack {
+            
+            TabView {
+                // Urlaub
+                CalendarScreen()
+                    .tabItem {
+                        Label("Kalender", systemImage: "calendar")
+                    }
+                
+                MyRequestsScreen()
+                    .tabItem {
+                        Label("Meine Anträge", systemImage: "doc.text")
+                    }
+                
+                // Admin-spezifische Tabs
+                if let user = appState.currentUser {
+                    if user.role == .admin {
+                        AdminConsoleView()
+                            .tabItem {
+                                Label("Admin", systemImage: "shield.lefthalf.filled")
+                            }
+                    }
+                    
+                    // Provisionen nur für Admin & Sachverständige
+                    if user.role == .admin || user.role == .expert {
+                        ProvisionenView()
+                            .tabItem {
+                                Label("Provisionen", systemImage: "eurosign")
+                            }
+                    }
                 }
-
-            MyRequestsScreen()
-                .tabItem {
-                    Label("Meine Anträge", systemImage: "doc.text")
-                }
-
-            // Admin-spezifische Tabs
-            if let user = appState.currentUser {
-                if user.role == .admin {
-                    AdminConsoleView()
-                        .tabItem {
-                            Label("Admin", systemImage: "shield.lefthalf.filled")
-                        }
-                }
-
-                // Provisionen nur für Admin & Sachverständige
-                if user.role == .admin || user.role == .expert {
-                    ProvisionenView()
-                        .tabItem {
-                            Label("Provisionen", systemImage: "eurosign")
-                        }
-                }
+                
+                // Für alle sichtbar
+                TasksView()
+                    .tabItem {
+                        Label("Aufgaben", systemImage: "checklist")
+                    }
+                
+                DashboardView()
+                    .tabItem {
+                        Label("Dashboard", systemImage: "chart.bar.doc.horizontal")
+                    }
+                
+                // Menü Tab
+                MenuView()
+                    .tabItem {
+                        Label("Menü", systemImage: "gearshape")
+                    }
             }
-
-            // Für alle sichtbar
-            TasksView()
-                .tabItem {
-                    Label("Aufgaben", systemImage: "checklist")
-                }
-
-            DashboardView()
-                .tabItem {
-                    Label("Dashboard", systemImage: "chart.bar.doc.horizontal")
-                }
-
-            // Menü Tab
-            MenuView()
-                .tabItem {
-                    Label("Menü", systemImage: "gearshape")
-                }
         }
     }
 }
@@ -973,13 +1038,49 @@ struct EditLeaveRequestView: View {
 
 // MARK: - Admin Requests Screen
 
+enum AdminQuickFilter: String, CaseIterable, Identifiable {
+    case all = "Alle"
+    case today = "Heute"
+    case thisWeek = "Diese Woche"
+
+    var id: String { rawValue }
+}
+
 struct AdminRequestsScreen: View {
     @EnvironmentObject var appState: AppState
     @State private var editingRequest: LeaveRequest?
+    @State private var searchText: String = ""
+    @State private var filterMode: AdminQuickFilter = .all
+
+    private func matchesSearch(_ request: LeaveRequest) -> Bool {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return true }
+        return request.user.name.lowercased().contains(q.lowercased())
+    }
+
+    private func matchesQuickFilter(_ request: LeaveRequest) -> Bool {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: request.startDate)
+        let end = cal.startOfDay(for: request.endDate)
+        let today = cal.startOfDay(for: Date())
+
+        switch filterMode {
+        case .all:
+            return true
+        case .today:
+            return start <= today && today <= end
+        case .thisWeek:
+            guard let week = cal.dateInterval(of: .weekOfYear, for: today) else { return true }
+            let wStart = cal.startOfDay(for: week.start)
+            let wEnd = cal.startOfDay(for: week.end.addingTimeInterval(-1))
+            return start <= wEnd && wStart <= end
+        }
+    }
 
     private var openRequests: [LeaveRequest] {
         appState.leaveRequests
             .filter { $0.type == .vacation && $0.status == .pending }
+            .filter { matchesSearch($0) && matchesQuickFilter($0) }
             .sorted { $0.startDate > $1.startDate }
     }
 
@@ -987,6 +1088,7 @@ struct AdminRequestsScreen: View {
     private var answeredRequests: [LeaveRequest] {
         appState.leaveRequests
             .filter { !($0.type == .vacation && $0.status == .pending) }
+            .filter { matchesSearch($0) && matchesQuickFilter($0) }
             .sorted { $0.startDate > $1.startDate }
     }
 
@@ -1040,7 +1142,21 @@ struct AdminRequestsScreen: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Freigaben")
+            .navigationTitle("Anträge")
+            .searchable(text: $searchText, prompt: "Mitarbeiter suchen")
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Menu {
+                        Picker("Filter", selection: $filterMode) {
+                            ForEach(AdminQuickFilter.allCases) { mode in
+                                Text(mode.rawValue).tag(mode)
+                            }
+                        }
+                    } label: {
+                        Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                }
+            }
             .sheet(item: $editingRequest) { request in
                 NavigationView {
                     EditLeaveRequestView(request: request)
@@ -1059,6 +1175,7 @@ struct AdminRequestsScreen: View {
             onEdit: { editingRequest = request },
             onDelete: { appState.deleteLeaveRequest(request) }
         )
+        .environmentObject(appState)
         .listRowSeparator(.hidden)
         .listRowBackground(Color.clear)
         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
@@ -1087,6 +1204,8 @@ private struct AdminLeaveRequestCard: View {
     let onResetToOpen: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
+
+    @EnvironmentObject var appState: AppState
 
     private var isVacation: Bool { request.type == .vacation }
     private var accent: Color {
@@ -1153,6 +1272,19 @@ private struct AdminLeaveRequestCard: View {
                     .padding(.top, 2)
                 }
             }
+
+            // AUDIT FOOTER
+            let createdBy = appState.userName(for: request.createdByUserId)
+            let updatedBy = request.updatedByUserId.map { appState.userName(for: $0) }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Erstellt von: \(createdBy) • \(shortDateString(request.createdAt))")
+                if let uAt = request.updatedAt, let uBy = updatedBy {
+                    Text("Geändert: \(uBy) • \(shortDateString(uAt))")
+                }
+            }
+            .font(.caption2)
+            .foregroundColor(.secondary)
         }
         .padding(14)
         .background(
@@ -1361,9 +1493,35 @@ struct CalendarScreen: View {
     @State private var selectedDate: Date = Date()
 
     var body: some View {
-        NavigationView {
-            VStack {
+        VStack(spacing: 12) {
+            // Clean Header
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Kalender")
+                        .font(.largeTitle.weight(.bold))
+
+                    Spacer()
+
+                    Button {
+                        let now = Date()
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            currentMonth = now
+                        }
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            selectedDate = now
+                        }
+                    } label: {
+                        Text("Heute")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.secondary)
+                }
+
                 MonthHeader(currentMonth: $currentMonth)
+            }
+            .padding(.horizontal)
+            .padding(.top, 4)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Mitarbeiter")
@@ -1376,9 +1534,10 @@ struct CalendarScreen: View {
                 CalendarGrid(currentMonth: currentMonth,
                              selectedDate: $selectedDate)
                     .padding(.horizontal)
+                    .animation(.easeInOut(duration: 0.25), value: currentMonth)
 
                 List {
-                    Section(header: Text("Anträge am \(formatted(selectedDate))")) {
+                    Section(header: Text("\(formatted(selectedDate))")) {
                         if let holiday = germanHolidayName(selectedDate) {
                             Text(holiday)
                                 .font(.subheadline)
@@ -1410,15 +1569,7 @@ struct CalendarScreen: View {
                     }
                 }
             }
-            .navigationTitle("Urlaubskalender")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    NavigationLink(destination: NewLeaveRequestView()) {
-                        Image(systemName: "plus.circle.fill")
-                    }
-                }
-            }
+            // removed navigationTitle/navigationBarTitleDisplayMode for cleaner custom header
         }
     }
 
@@ -1429,7 +1580,7 @@ struct CalendarScreen: View {
     func dateRange(_ start: Date, _ end: Date) -> String {
         dateRangeString(start, end)
     }
-}
+
 
 // MARK: - Month Header
 
@@ -1444,24 +1595,44 @@ struct MonthHeader: View {
     }
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Button {
-                moveMonth(by: -1)
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    moveMonth(by: -1)
+                }
             } label: {
                 Image(systemName: "chevron.left")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Color(.secondarySystemBackground)))
             }
-            Spacer()
-            Text(title.capitalized)
-                .font(.headline)
-            Spacer()
+            .buttonStyle(.plain)
+
+            VStack(spacing: 2) {
+                Text(title.capitalized)
+                    .font(.headline)
+            }
+            .frame(maxWidth: .infinity)
+
             Button {
-                moveMonth(by: 1)
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    moveMonth(by: 1)
+                }
             } label: {
                 Image(systemName: "chevron.right")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 34, height: 34)
+                    .background(Circle().fill(Color(.secondarySystemBackground)))
             }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal)
-        .padding(.bottom, 8)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.04), radius: 10, x: 0, y: 6)
+        )
     }
 
     func moveMonth(by value: Int) {
@@ -1506,20 +1677,37 @@ struct CalendarGrid: View {
     @Binding var selectedDate: Date
 
     private var days: [Date] {
-        let calendar = Calendar.current
-        guard let monthInterval = calendar.dateInterval(of: .month, for: currentMonth),
-              let firstWeekday = calendar.dateInterval(of: .weekOfMonth, for: monthInterval.start)?.start
-        else {
+        var cal = Calendar.current
+        cal.firstWeekday = 2 // Montag
+
+        guard let monthInterval = cal.dateInterval(of: .month, for: currentMonth) else {
             return []
         }
 
-        var dates: [Date] = []
-        for offset in 0..<42 { // 6 Wochen
-            if let date = calendar.date(byAdding: .day, value: offset, to: firstWeekday) {
-                dates.append(date)
-            }
+        let startOfMonth = cal.startOfDay(for: monthInterval.start)
+        let endOfMonth = cal.date(byAdding: .day, value: -1, to: monthInterval.end).map { cal.startOfDay(for: $0) } ?? startOfMonth
+
+        func startOfWeek(_ date: Date) -> Date {
+            let weekday = cal.component(.weekday, from: date)
+            let diff = (weekday - cal.firstWeekday + 7) % 7
+            return cal.date(byAdding: .day, value: -diff, to: date).map { cal.startOfDay(for: $0) } ?? date
         }
-        return dates
+
+        func endOfWeek(_ date: Date) -> Date {
+            let weekday = cal.component(.weekday, from: date)
+            let diff = (cal.firstWeekday + 6 - weekday + 7) % 7
+            return cal.date(byAdding: .day, value: diff, to: date).map { cal.startOfDay(for: $0) } ?? date
+        }
+
+        let gridStart = startOfWeek(startOfMonth)
+        let gridEnd = endOfWeek(endOfMonth)
+
+        let totalDays = (cal.dateComponents([.day], from: gridStart, to: gridEnd).day ?? 0) + 1
+        let weeks = max(4, min(6, Int(ceil(Double(totalDays) / 7.0))))
+
+        return (0..<(weeks * 7)).compactMap { offset in
+            cal.date(byAdding: .day, value: offset, to: gridStart)
+        }
     }
 
     var body: some View {
@@ -1535,19 +1723,28 @@ struct CalendarGrid: View {
             }
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(days, id: \.self) { date in
-                    let approvedRequests = appState.requests(for: date).filter { $0.status == .approved }
+                    let isCurrentMonth = Calendar.current.isDate(date, equalTo: currentMonth, toGranularity: .month)
+
+                    let approvedRequests = isCurrentMonth
+                        ? appState.requests(for: date).filter { $0.status == .approved }
+                        : []
+
                     let approvedColors = approvedRequests.map { $0.user.color }
-                    let isHoliday = isPublicHolidayBremen(date)
+                    let isHoliday = isCurrentMonth ? isPublicHolidayBremen(date) : false
 
                     DayCell(
                         date: date,
-                        isCurrentMonth: Calendar.current.isDate(date, equalTo: currentMonth, toGranularity: .month),
-                        isSelected: Calendar.current.isDate(date, inSameDayAs: selectedDate),
+                        isCurrentMonth: isCurrentMonth,
+                        isSelected: isCurrentMonth && Calendar.current.isDate(date, inSameDayAs: selectedDate),
                         approvedColors: approvedColors,
                         isHoliday: isHoliday
                     )
+                    .contentShape(Rectangle())
+                    .allowsHitTesting(isCurrentMonth)
                     .onTapGesture {
-                        selectedDate = date
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            selectedDate = date
+                        }
                     }
                 }
             }
@@ -1563,43 +1760,73 @@ struct DayCell: View {
     let isHoliday: Bool
 
     var body: some View {
+        // Tage außerhalb des aktuellen Monats: bewusst „leer“ darstellen
+        if !isCurrentMonth {
+            return AnyView(
+                Color.clear
+                    .frame(maxWidth: .infinity, minHeight: 36)
+            )
+        }
+
         let day = Calendar.current.component(.day, from: date)
 
-        Text("\(day)")
-            .font(.callout)
-            .frame(maxWidth: .infinity, minHeight: 32)
-            .padding(4)
+        return AnyView(
+            VStack(spacing: 3) {
+                Text("\(day)")
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+                    .foregroundColor(isHoliday ? .red : .primary)
+                    .padding(.top, 1)
+
+                // Indicator-Bars (Apple-like)
+                indicators
+                    .frame(height: 5) // kleiner als vorher
+            }
+            .frame(maxWidth: .infinity, minHeight: 36)
+            .padding(.vertical, 4)
             .background(
-                Group {
-                    if isSelected {
-                        Circle()
-                            .fill(Color.accentColor.opacity(0.25))
-                    } else if !approvedColors.isEmpty {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: gradientColors,
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    } else {
-                        Circle().fill(Color.clear)
-                    }
-                }
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
             )
-            .foregroundColor(
-                isHoliday ? .red : (isCurrentMonth ? .primary : .secondary)
-            )
+            .animation(.easeInOut(duration: 0.15), value: isSelected)
+        )
     }
 
-    private var gradientColors: [Color] {
-        if approvedColors.count == 1 {
-            let c = approvedColors[0]
-            return [c.opacity(0.8), c.opacity(0.4)]
-        } else {
-            return approvedColors.map { $0.opacity(0.8) }
+    private var indicators: some View {
+        let unique = Array(orderedUniqueColors(approvedColors))
+        let maxBars = 3
+        let shown = Array(unique.prefix(maxBars))
+        let hasMore = unique.count > maxBars
+
+        return HStack(spacing: 3) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, c in
+                Capsule()
+                    .fill(c.opacity(isCurrentMonth ? 0.95 : 0.35))
+                    .frame(height: 3)
+            }
+
+            if hasMore {
+                Circle()
+                    .fill(Color.secondary.opacity(0.7))
+                    .frame(width: 3, height: 3)
+            }
+
+            // Wenn keine Anträge: unsichtbar, aber gleicher Platz
+            if shown.isEmpty && !hasMore {
+                Capsule().fill(Color.clear).frame(height: 3)
+            }
         }
+        .padding(.horizontal, 6)
+    }
+
+    private func orderedUniqueColors(_ colors: [Color]) -> [Color] {
+        var result: [Color] = []
+        for c in colors {
+            if !result.contains(where: { $0.description == c.description }) {
+                result.append(c)
+            }
+        }
+        return result
     }
 }
 
