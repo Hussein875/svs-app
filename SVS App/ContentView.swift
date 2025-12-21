@@ -2038,7 +2038,7 @@ struct MyRequestsScreen: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Urlaubsanträge")
+            .navigationTitle("Meine Anträge")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink(destination: NewLeaveRequestView()) {
