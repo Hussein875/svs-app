@@ -966,28 +966,155 @@ struct MainView: View {
 
 struct AdminConsoleView: View {
     @EnvironmentObject var appState: AppState
+    @State private var showNewRequestSheet: Bool = false
 
     var body: some View {
-        NavigationView {
-            List {
-                Section(header: Text("Übersicht")) {
-                    NavigationLink {
-                        AdminRequestsScreen()
-                            .environmentObject(appState)
-                    } label: {
-                        Label("Anträge", systemImage: "doc.text.magnifyingglass")
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Admin")
+                            .font(.largeTitle.weight(.bold))
+
+                        Spacer()
+
+                        Button {
+                            showNewRequestSheet = true
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(width: 40, height: 40)
+                                .background(Circle().fill(Color(.secondarySystemBackground)))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Antrag erstellen")
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+
+                    // KPI Cards (2 only, neutral accent)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                        AdminStatCard(
+                            title: "Offene Anträge",
+                            value: "\(openVacationRequestsCount)",
+                            systemImage: "doc.text",
+                            accent: .secondary
+                        )
+
+                        AdminStatCard(
+                            title: "Heute abwesend",
+                            value: "\(todayAbsentCount)",
+                            systemImage: "calendar.badge.clock",
+                            accent: .secondary
+                        )
+                    }
+                    .padding(.horizontal, 18)
+
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Übersicht")
+                            .font(.headline)
+                            .padding(.horizontal, 18)
+
+                        VStack(spacing: 10) {
+                            NavigationLink {
+                                AdminRequestsScreen()
+                                    .environmentObject(appState)
+                            } label: {
+                                AdminNavRow(title: "Anträge verwalten",
+                                            subtitle: "Genehmigen, ablehnen und filtern",
+                                            systemImage: "doc.text.magnifyingglass")
+                            }
+
+                            NavigationLink {
+                                AdminUsersScreen()
+                                    .environmentObject(appState)
+                            } label: {
+                                AdminNavRow(title: "Mitarbeiter",
+                                            subtitle: "Urlaub, Rollen und Login verwalten",
+                                            systemImage: "person.2")
+                            }
+                        }
+                        .padding(.horizontal, 18)
                     }
 
-                    NavigationLink {
-                        AdminUsersScreen()
-                            .environmentObject(appState)
-                    } label: {
-                        Label("Mitarbeiter", systemImage: "person.2")
-                    }
+                    Spacer(minLength: 18)
+                }
+                .padding(.top, 2)
+            }
+            .background(Color(.systemGroupedBackground))
+            .sheet(isPresented: $showNewRequestSheet) {
+                NavigationStack {
+                    NewLeaveRequestView()
+                        .environmentObject(appState)
                 }
             }
-            .navigationTitle("Admin")
         }
+    }
+    
+    private struct AdminStatCard: View {
+        let title: String
+        let value: String
+        let systemImage: String
+        let accent: Color
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: systemImage).foregroundColor(.secondary)
+                    Spacer()
+                }
+                Text(value).font(.title2.weight(.bold))
+                Text(title).font(.caption).foregroundColor(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.secondary.opacity(0.18), lineWidth: 1))
+        }
+    }
+
+    private struct AdminNavRow: View {
+        let title: String
+        let subtitle: String
+        let systemImage: String
+
+        var body: some View {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(Color(.secondarySystemBackground))
+                    Image(systemName: systemImage)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .frame(width: 38, height: 38)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline.weight(.semibold))
+                    Text(subtitle).font(.caption).foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .foregroundColor(.secondary)
+                    .font(.caption.weight(.semibold))
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+            .contentShape(Rectangle())
+        }
+    }
+
+    private var openVacationRequestsCount: Int {
+        appState.leaveRequests.filter { $0.type == .vacation && $0.status == .pending }.count
+    }
+
+    private var todayAbsentCount: Int {
+        let today = Calendar.current.startOfDay(for: Date())
+        let todays = appState.requests(for: today).filter { $0.status == .approved }
+        return Set(todays.map { $0.user.id }).count
     }
 }
 
@@ -1163,38 +1290,14 @@ struct AdminRequestsScreen: View {
     }
 
     var body: some View {
-        NavigationView {
-            List {
-                if openRequests.isEmpty && answeredRequests.isEmpty {
-                    Section {
-                        Text("Keine Anträge vorhanden")
-                            .foregroundColor(.secondary)
-                    }
-                } else {
-                    if !openRequests.isEmpty {
-                        Section(header: Text("Offen")) {
-                            ForEach(openRequests) { request in
-                                adminRequestRow(for: request)
-                            }
-                        }
-                    }
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Anträge")
+                        .font(.largeTitle.weight(.bold))
 
-                    if !answeredRequestsByMonth.isEmpty {
-                        ForEach(answeredRequestsByMonth, id: \.monthStart) { group in
-                            Section(header: Text(monthTitle(group.monthStart))) {
-                                ForEach(group.requests) { request in
-                                    adminRequestRow(for: request)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Anträge")
-            .searchable(text: $searchText, prompt: "Mitarbeiter suchen")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                    Spacer()
+
                     Menu {
                         Picker("Filter", selection: $filterMode) {
                             ForEach(AdminQuickFilter.allCases) { mode in
@@ -1202,15 +1305,54 @@ struct AdminRequestsScreen: View {
                             }
                         }
                     } label: {
-                        Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(Color(.secondarySystemBackground)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Filter")
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+
+                List {
+                    if openRequests.isEmpty && answeredRequests.isEmpty {
+                        Section {
+                            Text("Keine Anträge vorhanden")
+                                .foregroundColor(.secondary)
+                        }
+                    } else {
+                        if !openRequests.isEmpty {
+                            Section(header: Text("Offen")) {
+                                ForEach(openRequests) { request in
+                                    adminRequestRow(for: request)
+                                }
+                            }
+                        }
+
+                        if !answeredRequestsByMonth.isEmpty {
+                            ForEach(answeredRequestsByMonth, id: \.monthStart) { group in
+                                Section(header: Text(monthTitle(group.monthStart))) {
+                                    ForEach(group.requests) { request in
+                                        adminRequestRow(for: request)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(Color(.systemGroupedBackground))
+                .searchable(text: $searchText, prompt: "Mitarbeiter suchen")
+                .sheet(item: $editingRequest) { request in
+                    NavigationStack {
+                        EditLeaveRequestView(request: request)
                     }
                 }
             }
-            .sheet(item: $editingRequest) { request in
-                NavigationView {
-                    EditLeaveRequestView(request: request)
-                }
-            }
+            .background(Color(.systemGroupedBackground))
         }
     }
 
@@ -1260,6 +1402,7 @@ private struct AdminLeaveRequestCard: View {
     private var accent: Color {
         request.type == .sick ? Color.gray : colorForLeaveStatus(request.status)
     }
+    @State private var showAudit: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1322,18 +1465,50 @@ private struct AdminLeaveRequestCard: View {
                 }
             }
 
-            // AUDIT FOOTER
+            // AUDIT (einklappbar)
             let createdBy = appState.userName(for: request.createdByUserId)
             let updatedBy = request.updatedByUserId.map { appState.userName(for: $0) }
+            let hasUpdate = (request.updatedAt != nil && updatedBy != nil)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Erstellt von: \(createdBy) • \(shortDateString(request.createdAt))")
-                if let uAt = request.updatedAt, let uBy = updatedBy {
-                    Text("Geändert: \(uBy) • \(shortDateString(uAt))")
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showAudit.toggle()
                 }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: showAudit ? "chevron.down" : "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+
+                    Text(showAudit ? "Audit ausblenden" : "Audit anzeigen")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(.secondary)
+
+                    Spacer()
+
+                    // Optional: kleine Kurzinfo, damit man ohne Aufklappen Kontext hat
+                    Text(shortDateString(request.createdAt))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                .contentShape(Rectangle())
             }
-            .font(.caption2)
-            .foregroundColor(.secondary)
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+
+            if showAudit {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Erstellt von: \(createdBy) • \(shortDateString(request.createdAt))")
+                    if let uAt = request.updatedAt, let uBy = updatedBy {
+                        Text("Geändert: \(uBy) • \(shortDateString(uAt))")
+                    } else if !hasUpdate {
+                        Text("Noch nicht geändert")
+                    }
+                }
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(14)
         .background(
@@ -1348,69 +1523,210 @@ private struct AdminLeaveRequestCard: View {
     }
 }
 
+enum AdminUserRoleFilter: String, CaseIterable, Identifiable {
+    case all = "Alle"
+    case admins = "Admins"
+    case employees = "Mitarbeiter"
+    case experts = "Sachverständige"
+    var id: String { rawValue }
+}
+
+enum AdminUserSortMode: String, CaseIterable, Identifiable {
+    case name = "Name"
+    case remainingAsc = "Resturlaub ↑"
+    case remainingDesc = "Resturlaub ↓"
+    var id: String { rawValue }
+}
+
 // MARK: - Admin Users Screen
 
 struct AdminUsersScreen: View {
     @EnvironmentObject var appState: AppState
     @State private var showAddUser = false
+    @State private var searchText: String = ""
+    @State private var roleFilter: AdminUserRoleFilter = .all
+    @State private var sortMode: AdminUserSortMode = .name
+    
+    private func matchesSearch(_ user: User) -> Bool {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return true }
+        return user.name.lowercased().contains(q.lowercased())
+    }
+
+    private func matchesRole(_ user: User) -> Bool {
+        switch roleFilter {
+        case .all: return true
+        case .admins: return user.role == .admin
+        case .employees: return user.role == .employee
+        case .experts: return user.role == .expert
+        }
+    }
+
+    private var filteredUsers: [User] {
+        let base = appState.users
+            .filter { matchesRole($0) }
+            .filter { matchesSearch($0) }
+
+        switch sortMode {
+        case .name:
+            return base.sorted { $0.name.lowercased() < $1.name.lowercased() }
+        case .remainingAsc:
+            return base.sorted { appState.remainingLeaveDays(for: $0) < appState.remainingLeaveDays(for: $1) }
+        case .remainingDesc:
+            return base.sorted { appState.remainingLeaveDays(for: $0) > appState.remainingLeaveDays(for: $1) }
+        }
+    }
 
     var body: some View {
-        NavigationView {
-            List {
-                Section(header: Text("Mitarbeiter & Resturlaub")) {
-                    ForEach(appState.users) { user in
-                        NavigationLink(destination: EditUserView(user: user)) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(user.name)
-                                        .font(.headline)
-                                        .foregroundColor(user.color)
-                                    Spacer()
-                                    Text(roleText(for: user.role))
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                let used = appState.usedVacationDays(for: user)
-                                let remaining = appState.remainingLeaveDays(for: user)
-                                Text("Jahresurlaub: \(user.annualLeaveDays) Tage")
-                                    .font(.caption)
-                                Text("Genutzt: \(used) Tage")
-                                    .font(.caption2)
-                                Text("Resturlaub: \(remaining) Tage")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Mitarbeiter")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Mitarbeiter")
+                        .font(.largeTitle.weight(.bold))
+
+                    Spacer()
+
                     Button {
                         showAddUser = true
                     } label: {
                         Image(systemName: "plus")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(Color(.secondarySystemBackground)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Neuen Mitarbeiter erstellen")
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Picker("Rolle", selection: $roleFilter) {
+                        ForEach(AdminUserRoleFilter.allCases) { f in
+                            Text(f.rawValue).tag(f)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    HStack(spacing: 10) {
+                        Menu {
+                            Picker("Sortierung", selection: $sortMode) {
+                                ForEach(AdminUserSortMode.allCases) { m in
+                                    Text(m.rawValue).tag(m)
+                                }
+                            }
+                        } label: {
+                            Label("Sortieren", systemImage: "arrow.up.arrow.down")
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+                        }
+                        .buttonStyle(.plain)
+
+                        Spacer()
+
+                        Text("\(filteredUsers.count) Mitarbeiter")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
+                .padding(.horizontal, 18)
+
+                List {
+                    Section(header: Text("Mitarbeiter & Resturlaub")) {
+                        ForEach(filteredUsers) { user in
+                            NavigationLink {
+                                EditUserView(user: user).environmentObject(appState)
+                            } label: {
+                                AdminUserCard(user: user).environmentObject(appState)
+                            }
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                        }
+                    }
+                }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(Color(.systemGroupedBackground))
+                .searchable(text: $searchText, prompt: "Mitarbeiter suchen")
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(Color(.systemGroupedBackground))
             }
+            .background(Color(.systemGroupedBackground))
             .sheet(isPresented: $showAddUser) {
-                NavigationView {
+                NavigationStack {
                     AddUserView()
+                        .environmentObject(appState)
                 }
             }
         }
     }
+    
+    private struct AdminUserCard: View {
+        let user: User
+        @EnvironmentObject var appState: AppState
 
-    private func roleText(for role: UserRole) -> String {
-        switch role {
-        case .admin:
-            return "Admin"
-        case .employee:
-            return "Mitarbeiter"
-        case .expert:
-            return "Sachverständiger"
+        private var used: Int { appState.usedVacationDays(for: user) }
+        private var remaining: Int { appState.remainingLeaveDays(for: user) }
+        private var warning: Bool { remaining <= 5 }
+
+        var body: some View {
+            HStack(spacing: 12) {
+                Circle().fill(user.color).frame(width: 12, height: 12)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(user.name)
+                            .font(.headline)
+                            .foregroundColor(user.color)
+
+                        Spacer()
+
+                        Text(roleText(for: user.role))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    HStack(spacing: 10) {
+                        Text("Urlaub: \(user.annualLeaveDays)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+
+                        Text("Genutzt: \(used)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+
+                        Text("Rest: \(remaining)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundColor(warning ? .red : .secondary)
+
+                        if warning {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundColor(.red)
+                        }
+
+                        Spacer()
+                    }
+                }
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke((warning ? Color.red : user.color).opacity(0.12), lineWidth: 1)
+            )
+        }
+
+        private func roleText(for role: UserRole) -> String {
+            switch role {
+            case .admin: return "Admin"
+            case .employee: return "Mitarbeiter"
+            case .expert: return "Sachverständiger"
+            }
         }
     }
 }
@@ -1420,6 +1736,9 @@ struct EditUserView: View {
     @Environment(\.dismiss) var dismiss
 
     @State var user: User
+
+    @State private var showNewRequest: Bool = false
+    @State private var showPinResetAlert: Bool = false
 
     private let availableColors: [String] = ["blue", "green", "orange", "purple", "red", "pink", "teal", "indigo", "yellow", "gray"]
 
@@ -1437,6 +1756,14 @@ struct EditUserView: View {
             Section(header: Text("Login")) {
                 TextField("PIN", text: binding(for: \.pin))
                     .keyboardType(.numberPad)
+
+                Button {
+                    user.pin = "0000"
+                    showPinResetAlert = true
+                } label: {
+                    Label("PIN auf 0000 setzen", systemImage: "key")
+                }
+                .font(.subheadline)
             }
 
             Section(header: Text("Urlaub")) {
@@ -1449,6 +1776,16 @@ struct EditUserView: View {
                 Picker("Farbe", selection: binding(for: \.colorName)) {
                     ForEach(availableColors, id: \.self) { color in
                         Text(color.capitalized).tag(color)
+                    }
+                }
+            }
+
+            if appState.currentUser?.role == .admin {
+                Section(header: Text("Aktionen")) {
+                    Button {
+                        showNewRequest = true
+                    } label: {
+                        Label("Antrag für diesen Mitarbeiter erstellen", systemImage: "plus.circle")
                     }
                 }
             }
@@ -1466,6 +1803,17 @@ struct EditUserView: View {
             }
         }
         .navigationTitle("Mitarbeiter bearbeiten")
+        .sheet(isPresented: $showNewRequest) {
+            NavigationStack {
+                NewLeaveRequestView(preselectedUserId: user.id)
+                    .environmentObject(appState)
+            }
+        }
+        .alert("PIN geändert", isPresented: $showPinResetAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Der PIN wurde auf 0000 gesetzt. Bitte speichern.")
+        }
     }
 
     private func binding<Value>(for keyPath: WritableKeyPath<User, Value>) -> Binding<Value> {
@@ -1572,53 +1920,51 @@ struct CalendarScreen: View {
             .padding(.horizontal)
             .padding(.top, 4)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Mitarbeiter")
-                        .font(.subheadline)
-                        .padding(.horizontal)
-                    UserLegendView()
-                        .padding(.horizontal)
-                }
-
-                CalendarGrid(currentMonth: currentMonth,
-                             selectedDate: $selectedDate)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Mitarbeiter")
+                    .font(.subheadline)
                     .padding(.horizontal)
-                    .animation(.easeInOut(duration: 0.25), value: currentMonth)
+                UserLegendView()
+                    .padding(.horizontal)
+            }
 
-                List {
-                    Section(header: Text("\(formatted(selectedDate))")) {
-                        if let holiday = germanHolidayName(selectedDate) {
-                            Text(holiday)
-                                .font(.subheadline)
-                                .foregroundColor(.red)
-                        }
+            CalendarGrid(currentMonth: currentMonth,
+                         selectedDate: $selectedDate)
+                .padding(.horizontal)
+                .animation(.easeInOut(duration: 0.25), value: currentMonth)
 
-                        let requests = appState.requests(for: selectedDate).filter { $0.status == .approved }
-                        if requests.isEmpty {
-                            Text("Keine Anträge")
-                                .foregroundColor(.secondary)
-                        } else {
-                            ForEach(requests) { r in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(r.user.name)
-                                        .font(.headline)
-                                        .foregroundColor(r.user.color)
-                                    Text("\(dateRange(r.startDate, r.endDate))")
-                                        .font(.subheadline)
-                                    Text(r.type.rawValue)
-                                        .font(.caption)
-                                    // Bei Krankheit keinen Status-Text anzeigen
-                                    if r.type != .sick {
-                                        Text(r.status.rawValue)
-                                            .font(.caption2)
-                                    }
+            List {
+                Section(header: Text("\(formatted(selectedDate))")) {
+                    if let holiday = germanHolidayName(selectedDate) {
+                        Text(holiday)
+                            .font(.subheadline)
+                            .foregroundColor(.red)
+                    }
+
+                    let requests = appState.requests(for: selectedDate).filter { $0.status == .approved }
+                    if requests.isEmpty {
+                        Text("Keine Anträge")
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(requests) { r in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(r.user.name)
+                                    .font(.headline)
+                                    .foregroundColor(r.user.color)
+                                Text("\(dateRange(r.startDate, r.endDate))")
+                                    .font(.subheadline)
+                                Text(r.type.rawValue)
+                                    .font(.caption)
+                                // Bei Krankheit keinen Status-Text anzeigen
+                                if r.type != .sick {
+                                    Text(r.status.rawValue)
+                                        .font(.caption2)
                                 }
                             }
                         }
                     }
                 }
             }
-            // removed navigationTitle/navigationBarTitleDisplayMode for cleaner custom header
         }
     }
 
@@ -1629,7 +1975,7 @@ struct CalendarScreen: View {
     func dateRange(_ start: Date, _ end: Date) -> String {
         dateRangeString(start, end)
     }
-
+}
 
 // MARK: - Month Header
 
@@ -1807,7 +2153,7 @@ struct DayCell: View {
     let isSelected: Bool
     let approvedColors: [Color]
     let isHoliday: Bool
-
+    
     var body: some View {
         // Tage außerhalb des aktuellen Monats: bewusst „leer“ darstellen
         if !isCurrentMonth {
@@ -1816,9 +2162,9 @@ struct DayCell: View {
                     .frame(maxWidth: .infinity, minHeight: 36)
             )
         }
-
+        
         let day = Calendar.current.component(.day, from: date)
-
+        
         return AnyView(
             VStack(spacing: 3) {
                 Text("\(day)")
@@ -1826,40 +2172,41 @@ struct DayCell: View {
                     .frame(maxWidth: .infinity)
                     .foregroundColor(isHoliday ? .red : .primary)
                     .padding(.top, 1)
-
+                
                 // Indicator-Bars (Apple-like)
                 indicators
                     .frame(height: 5) // kleiner als vorher
             }
-            .frame(maxWidth: .infinity, minHeight: 36)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
-            )
-            .animation(.easeInOut(duration: 0.15), value: isSelected)
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
+                )
+                .animation(.easeInOut(duration: 0.15), value: isSelected)
         )
     }
-
+    
+    
     private var indicators: some View {
         let unique = Array(orderedUniqueColors(approvedColors))
         let maxBars = 3
         let shown = Array(unique.prefix(maxBars))
         let hasMore = unique.count > maxBars
-
+        
         return HStack(spacing: 3) {
             ForEach(Array(shown.enumerated()), id: \.offset) { _, c in
                 Capsule()
                     .fill(c.opacity(isCurrentMonth ? 0.95 : 0.35))
                     .frame(height: 3)
             }
-
+            
             if hasMore {
                 Circle()
                     .fill(Color.secondary.opacity(0.7))
                     .frame(width: 3, height: 3)
             }
-
+            
             // Wenn keine Anträge: unsichtbar, aber gleicher Platz
             if shown.isEmpty && !hasMore {
                 Capsule().fill(Color.clear).frame(height: 3)
@@ -1867,7 +2214,7 @@ struct DayCell: View {
         }
         .padding(.horizontal, 6)
     }
-
+    
     private func orderedUniqueColors(_ colors: [Color]) -> [Color] {
         var result: [Color] = []
         for c in colors {
@@ -1878,105 +2225,105 @@ struct DayCell: View {
         return result
     }
 }
-
-// MARK: - Feiertage (Deutschland)
-
-func germanHolidayName(_ date: Date) -> String? {
-    let calendar = Calendar.current
-    let year = calendar.component(.year, from: date)
-
-    func makeDate(_ month: Int, _ day: Int) -> Date? {
+    
+    
+    // MARK: - Feiertage (Deutschland)
+    
+    func germanHolidayName(_ date: Date) -> String? {
+        let calendar = Calendar.current
+        let year = calendar.component(.year, from: date)
+        
+        func makeDate(_ month: Int, _ day: Int) -> Date? {
+            var components = DateComponents()
+            components.year = year
+            components.month = month
+            components.day = day
+            return calendar.date(from: components)
+        }
+        
+        func sameDay(_ d1: Date?, _ d2: Date) -> Bool {
+            guard let d1 = d1 else { return false }
+            return calendar.isDate(d1, inSameDayAs: d2)
+        }
+        
+        // Feste Feiertage (bundesweit)
+        let newYear        = makeDate(1, 1)
+        let labourDay      = makeDate(5, 1)
+        let germanUnity    = makeDate(10, 3)
+        let reformationDay = makeDate(10, 31)
+        let christmasDay   = makeDate(12, 25)
+        let boxingDay      = makeDate(12, 26)
+        
+        if sameDay(newYear, date)        { return "Neujahr" }
+        if sameDay(labourDay, date)      { return "Tag der Arbeit" }
+        if sameDay(germanUnity, date)    { return "Tag der Deutschen Einheit" }
+        if sameDay(reformationDay, date) { return "Reformationstag" }
+        if sameDay(christmasDay, date)   { return "1. Weihnachtstag" }
+        if sameDay(boxingDay, date)      { return "2. Weihnachtstag" }
+        
+        // Bewegliche Feiertage rund um Ostern
+        guard let easter = easterSunday(year: year) else { return nil }
+        let goodFriday   = calendar.date(byAdding: .day, value: -2, to: easter)
+        let easterMonday = calendar.date(byAdding: .day, value:  1, to: easter)
+        let ascension    = calendar.date(byAdding: .day, value: 39, to: easter)
+        let whitMonday   = calendar.date(byAdding: .day, value: 50, to: easter)
+        
+        if sameDay(goodFriday, date)     { return "Karfreitag" }
+        if sameDay(easter, date)         { return "Ostersonntag" }
+        if sameDay(easterMonday, date)   { return "Ostermontag" }
+        if sameDay(ascension, date)      { return "Christi Himmelfahrt" }
+        if sameDay(whitMonday, date)     { return "Pfingstmontag" }
+        
+        return nil
+    }
+    
+    func isPublicHolidayBremen(_ date: Date) -> Bool {
+        return germanHolidayName(date) != nil
+    }
+    
+    func easterSunday(year: Int) -> Date? {
+        // Meeus/Jones/Butcher Algorithmus
+        let a = year % 19
+        let b = year / 100
+        let c = year % 100
+        let d = b / 4
+        let e = b % 4
+        let f = (b + 8) / 25
+        let g = (b - f + 1) / 3
+        let h = (19 * a + b - d - g + 15) % 30
+        let i = c / 4
+        let k = c % 4
+        let l = (32 + 2 * e + 2 * i - h - k) % 7
+        let m = (a + 11 * h + 22 * l) / 451
+        let month = (h + l - 7 * m + 114) / 31
+        let day = ((h + l - 7 * m + 114) % 31) + 1
+        
         var components = DateComponents()
         components.year = year
         components.month = month
         components.day = day
-        return calendar.date(from: components)
+        return Calendar.current.date(from: components)
     }
 
-    func sameDay(_ d1: Date?, _ d2: Date) -> Bool {
-        guard let d1 = d1 else { return false }
-        return calendar.isDate(d1, inSameDayAs: d2)
-    }
-
-    // Feste Feiertage (bundesweit)
-    let newYear        = makeDate(1, 1)
-    let labourDay      = makeDate(5, 1)
-    let germanUnity    = makeDate(10, 3)
-    let reformationDay = makeDate(10, 31)
-    let christmasDay   = makeDate(12, 25)
-    let boxingDay      = makeDate(12, 26)
-
-    if sameDay(newYear, date)        { return "Neujahr" }
-    if sameDay(labourDay, date)      { return "Tag der Arbeit" }
-    if sameDay(germanUnity, date)    { return "Tag der Deutschen Einheit" }
-    if sameDay(reformationDay, date) { return "Reformationstag" }
-    if sameDay(christmasDay, date)   { return "1. Weihnachtstag" }
-    if sameDay(boxingDay, date)      { return "2. Weihnachtstag" }
-
-    // Bewegliche Feiertage rund um Ostern
-    guard let easter = easterSunday(year: year) else { return nil }
-    let goodFriday   = calendar.date(byAdding: .day, value: -2, to: easter)
-    let easterMonday = calendar.date(byAdding: .day, value:  1, to: easter)
-    let ascension    = calendar.date(byAdding: .day, value: 39, to: easter)
-    let whitMonday   = calendar.date(byAdding: .day, value: 50, to: easter)
-
-    if sameDay(goodFriday, date)     { return "Karfreitag" }
-    if sameDay(easter, date)         { return "Ostersonntag" }
-    if sameDay(easterMonday, date)   { return "Ostermontag" }
-    if sameDay(ascension, date)      { return "Christi Himmelfahrt" }
-    if sameDay(whitMonday, date)     { return "Pfingstmontag" }
-
-    return nil
-}
-
-func isPublicHolidayBremen(_ date: Date) -> Bool {
-    return germanHolidayName(date) != nil
-}
-
-func easterSunday(year: Int) -> Date? {
-    // Meeus/Jones/Butcher Algorithmus
-    let a = year % 19
-    let b = year / 100
-    let c = year % 100
-    let d = b / 4
-    let e = b % 4
-    let f = (b + 8) / 25
-    let g = (b - f + 1) / 3
-    let h = (19 * a + b - d - g + 15) % 30
-    let i = c / 4
-    let k = c % 4
-    let l = (32 + 2 * e + 2 * i - h - k) % 7
-    let m = (a + 11 * h + 22 * l) / 451
-    let month = (h + l - 7 * m + 114) / 31
-    let day = ((h + l - 7 * m + 114) % 31) + 1
-
-    var components = DateComponents()
-    components.year = year
-    components.month = month
-    components.day = day
-    return Calendar.current.date(from: components)
-}
-
-// Zählt nur Werktage (Montag–Freitag) zwischen zwei Daten, inkl. Start- und Enddatum
-func workingDays(from start: Date, to end: Date) -> Int {
-    let calendar = Calendar.current
-    var date = calendar.startOfDay(for: start)
-    let endDay = calendar.startOfDay(for: end)
+ func workingDays(from start: Date, to end: Date) -> Int {
+    let cal = Calendar.current
+    var date = cal.startOfDay(for: start)
+    let endDate = cal.startOfDay(for: end)
     var count = 0
 
-    while date <= endDay {
-        let weekday = calendar.component(.weekday, from: date)
-        // 1 = Sonntag, 7 = Samstag
-        // Zusätzlich: deutsche Feiertage nicht mitzählen
-        if weekday != 1 && weekday != 7 && !isPublicHolidayBremen(date) {
+    while date <= endDate {
+        let weekday = cal.component(.weekday, from: date)
+        let isWeekday = weekday >= 2 && weekday <= 6
+
+        if isWeekday && !isPublicHolidayBremen(date) {
             count += 1
         }
-        guard let next = calendar.date(byAdding: .day, value: 1, to: date) else { break }
-        date = next
+        date = cal.date(byAdding: .day, value: 1, to: date)!
     }
-
-    return max(count, 0)
+    return count
 }
+
+
 
 // MARK: - My Requests Screen
 
@@ -2166,7 +2513,14 @@ private struct MyLeaveRequestCard: View {
 // MARK: - New Leave Request Form
 
 struct NewLeaveRequestView: View {
-    
+
+    private let preselectedUserId: UUID?
+
+    init(preselectedUserId: UUID? = nil) {
+        self.preselectedUserId = preselectedUserId
+        _selectedUserId = State(initialValue: preselectedUserId)
+    }
+
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
 
@@ -2368,7 +2722,7 @@ struct NewLeaveRequestView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if selectedUserId == nil {
-                selectedUserId = appState.currentUser?.id
+                selectedUserId = preselectedUserId ?? appState.currentUser?.id
             }
             // Bei Krankheit macht "Direkt genehmigen" keinen Sinn
             if selectedType == .sick {
@@ -2965,61 +3319,62 @@ private func roleLabel(for role: UserRole) -> String {
 
 // MARK: - Menü
 
-struct MenuView: View {
-    @EnvironmentObject var appState: AppState
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Menü")
-                        .font(.largeTitle.weight(.bold))
-                    Spacer()
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-
-                List {
-                    Section(header: Text("Benutzer")) {
-                        if let user = appState.currentUser {
+    struct MenuView: View {
+        @EnvironmentObject var appState: AppState
+        
+        var body: some View {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Menü")
+                            .font(.largeTitle.weight(.bold))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+                    
+                    List {
+                        Section(header: Text("Benutzer")) {
+                            if let user = appState.currentUser {
+                                HStack {
+                                    Text("Eingeloggt als:")
+                                    Spacer()
+                                    Text(user.name)
+                                        .foregroundColor(.accentColor)
+                                }
+                            }
+                        }
+                        
+                        Section(header: Text("Aktionen")) {
+                            Button(role: .destructive) {
+                                appState.currentUser = nil
+                                appState.sessionUserId = nil
+                            } label: {
+                                Label("Ausloggen", systemImage: "rectangle.portrait.and.arrow.right")
+                            }
+                        }
+                        
+                        Section(header: Text("App-Info")) {
                             HStack {
-                                Text("Eingeloggt als:")
+                                Text("Version")
                                 Spacer()
-                                Text(user.name)
-                                    .foregroundColor(.accentColor)
+                                Text("1.0")
+                                    .foregroundColor(.secondary)
+                            }
+                            HStack {
+                                Text("Entwickelt für")
+                                Spacer()
+                                Text("SV Souleiman")
+                                    .foregroundColor(.secondary)
                             }
                         }
                     }
-
-                    Section(header: Text("Aktionen")) {
-                        Button(role: .destructive) {
-                            appState.currentUser = nil
-                            appState.sessionUserId = nil
-                        } label: {
-                            Label("Ausloggen", systemImage: "rectangle.portrait.and.arrow.right")
-                        }
-                    }
-
-                    Section(header: Text("App-Info")) {
-                        HStack {
-                            Text("Version")
-                            Spacer()
-                            Text("1.0")
-                                .foregroundColor(.secondary)
-                        }
-                        HStack {
-                            Text("Entwickelt für")
-                            Spacer()
-                            Text("SV Souleiman")
-                                .foregroundColor(.secondary)
-                        }
-                    }
+                    .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
+                    .background(Color(.systemGroupedBackground))
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
                 .background(Color(.systemGroupedBackground))
             }
-            .background(Color(.systemGroupedBackground))
         }
     }
-}
+
