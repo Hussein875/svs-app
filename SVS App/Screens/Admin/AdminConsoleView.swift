@@ -161,98 +161,7 @@ struct AdminConsoleView: View {
     }
 }
 
-struct EditLeaveRequestView: View {
-    @EnvironmentObject var appState: AppState
-    @Environment(\.dismiss) var dismiss
 
-    @State var request: LeaveRequest
-    @State private var inlineError: String? = nil
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            Form {
-                if let inlineError {
-                    Section {
-                        HStack(alignment: .top, spacing: 10) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.red)
-                            Text(inlineError)
-                                .font(.footnote)
-                                .foregroundColor(.red)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .id("errorBanner")
-                }
-
-                Section(header: Text("Zeitraum")) {
-                    DatePicker("Von", selection: $request.startDate, displayedComponents: .date)
-                    DatePicker("Bis", selection: $request.endDate, in: request.startDate..., displayedComponents: .date)
-                }
-
-                Section(header: Text("Art der Abwesenheit")) {
-                    // Nur Urlaub und Krankheit zur Auswahl anbieten
-                    let allowedTypes: [LeaveType] = [.vacation, .sick]
-
-                    Picker("Art", selection: $request.type) {
-                        ForEach(allowedTypes, id: \.self) { type in
-                            Text(type.rawValue).tag(type)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                }
-
-                Section {
-                    if appState.canEditOrDelete(request, by: appState.currentUser) {
-                        Button("Änderungen speichern") {
-                            let ok = appState.updateLeaveRequest(request)
-                            if ok {
-                                inlineError = nil
-                                dismiss()
-                            } else {
-                                inlineError = appState.uiErrorMessage
-                            }
-                        }
-
-                        Button("Antrag löschen", role: .destructive) {
-                            appState.deleteLeaveRequest(request)
-                            dismiss()
-                        }
-                    } else {
-                        Text("Dieser Antrag wurde bereits entschieden und kann nicht mehr bearbeitet werden.")
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            .onChange(of: inlineError) { value in
-                guard value != nil else { return }
-                withAnimation(.easeInOut) {
-                    proxy.scrollTo("errorBanner", anchor: .top)
-                }
-            }
-            .onChange(of: request.startDate) { _ in
-                inlineError = nil
-                appState.uiErrorMessage = nil
-            }
-            .onChange(of: request.endDate) { _ in
-                inlineError = nil
-                appState.uiErrorMessage = nil
-            }
-            .onChange(of: request.type) { _ in
-                inlineError = nil
-                appState.uiErrorMessage = nil
-            }
-        }
-        .navigationTitle("Antrag bearbeiten")
-        .onAppear {
-            if request.type == .sick {
-                request.status = .approved
-            }
-        }
-    }
-}
 
 
 // MARK: - Admin Requests Screen
@@ -268,6 +177,7 @@ enum AdminQuickFilter: String, CaseIterable, Identifiable {
 struct AdminRequestsScreen: View {
     @EnvironmentObject var appState: AppState
     @State private var editingRequest: LeaveRequest?
+    @State private var showEditScreen: Bool = false
     @State private var searchText: String = ""
     @State private var filterMode: AdminQuickFilter = .all
 
@@ -389,9 +299,11 @@ struct AdminRequestsScreen: View {
                 .scrollContentBackground(.hidden)
                 .background(Color(.systemGroupedBackground))
                 .searchable(text: $searchText, prompt: "Mitarbeiter suchen")
-                .sheet(item: $editingRequest) { request in
-                    NavigationStack {
+                .navigationDestination(isPresented: $showEditScreen) {
+                    if let request = editingRequest {
                         EditLeaveRequestView(request: request)
+                            .environmentObject(appState)
+                            .onDisappear { editingRequest = nil }
                     }
                 }
             }
@@ -406,7 +318,10 @@ struct AdminRequestsScreen: View {
             onApprove: { appState.updateStatus(for: request.id, to: .approved) },
             onReject: { appState.updateStatus(for: request.id, to: .rejected) },
             onResetToOpen: { appState.updateStatus(for: request.id, to: .pending) },
-            onEdit: { editingRequest = request },
+            onEdit: {
+                editingRequest = request
+                showEditScreen = true
+            },
             onDelete: { appState.deleteLeaveRequest(request) }
         )
         .environmentObject(appState)
@@ -417,6 +332,7 @@ struct AdminRequestsScreen: View {
             if appState.canEditOrDelete(request, by: appState.currentUser) {
                 Button {
                     editingRequest = request
+                    showEditScreen = true
                 } label: {
                     Label("Bearbeiten", systemImage: "pencil")
                 }
