@@ -29,3 +29,32 @@ enum TaskStatus: String, Codable {
     case open
     case done
 }
+
+enum PayoutMethod: String, Codable, CaseIterable {
+    case paypal = "PayPal"
+    case iban = "IBAN"
+}
+
+enum CommissionStatus: String, Codable {
+    case open = "Offen"
+    case paid = "Ausgezahlt"
+}
+
+struct CommissionEntry: Identifiable, Codable, Equatable {
+    let id: UUID
+
+    var recipientName: String
+    var recipientAddress: String
+    var amountEUR: Decimal
+
+    var payoutMethod: PayoutMethod
+    var payoutTarget: String // PayPal-Mail oder IBAN (normalisiert)
+
+    var status: CommissionStatus
+
+    // Audit
+    var createdAt: Date
+    var createdByUserId: UUID
+    var paidAt: Date?
+    var paidByUserId: UUID?
+}

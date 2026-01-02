@@ -33,7 +33,7 @@ struct LoginView: View {
                         Text("SVS Mitarbeiter-App")
                             .font(.title3.weight(.semibold))
 
-                        Text("Mitarbeiter auswählen und mit PIN anmelden")
+                        Text("Account auswählen und mit PIN anmelden")
                             .font(.footnote)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)

@@ -20,7 +20,11 @@ class AppState: ObservableObject {
         didSet { saveTasks() }
     }
     @Published var uiErrorMessage: String? = nil
-
+    
+    @Published var commissions: [CommissionEntry] {
+        didSet { saveCommissions() }
+    }
+    
     // Session: keep user logged in across app launches
     @Published var sessionUserId: UUID? = nil {
         didSet {
@@ -75,6 +79,13 @@ class AppState: ObservableObject {
             self.leaveRequests = decoded
         } else {
             self.leaveRequests = []
+        }
+        
+        if let data = UserDefaults.standard.data(forKey: "commissions"),
+           let decoded = try? JSONDecoder().decode([CommissionEntry].self, from: data) {
+            self.commissions = decoded
+        } else {
+            self.commissions = []
         }
 
         // Tasks laden
@@ -412,5 +423,90 @@ class AppState: ObservableObject {
     func availableVacationDaysForRequests(for user: User, excludingRequestId: UUID? = nil) -> Int {
         let reserved = reservedVacationDays(for: user, excludingRequestId: excludingRequestId)
         return max(user.annualLeaveDays - reserved, 0)
+    }
+    
+    private func saveCommissions() {
+        if let data = try? JSONEncoder().encode(commissions) {
+            UserDefaults.standard.set(data, forKey: "commissions")
+        }
+    }
+    
+    func currencyString(_ amount: Decimal) -> String {
+        let nf = NumberFormatter()
+        nf.numberStyle = .currency
+        nf.currencyCode = "EUR"
+        nf.locale = Locale(identifier: "de_DE")
+        return nf.string(from: amount as NSDecimalNumber) ?? "€\(amount)"
+    }
+    
+    func createCommission(recipientName: String,
+                          recipientAddress: String,
+                          amountEUR: Decimal,
+                          payoutMethod: PayoutMethod,
+                          payoutTarget: String) {
+        guard let creator = currentUser else { return }
+        guard let admin = users.first(where: { $0.role == .admin }) else { return }
+
+        let normalizedTarget: String = {
+            switch payoutMethod {
+            case .paypal:
+                return payoutTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+            case .iban:
+                return payoutTarget
+                    .replacingOccurrences(of: " ", with: "")
+                    .uppercased()
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }()
+
+        let entry = CommissionEntry(
+            id: UUID(),
+            recipientName: recipientName.trimmingCharacters(in: .whitespacesAndNewlines),
+            recipientAddress: recipientAddress.trimmingCharacters(in: .whitespacesAndNewlines),
+            amountEUR: amountEUR,
+            payoutMethod: payoutMethod,
+            payoutTarget: normalizedTarget,
+            status: .open,
+            createdAt: Date(),
+            createdByUserId: creator.id,
+            paidAt: nil,
+            paidByUserId: nil
+        )
+
+        commissions.append(entry)
+
+        // Task beim Admin erzeugen
+        let amountString = currencyString(amountEUR)
+        var details = "Empfänger: \(entry.recipientName)\n"
+        details += "Adresse: \(entry.recipientAddress)\n"
+        details += "Betrag: \(amountString)\n"
+        details += "Auszahlung: \(entry.payoutMethod.rawValue) – \(entry.payoutTarget)\n"
+        details += "Gemeldet von: \(creator.name)\n"
+
+        createTask(
+            title: "Provision zahlen – \(entry.recipientName)",
+            details: details,
+            dueDate: nil,
+            assignedUser: admin,
+            creator: creator
+        )
+    }
+    
+    func commissionHistory(for user: User) -> [CommissionEntry] {
+        commissions
+            .filter { $0.createdByUserId == user.id }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func allCommissionHistory() -> [CommissionEntry] {
+        commissions.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func markCommissionPaid(_ entry: CommissionEntry) {
+        guard let admin = currentUser, admin.role == .admin else { return }
+        guard let idx = commissions.firstIndex(where: { $0.id == entry.id }) else { return }
+        commissions[idx].status = .paid
+        commissions[idx].paidAt = Date()
+        commissions[idx].paidByUserId = admin.id
     }
 }

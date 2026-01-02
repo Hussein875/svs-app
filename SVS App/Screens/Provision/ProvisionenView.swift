@@ -4,11 +4,6 @@ import SwiftUI
 struct ProvisionenView: View {
     @EnvironmentObject var appState: AppState
 
-    private enum PayoutMethod: String, CaseIterable, Identifiable {
-        case paypal = "PayPal"
-        case iban = "IBAN"
-        var id: String { rawValue }
-    }
 
     // MARK: - Input
 
@@ -32,9 +27,6 @@ struct ProvisionenView: View {
 
     // MARK: - Derived
 
-    private var adminUser: User? {
-        appState.users.first(where: { $0.role == .admin })
-    }
 
     private var parsedAmount: Decimal? {
         let trimmed = amountText
@@ -139,7 +131,7 @@ struct ProvisionenView: View {
                                     .foregroundColor(.secondary)
 
                                 Picker("Auszahlung", selection: $payoutMethod) {
-                                    ForEach(PayoutMethod.allCases) { m in
+                                    ForEach(PayoutMethod.allCases, id: \.self) { m in
                                         Text(m.rawValue).tag(m)
                                     }
                                 }
@@ -191,22 +183,22 @@ struct ProvisionenView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(isValid ? Color.primary.opacity(0.10) : Color.primary.opacity(0.06))
-                        )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color(.secondaryLabel))
+                    .foregroundColor(.white)
                     .disabled(!isValid)
                     .padding(.horizontal, 18)
                 }
-                .padding(.top, 2)
+                .padding(.top, 0)
             }
             .background(Color(.systemGroupedBackground))
             .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Fertig") { focusedField = nil }
+                if focusedField != nil {
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Fertig") { focusedField = nil }
+                    }
                 }
             }
             .onChange(of: customerName) { _, _ in clearInlineError() }
@@ -227,20 +219,16 @@ struct ProvisionenView: View {
             }
         }
         .padding(.horizontal, 18)
-        .padding(.top, 8)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
     }
-
     // MARK: - Actions
 
     private func submit() {
         clearInlineError()
 
-        guard let current = appState.currentUser else {
+        guard appState.currentUser != nil else {
             showError("Bitte erneut anmelden.")
-            return
-        }
-        guard let admin = adminUser else {
-            showError("Kein Admin-Benutzer gefunden.")
             return
         }
         guard let amount = parsedAmount, amount > 0 else {
@@ -261,7 +249,7 @@ struct ProvisionenView: View {
         }
 
         let payoutLine: String
-        switch payoutMethod {
+        switch payoutMethod{
         case .paypal:
             if paypalAddress.trimmed.isEmpty {
                 showError("Bitte eine PayPal-Adresse eintragen.")
@@ -282,18 +270,12 @@ struct ProvisionenView: View {
 
         let amountString = currencyString(amount)
 
-        var details = "Kunde: \(customerName.trimmed)\n"
-        details += "Adresse: \(customerAddress.trimmed)\n"
-        details += "Provision: \(amountString)\n"
-        details += "Auszahlung: \(payoutLine)\n"
-        details += "Angefragt von: \(current.name)\n"
-
-        appState.createTask(
-            title: "Provision zahlen – \(customerName.trimmed)",
-            details: details,
-            dueDate: nil,
-            assignedUser: admin,
-            creator: current
+        appState.createCommission(
+            recipientName: customerName,
+            recipientAddress: customerAddress,
+            amountEUR: amount,
+            payoutMethod: payoutMethod,
+            payoutTarget: (payoutMethod == .paypal ? paypalAddress : normalizedIBAN(iban))
         )
 
         appState.showToast(.success, "Provision gesendet")
