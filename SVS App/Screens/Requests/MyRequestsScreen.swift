@@ -406,6 +406,8 @@ struct NewLeaveRequestView: View {
             return "Urlaub beantragen"
         case .sick:
             return "Krankheit melden"
+        case .onCallSaturday:
+            return "Samstag beantragen"
         }
     }
 
@@ -415,6 +417,8 @@ struct NewLeaveRequestView: View {
             return "Urlaubsanträge müssen genehmigt werden."
         case .sick:
             return "Krankheit wird direkt eingetragen."
+        case .onCallSaturday:
+            return "Samstaganträge werden nicht genehmigt."
         }
     }
 

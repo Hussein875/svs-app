@@ -239,6 +239,8 @@ class AppState: ObservableObject {
                 }
             case .vacation:
                 uiErrorMessage = "Dieser Zeitraum überschneidet sich mit einem bestehenden Urlaubsantrag."
+            case .onCallSaturday:
+                uiErrorMessage = "Samstag bereits vergeben."
             }
             return false
         }
@@ -271,8 +273,10 @@ class AppState: ObservableObject {
         let successText: String
         if type == .sick {
             successText = "Krankmeldung erfolgreich gespeichert."
-        } else {
+        } else if type == .vacation {
             successText = (initialStatus == .approved) ? "Urlaub erfolgreich eingetragen." : "Urlaubsantrag erfolgreich erstellt."
+        } else {
+            successText = "Samstag erfolgreich vergeben."
         }
         showToast(.success, successText)
         uiErrorMessage = nil

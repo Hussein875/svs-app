@@ -17,6 +17,7 @@ enum UserRole: String, Codable {
 enum LeaveType: String, Codable {
     case vacation = "Urlaub"
     case sick = "Krankheit"
+    case onCallSaturday = "Bereitschaft"
 }
 
 enum LeaveStatus: String, CaseIterable, Codable {
