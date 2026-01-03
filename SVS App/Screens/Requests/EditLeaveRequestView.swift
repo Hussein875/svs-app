@@ -39,7 +39,16 @@ struct EditLeaveRequestView: View {
     }
 
     private var canEdit: Bool {
-        appState.canEditOrDelete(request, by: appState.currentUser)
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let requestDay = cal.startOfDay(for: request.startDate)
+
+        if request.type == .onCallSaturday {
+            // Samstags-Bereitschaft ist sofort genehmigt, soll aber bis zum Termin editierbar bleiben.
+            return requestDay >= today
+        }
+
+        return appState.canEditOrDelete(request, by: appState.currentUser)
     }
 
     private var hasChanges: Bool {
@@ -48,7 +57,14 @@ struct EditLeaveRequestView: View {
     }
 
     private var typeIcon: String {
-        request.type == .sick ? "cross.case" : "beach.umbrella"
+        switch request.type {
+        case .vacation:
+            return "beach.umbrella"
+        case .sick:
+            return "cross.case"
+        case .onCallSaturday:
+            return "person.badge.clock"
+        }
     }
 
     var body: some View {
@@ -68,7 +84,6 @@ struct EditLeaveRequestView: View {
             }
             // type is read-only here; no onChange needed
             .onAppear {
-                if request.type == .sick { request.status = .approved }
                 originalRequest = request
             }
             .alert("Antrag wirklich löschen?", isPresented: $showDeleteConfirm) {
@@ -131,7 +146,7 @@ struct EditLeaveRequestView: View {
 
                 Spacer()
 
-                if request.type != .sick {
+                if request.type != .sick && request.type != .onCallSaturday {
                     statusBadgeView(request.status)
                 }
             }
@@ -154,7 +169,9 @@ struct EditLeaveRequestView: View {
             Text("Zeitraum")
         } footer: {
             if !canEdit {
-                Text("Dieser Antrag wurde bereits entschieden und kann nicht mehr bearbeitet werden.")
+                Text(request.type == .onCallSaturday
+                     ? "Diese Bereitschaft liegt in der Vergangenheit und kann nicht mehr bearbeitet werden."
+                     : "Dieser Antrag wurde bereits entschieden und kann nicht mehr bearbeitet werden.")
             }
         }
     }

@@ -882,6 +882,33 @@ struct AdminOnCallSaturdaysScreen: View {
             .sorted { $0.startDate < $1.startDate }
     }
 
+    private var onCallCountsByUser: [(user: User, count: Int)] {
+        let cal = Calendar.current
+        let currentYear = cal.component(.year, from: Date())
+
+        // Count ONLY approved on-call Saturdays in the current year
+        let counts: [UUID: Int] = appState.leaveRequests
+            .filter { $0.type == .onCallSaturday && $0.status == .approved }
+            .filter { cal.component(.year, from: $0.startDate) == currentYear }
+            .reduce(into: [:]) { partial, req in
+                partial[req.user.id, default: 0] += 1
+            }
+
+        let eligible = appState.users
+            .filter { $0.role == .admin || $0.role == .expert }
+
+        return eligible
+            .map { ($0, counts[$0.id] ?? 0) }
+            .sorted { lhs, rhs in
+                if lhs.1 == rhs.1 { return lhs.0.name.lowercased() < rhs.0.name.lowercased() }
+                return lhs.1 > rhs.1
+            }
+    }
+
+    private var totalOnCallCount: Int {
+        onCallCountsByUser.reduce(0) { $0 + $1.count }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
@@ -903,6 +930,57 @@ struct AdminOnCallSaturdaysScreen: View {
             }
             .padding(.horizontal, 18)
             .padding(.top, 8)
+
+            // Übersicht: Counts pro Mitarbeiter
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Übersicht")
+                        .font(.headline)
+
+                    Spacer()
+
+                    Text("Gesamt: \(totalOnCallCount)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 18)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(onCallCountsByUser, id: \.user.id) { item in
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(item.user.color)
+                                    .frame(width: 10, height: 10)
+
+                                Text(item.user.name)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.primary)
+
+                                Text("\(item.count)")
+                                    .font(.caption2.weight(.bold))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        Capsule().fill(Color(.secondarySystemBackground))
+                                    )
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(Color(.secondarySystemBackground))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 18)
+                }
+            }
+            .padding(.top, 4)
 
             List {
                 if upcomingOnCalls.isEmpty {

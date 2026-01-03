@@ -39,6 +39,17 @@ struct MyRequestsScreen: View {
         return (pending, approved, rejected)
     }
 
+    private func canEditOnCall(_ r: LeaveRequest) -> Bool {
+        guard r.type == .onCallSaturday else { return false }
+        guard let currentUser = appState.currentUser else { return false }
+        // Only allow editing for future (or today) entries
+        let day = Calendar.current.startOfDay(for: r.startDate)
+        guard day >= todayStart else { return false }
+        // Admin can edit all; otherwise only the owner can edit
+        if currentUser.role == .admin { return true }
+        return (currentUser.role == .expert) && (r.user.id == currentUser.id)
+    }
+
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
@@ -101,12 +112,21 @@ struct MyRequestsScreen: View {
                                 } else {
                                     ForEach(currentRequests) { r in
                                         MyLeaveRequestCard(request: r) {
+                                            // Samstags-Bereitschaft soll nicht bearbeitet werden
+                                            guard r.type != .onCallSaturday else { return }
                                             if appState.canEditOrDelete(r, by: appState.currentUser) {
                                                 editingRequest = r
                                             }
                                         }
                                         .swipeActions {
-                                            if appState.canEditOrDelete(r, by: appState.currentUser) {
+                                            // Für Samstags-Bereitschaft: nur Löschen (kein Bearbeiten)
+                                            if r.type == .onCallSaturday {
+                                                Button(role: .destructive) {
+                                                    appState.deleteLeaveRequest(r)
+                                                } label: {
+                                                    Label("Löschen", systemImage: "trash")
+                                                }
+                                            } else if appState.canEditOrDelete(r, by: appState.currentUser) {
                                                 Button {
                                                     editingRequest = r
                                                 } label: {
@@ -191,6 +211,7 @@ struct PastRequestsScreen: View {
         case all = "Alle"
         case vacation = "Urlaub"
         case sick = "Krankheit"
+        case onCallSaturday = "Bereitschaft"
         var id: String { rawValue }
     }
 
@@ -215,6 +236,8 @@ struct PastRequestsScreen: View {
                     return r.type == .vacation
                 case .sick:
                     return r.type == .sick
+                case .onCallSaturday:
+                    return r.type == .onCallSaturday
                 }
             }
             .filter { r in
@@ -268,7 +291,14 @@ struct PastRequestsScreen: View {
                                 }
                             }
                             .swipeActions {
-                                if appState.canEditOrDelete(r, by: appState.currentUser) {
+                                // Für Samstags-Bereitschaft: nur Löschen (kein Bearbeiten)
+                                if r.type == .onCallSaturday {
+                                    Button(role: .destructive) {
+                                        appState.deleteLeaveRequest(r)
+                                    } label: {
+                                        Label("Löschen", systemImage: "trash")
+                                    }
+                                } else if appState.canEditOrDelete(r, by: appState.currentUser) {
                                     Button {
                                         editingRequest = r
                                     } label: {
@@ -348,7 +378,13 @@ private struct MyLeaveRequestCard: View {
                     }
 
                     HStack(spacing: 8) {
-                        Image(systemName: request.type == .sick ? "cross.case" : "beach.umbrella")
+                        Image(systemName: {
+                            switch request.type {
+                            case .vacation: return "beach.umbrella"
+                            case .sick: return "cross.case"
+                            case .onCallSaturday: return "person.badge.clock"
+                            }
+                        }())
                             .font(.caption)
                             .foregroundColor(.secondary)
 
@@ -375,7 +411,12 @@ private struct MyLeaveRequestCard: View {
         )
         .shadow(color: Color.black.opacity(0.06), radius: 10, x: 0, y: 6)
         .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
+        .onTapGesture {
+            // Samstags-Bereitschaft soll nicht per Tap geöffnet werden.
+            // Bearbeiten/Löschen erfolgt dort ausschließlich über Wischen (Swipe Actions).
+            guard request.type != .onCallSaturday else { return }
+            onTap()
+        }
     }
 }
 
@@ -399,6 +440,7 @@ struct NewLeaveRequestView: View {
     @State private var selectedUserId: UUID? = nil
     @State private var approveImmediately: Bool = true
     @State private var inlineError: String? = nil
+    @State private var didLoadInitialValues: Bool = false
 
     private var buttonTitle: String {
         switch selectedType {
@@ -407,7 +449,7 @@ struct NewLeaveRequestView: View {
         case .sick:
             return "Krankheit melden"
         case .onCallSaturday:
-            return "Samstag beantragen"
+            return "Samstags-Bereitschaft eintragen"
         }
     }
 
@@ -418,7 +460,7 @@ struct NewLeaveRequestView: View {
         case .sick:
             return "Krankheit wird direkt eingetragen."
         case .onCallSaturday:
-            return "Samstaganträge werden nicht genehmigt."
+            return "Bereitschaft am Samstag wird direkt eingetragen."
         }
     }
 
@@ -438,6 +480,64 @@ struct NewLeaveRequestView: View {
         }
         // Default: aktueller User
         return appState.currentUser
+    }
+
+    // MARK: - Samstags-Bereitschaft Helpers
+
+    private var canRequestSaturdayOnCall: Bool {
+        // Sachverständige + Admins dürfen Samstags-Bereitschaft eintragen
+        guard let role = appState.currentUser?.role else { return false }
+        return role == .admin || role == .expert
+    }
+
+    private var eligibleSaturdayUsers: [User] {
+        // Nur Admins und Sachverständige auswählbar
+        appState.users.filter { $0.role == .admin || $0.role == .expert }
+    }
+
+    private var takenOnCallSaturdays: Set<Date> {
+        let cal = Calendar.current
+        let all = appState.leaveRequests
+            .filter { $0.type == .onCallSaturday }
+            .filter { $0.status == .approved }
+        return Set(all.map { cal.startOfDay(for: $0.startDate) })
+    }
+
+    private var upcomingFreeSaturdays: [Date] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var result: [Date] = []
+        var d = today
+
+        // Next 52 weeks max (enough for planning) and skip taken Saturdays
+        while result.count < 52 {
+            let weekday = cal.component(.weekday, from: d)
+            if weekday == 7 { // Saturday (1=Sunday ... 7=Saturday)
+                let day = cal.startOfDay(for: d)
+                if !takenOnCallSaturdays.contains(day) {
+                    result.append(day)
+                }
+            }
+            d = cal.date(byAdding: .day, value: 1, to: d) ?? d
+        }
+        return result
+    }
+
+    private var saturdayPickerOptions: [Date] {
+        // Prevent Picker invalid-tag warning by ensuring selection is always present
+        let cal = Calendar.current
+        let normalizedStart = cal.startOfDay(for: startDate)
+        var options = upcomingFreeSaturdays
+        if !options.contains(normalizedStart) {
+            options.append(normalizedStart)
+        }
+        return Array(Set(options)).sorted(by: <)
+    }
+
+    private var isSelectedSaturdayFree: Bool {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: startDate)
+        return !takenOnCallSaturdays.contains(day)
     }
 
     var body: some View {
@@ -468,7 +568,7 @@ struct NewLeaveRequestView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(user.name)
                                     .font(.subheadline.weight(.semibold))
-                                Text("stellt einen neuen Abwesenheitsantrag.")
+                                Text(selectedType == .onCallSaturday ? "trägt eine Samstags-Bereitschaft ein." : "stellt einen neuen Abwesenheitsantrag.")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -489,40 +589,11 @@ struct NewLeaveRequestView: View {
                         Spacer()
                     }
                 }
-
-                // Admin: Mitarbeiter-Auswahl
-                if isAdmin {
-                    Section(header: Text("Mitarbeiter")) {
-                        Picker("Für", selection: Binding(
-                            get: { selectedUserId ?? appState.currentUser?.id },
-                            set: { selectedUserId = $0 }
-                        )) {
-                            ForEach(appState.users) { u in
-                                Text(u.name).tag(Optional(u.id))
-                            }
-                        }
-                        .pickerStyle(.menu)
-                    }
-                }
-
-    // Zeitraum
-    Section(header: Text("Zeitraum")) {
-        DatePicker("Von", selection: $startDate, displayedComponents: .date)
-            .datePickerStyle(.compact)
-            .onChange(of: startDate) { newStart in
-                if endDate < newStart {
-                    endDate = newStart
-                }
-            }
-
-        DatePicker("Bis", selection: $endDate, in: startDate...Date.distantFuture, displayedComponents: .date)
-            .datePickerStyle(.compact)
-    }
-
+                
                 // Art der Abwesenheit
-                Section(header: Text("Art der Abwesenheit")) {
-                    // Nur Urlaub und Krankheit zur Auswahl anbieten
-                    let allowedTypes: [LeaveType] = [.vacation, .sick]
+                Section(header: Text("Art")) {
+                    // Standard: Urlaub + Krankheit. Zusätzlich: Samstags-Bereitschaft für Sachverständige/Admins.
+                    let allowedTypes: [LeaveType] = canRequestSaturdayOnCall ? [.vacation, .sick, .onCallSaturday] : [.vacation, .sick]
 
                     Picker("Art", selection: $selectedType) {
                         ForEach(allowedTypes, id: \.self) { type in
@@ -542,6 +613,64 @@ struct NewLeaveRequestView: View {
                     }
                 }
 
+                // Admin: Mitarbeiter-Auswahl
+                if isAdmin {
+                    Section(header: Text("Mitarbeiter")) {
+                        Picker("Für", selection: Binding(
+                            get: { selectedUserId ?? appState.currentUser?.id },
+                            set: { selectedUserId = $0 }
+                        )) {
+                            ForEach(selectedType == .onCallSaturday ? eligibleSaturdayUsers : appState.users) { u in
+                                Text(u.name).tag(Optional(u.id))
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                }
+
+                // Zeitraum / Samstag
+                if selectedType == .onCallSaturday {
+                    Section(header: Text("Samstag"), footer: Text("Belegte Samstage sind nicht auswählbar.")) {
+                        Picker("Datum", selection: $startDate) {
+                            ForEach(saturdayPickerOptions, id: \.self) { d in
+                                Text(d.formatted(date: .abbreviated, time: .omitted)).tag(d)
+                            }
+                        }
+                        .pickerStyle(.navigationLink)
+                        .onAppear {
+                            // Ensure selection is start-of-day so it matches the tags
+                            startDate = Calendar.current.startOfDay(for: startDate)
+                            endDate = Calendar.current.startOfDay(for: endDate)
+                        }
+                        // For on-call Saturdays we keep start=end
+                        // (endDate is not used for this type but kept consistent)
+                        .onChange(of: startDate) { newValue in
+                            let day = Calendar.current.startOfDay(for: newValue)
+                            startDate = day
+                            endDate = day
+                        }
+
+                        if !isSelectedSaturdayFree {
+                            Text("Dieser Samstag ist bereits vergeben.")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                } else {
+                    Section(header: Text("Zeitraum")) {
+                        DatePicker("Von", selection: $startDate, displayedComponents: .date)
+                            .datePickerStyle(.compact)
+                            .onChange(of: startDate) { newStart in
+                                if endDate < newStart {
+                                    endDate = newStart
+                                }
+                            }
+
+                        DatePicker("Bis", selection: $endDate, in: startDate...Date.distantFuture, displayedComponents: .date)
+                            .datePickerStyle(.compact)
+                    }
+                }
+
                 // Aktion
                 Section {
                     Button {
@@ -550,11 +679,33 @@ struct NewLeaveRequestView: View {
                             return
                         }
 
-                        let ok = appState.createLeaveRequest(start: startDate,
-                                                             end: endDate,
-                                                             type: selectedType,
-                                                             for: targetUser,
-                                                             approveImmediately: (selectedType == .vacation) ? (isAdmin && approveImmediately) : false)
+                        if selectedType == .onCallSaturday {
+                            // Normalize to start-of-day and ensure the Saturday is free
+                            let day = Calendar.current.startOfDay(for: startDate)
+                            startDate = day
+                            endDate = day
+
+                            guard isSelectedSaturdayFree else {
+                                inlineError = "Dieser Samstag ist bereits vergeben. Bitte einen anderen Samstag wählen."
+                                return
+                            }
+
+                            // Optional: enforce eligibility at runtime
+                            guard targetUser.role == .admin || targetUser.role == .expert else {
+                                inlineError = "Für Samstags-Bereitschaft können nur Admins oder Sachverständige ausgewählt werden."
+                                return
+                            }
+                        }
+
+                        let ok = appState.createLeaveRequest(
+                            start: startDate,
+                            end: endDate,
+                            type: selectedType,
+                            for: targetUser,
+                            approveImmediately: (selectedType == .vacation)
+                                ? (isAdmin && approveImmediately)
+                                : (selectedType == .onCallSaturday ? true : false)
+                        )
                         if ok {
                             inlineError = nil
                             dismiss()
@@ -563,7 +714,7 @@ struct NewLeaveRequestView: View {
                         }
                     } label: {
                         HStack(spacing: 8) {
-                            Image(systemName: selectedType == .vacation ? "paperplane.fill" : "cross.case.fill")
+                            Image(systemName: selectedType == .vacation ? "paperplane.fill" : (selectedType == .sick ? "cross.case.fill" : "person.badge.clock"))
                                 .font(.system(size: 14, weight: .semibold))
                             Text(buttonTitle)
                                 .font(.subheadline.weight(.semibold))
@@ -596,17 +747,45 @@ struct NewLeaveRequestView: View {
                 if selectedType == .sick {
                     approveImmediately = false
                 }
+                if selectedType == .onCallSaturday {
+                    // Pick the first free Saturday by default
+                    if let first = upcomingFreeSaturdays.first {
+                        let day = Calendar.current.startOfDay(for: first)
+                        startDate = day
+                        endDate = day
+                    } else {
+                        // Fallback: normalize current
+                        let day = Calendar.current.startOfDay(for: startDate)
+                        startDate = day
+                        endDate = day
+                    }
+                    approveImmediately = false
+                }
             }
         }
         .navigationTitle("Neuer Antrag")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            // With `.pickerStyle(.navigationLink)` SwiftUI may re-trigger `onAppear`
+            // when returning from the picker screen. Guard to avoid resetting selections.
+            guard !didLoadInitialValues else { return }
+            didLoadInitialValues = true
+
             if selectedUserId == nil {
                 selectedUserId = preselectedUserId ?? appState.currentUser?.id
             }
             // Bei Krankheit macht "Direkt genehmigen" keinen Sinn
             if selectedType == .sick {
                 approveImmediately = false
+            }
+            // Normalize initial dates
+            startDate = Calendar.current.startOfDay(for: startDate)
+            endDate = Calendar.current.startOfDay(for: endDate)
+
+            // If the UI starts on on-call, ensure we start with a free Saturday.
+            if selectedType == .onCallSaturday, let first = upcomingFreeSaturdays.first {
+                startDate = Calendar.current.startOfDay(for: first)
+                endDate = startDate
             }
         }
     }
