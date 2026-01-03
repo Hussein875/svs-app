@@ -44,8 +44,7 @@ struct TasksView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Aufgaben")
                         .font(.largeTitle.weight(.bold))
@@ -64,12 +63,36 @@ struct TasksView: View {
                     .accessibilityLabel("Neue Aufgabe")
                 }
                 .padding(.horizontal, 18)
-                .padding(.top, 8)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+                // Übersicht
+                if let _ = currentUser {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Meine offenen Aufgaben")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+
+                            Text("\(myOpenTasks.count)")
+                                .font(.title2.weight(.bold))
+                        }
+
+                        Spacer()
+                    }
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 6)
+                }
 
                 Group {
                     // Leer, wenn wirklich gar keine Aufgaben existieren
                     if myOpenTasks.isEmpty && otherOpenTasks.isEmpty && myDoneTasks.isEmpty && otherDoneTasks.isEmpty {
-                        VStack(spacing: 12) {
+                        VStack(spacing: 16) {
                             Text("Noch keine Aufgaben")
                                 .font(.title3)
                                 .fontWeight(.semibold)
@@ -83,10 +106,11 @@ struct TasksView: View {
                         .background(Color(.systemGroupedBackground))
                     } else {
                         List {
+                            
                             if let user = currentUser, user.role == .admin {
                                 // Admin: Meine offenen Aufgaben
                                 if !myOpenTasks.isEmpty {
-                                    Section(header: Text("Meine Aufgaben – Offen")) {
+                                    Section(header: Text("Meine Aufgaben – Offen").textCase(nil)) {
                                         ForEach(myOpenTasks) { task in
                                             TaskRow(
                                                 task: task,
@@ -102,7 +126,7 @@ struct TasksView: View {
 
                                 // Admin: Offene Aufgaben anderer
                                 if !otherOpenTasks.isEmpty {
-                                    Section(header: Text("Andere Aufgaben – Offen")) {
+                                    Section(header: Text("Andere Aufgaben – Offen").textCase(nil)) {
                                         ForEach(otherOpenTasks) { task in
                                             TaskRow(
                                                 task: task,
@@ -133,7 +157,7 @@ struct TasksView: View {
                             } else {
                                 // Mitarbeiter / Sachverständige: nur eigene offene Aufgaben
                                 if !myOpenTasks.isEmpty {
-                                    Section(header: Text("Offen")) {
+                                    Section(header: Text("Offen").textCase(nil)) {
                                         ForEach(myOpenTasks) { task in
                                             TaskRow(
                                                 task: task,
@@ -163,6 +187,7 @@ struct TasksView: View {
                                 }
                             }
                         }
+                        .padding(.top, 6)
                         .listStyle(.insetGrouped)
                         .scrollContentBackground(.hidden)
                         .background(Color(.systemGroupedBackground))
@@ -178,7 +203,6 @@ struct TasksView: View {
                 NewTaskView(mode: .edit, task: task)
                     .environmentObject(appState)
             }
-        }
     }
 }
 
@@ -208,7 +232,7 @@ struct CompletedTasksView: View {
         List {
             if let user = currentUser, user.role == .admin {
                 if !myDoneTasks.isEmpty {
-                    Section(header: Text("Meine erledigten Aufgaben")) {
+                    Section(header: Text("Meine erledigten Aufgaben").textCase(nil)) {
                         ForEach(myDoneTasks) { task in
                             TaskRow(
                                 task: task,
@@ -223,7 +247,7 @@ struct CompletedTasksView: View {
                 }
 
                 if !otherDoneTasks.isEmpty {
-                    Section(header: Text("Erledigte Aufgaben anderer")) {
+                    Section(header: Text("Erledigte Aufgaben anderer").textCase(nil)) {
                         ForEach(otherDoneTasks) { task in
                             TaskRow(
                                 task: task,
@@ -243,7 +267,7 @@ struct CompletedTasksView: View {
                 }
             } else {
                 if !myDoneTasks.isEmpty {
-                    Section(header: Text("Erledigte Aufgaben")) {
+                    Section(header: Text("Erledigte Aufgaben").textCase(nil)) {
                         ForEach(myDoneTasks) { task in
                             TaskRow(
                                 task: task,
@@ -261,11 +285,12 @@ struct CompletedTasksView: View {
                 }
             }
         }
-        .navigationTitle("Erledigte Aufgaben")
         .sheet(item: $editingTask) { task in
             NewTaskView(mode: .edit, task: task)
                 .environmentObject(appState)
         }
+        .navigationTitle("Erledigte Aufgaben")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -280,7 +305,7 @@ struct TaskRow: View {
     let onDelete: () -> Void
 
     var body: some View {
-        HStack {
+        HStack(spacing: 12) {
             Button(action: onToggleStatus) {
                 Image(systemName: task.status == .done ? "checkmark.circle.fill" : "circle")
                     .foregroundColor(task.status == .done ? .green : .gray)
@@ -315,12 +340,20 @@ struct TaskRow: View {
 
             Spacer()
 
-            Menu {
-                Button("Bearbeiten", action: onEdit)
-                Button("Löschen", role: .destructive, action: onDelete)
+        }
+        .contentShape(Rectangle())
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+                onEdit()
             } label: {
-                Image(systemName: "ellipsis")
-                    .foregroundColor(.secondary)
+                Label("Bearbeiten", systemImage: "pencil")
+            }
+            .tint(.blue)
+
+            Button(role: .destructive) {
+                onDelete()
+            } label: {
+                Label("Löschen", systemImage: "trash")
             }
         }
     }
