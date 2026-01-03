@@ -23,6 +23,12 @@ struct MainView: View {
                 .tabItem {
                     Label("Meine Anträge", systemImage: "doc.text")
                 }
+            
+            // Für alle sichtbar
+            TasksView()
+                .tabItem {
+                    Label("Aufgaben", systemImage: "checklist")
+                }
 
             // Admin-spezifische Tabs
             if let user = appState.currentUser {
@@ -42,11 +48,7 @@ struct MainView: View {
                 }
             }
 
-            // Für alle sichtbar
-            TasksView()
-                .tabItem {
-                    Label("Aufgaben", systemImage: "checklist")
-                }
+
 
             DashboardView()
                 .tabItem {

@@ -44,7 +44,8 @@ struct TasksView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Aufgaben")
                         .font(.largeTitle.weight(.bold))
@@ -203,6 +204,8 @@ struct TasksView: View {
                 NewTaskView(mode: .edit, task: task)
                     .environmentObject(appState)
             }
+            .navigationBarHidden(true)
+        }
     }
 }
 
