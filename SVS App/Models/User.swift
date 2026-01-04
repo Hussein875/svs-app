@@ -8,7 +8,8 @@ import Foundation
 import SwiftUI
 
 struct User: Identifiable, Hashable, Codable {
-    let id: UUID
+    /// Firebase Auth UID für echte Nutzer. Für Einladungen (vor erstem Login): "invite:<email>"
+    let id: String
     var name: String
     var role: UserRole
     var colorName: String

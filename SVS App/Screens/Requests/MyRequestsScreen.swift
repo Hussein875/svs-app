@@ -12,7 +12,13 @@ struct MyRequestsScreen: View {
     @State private var editingRequest: LeaveRequest?
 
     private var myRequests: [LeaveRequest] {
-        appState.myRequests()
+        guard let me = appState.currentUser else { return [] }
+        let myEmail = me.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !myEmail.isEmpty else { return [] }
+
+        return appState.leaveRequests.filter {
+            $0.user.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == myEmail
+        }
     }
 
     private var todayStart: Date {
@@ -424,9 +430,9 @@ private struct MyLeaveRequestCard: View {
 
 struct NewLeaveRequestView: View {
 
-    private let preselectedUserId: UUID?
+    private let preselectedUserId: String?
 
-    init(preselectedUserId: UUID? = nil) {
+    init(preselectedUserId: String? = nil) {
         self.preselectedUserId = preselectedUserId
         _selectedUserId = State(initialValue: preselectedUserId)
     }
@@ -437,7 +443,7 @@ struct NewLeaveRequestView: View {
     @State private var startDate = Date()
     @State private var endDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
     @State private var selectedType: LeaveType = .vacation
-    @State private var selectedUserId: UUID? = nil
+    @State private var selectedUserId: String? = nil
     @State private var approveImmediately: Bool = true
     @State private var inlineError: String? = nil
     @State private var didLoadInitialValues: Bool = false
@@ -616,7 +622,7 @@ struct NewLeaveRequestView: View {
                 // Admin: Mitarbeiter-Auswahl
                 if isAdmin {
                     Section(header: Text("Mitarbeiter")) {
-                        Picker("Für", selection: Binding(
+                        Picker("Für", selection: Binding<String?>(
                             get: { selectedUserId ?? appState.currentUser?.id },
                             set: { selectedUserId = $0 }
                         )) {

@@ -13,7 +13,7 @@ struct Task: Identifiable, Codable, Equatable {
     var details: String
     var dueDate: Date?
     var status: TaskStatus
-    var assignedUserId: UUID
-    var creatorUserId: UUID
+    var assignedUserId: String
+    var creatorUserId: String
     var createdAt: Date
 }

@@ -31,29 +31,27 @@ struct MainView: View {
                 }
 
             // Admin-spezifische Tabs
-            if let user = appState.currentUser {
-            //    if user.role == .admin {
-                    AdminConsoleView()
-                        .tabItem {
-                            Label("Admin", systemImage: "shield.lefthalf.filled")
-                        }
-            //    }
-
-                // Provisionen nur für Admin & Sachverständige
-                if user.role == .admin || user.role == .expert {
-                    ProvisionenView()
-                        .tabItem {
-                            Label("Provisionen", systemImage: "eurosign")
-                        }
-                }
+            if appState.currentUser?.role == .admin {
+                AdminConsoleView()
+                    .tabItem {
+                        Label("Admin", systemImage: "shield.lefthalf.filled")
+                    }
             }
 
+            // Provisionen nur für Admin & Sachverständige
+            // if let user = appState.currentUser, user.role == .admin || user.role == .expert {
+            //     ProvisionenView()
+            //         .tabItem {
+            //             Label("Provisionen", systemImage: "eurosign")
+            //         }
+            // }
 
 
-            DashboardView()
-                .tabItem {
-                    Label("Dashboard", systemImage: "chart.bar.doc.horizontal")
-                }
+
+           // DashboardView()
+           //     .tabItem {
+           //         Label("Dashboard", systemImage: "chart.bar.doc.horizontal")
+           //     }
 
             // Menü Tab
             MenuView()
@@ -62,7 +60,7 @@ struct MainView: View {
                 }
         }
         .onAppear {
-            // Rename the system "More" tab when iOS collapses extra tabs.
+            // 1) UI-Kleinkram
             customizeMoreTab(title: "Mehr")
         }
     }

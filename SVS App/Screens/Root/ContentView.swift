@@ -10,6 +10,15 @@ struct ContentView: View {
             Group {
                 if appState.auth.user == nil {
                     LoginView()
+                } else if appState.currentUser == nil {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Profil wird geladen …")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemGroupedBackground))
                 } else {
                     MainView()
                 }

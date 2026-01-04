@@ -55,7 +55,7 @@ struct CommissionEntry: Identifiable, Codable, Equatable {
 
     // Audit
     var createdAt: Date
-    var createdByUserId: UUID
+    var createdByUserId: String
     var paidAt: Date?
-    var paidByUserId: UUID?
+    var paidByUserId: String?
 }

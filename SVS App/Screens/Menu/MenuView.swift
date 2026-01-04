@@ -49,8 +49,7 @@ import FirebaseAuth
                                 }
 
                                 // 2) Lokale Session/State bereinigen
-                                appState.currentUser = nil
-                                appState.sessionUserId = nil
+                                appState.signOut()
                             } label: {
                                 Label("Ausloggen", systemImage: "rectangle.portrait.and.arrow.right")
                             }

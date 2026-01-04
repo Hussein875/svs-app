@@ -18,9 +18,9 @@ struct LeaveRequest: Identifiable, Codable {
 
     // Audit
     var createdAt: Date
-    var createdByUserId: UUID
+    var createdByUserId: String
     var updatedAt: Date?
-    var updatedByUserId: UUID?
+    var updatedByUserId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, user, startDate, endDate, type, reason, status
@@ -40,9 +40,9 @@ struct LeaveRequest: Identifiable, Codable {
 
         // If missing, default to the user as creator and now as creation date
         createdAt = (try c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? Date()
-        createdByUserId = (try c.decodeIfPresent(UUID.self, forKey: .createdByUserId)) ?? user.id
+        createdByUserId = (try c.decodeIfPresent(String.self, forKey: .createdByUserId)) ?? user.id
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt)
-        updatedByUserId = try c.decodeIfPresent(UUID.self, forKey: .updatedByUserId)
+        updatedByUserId = try c.decodeIfPresent(String.self, forKey: .updatedByUserId)
     }
 
     init(id: UUID,
@@ -53,9 +53,9 @@ struct LeaveRequest: Identifiable, Codable {
          reason: String,
          status: LeaveStatus,
          createdAt: Date,
-         createdByUserId: UUID,
+         createdByUserId: String,
          updatedAt: Date? = nil,
-         updatedByUserId: UUID? = nil) {
+         updatedByUserId: String? = nil) {
         self.id = id
         self.user = user
         self.startDate = startDate

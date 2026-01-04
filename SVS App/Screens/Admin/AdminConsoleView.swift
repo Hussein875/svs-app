@@ -808,6 +808,19 @@ struct EditUserView: View {
     }
 }
 
+/**
+ Admin-Flow
+ 1.    Admin legt Mitarbeiter an
+ 2.    Cloud Function:
+ •    erstellt Firebase-Auth-User
+ •    speichert Profil in Firestore
+ 3.    App:
+ •    sendet Passwort-Reset
+ 4.    Mitarbeiter:
+ •    setzt eigenes Passwort
+ •    loggt sich ein
+ */
+
 struct AddUserView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
@@ -899,7 +912,7 @@ struct AdminOnCallSaturdaysScreen: View {
         let currentYear = cal.component(.year, from: Date())
 
         // Count ONLY approved on-call Saturdays in the current year
-        let counts: [UUID: Int] = appState.leaveRequests
+        let counts: [String: Int] = appState.leaveRequests
             .filter { $0.type == .onCallSaturday && $0.status == .approved }
             .filter { cal.component(.year, from: $0.startDate) == currentYear }
             .reduce(into: [:]) { partial, req in
@@ -1057,7 +1070,7 @@ struct NewOnCallSaturdayView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
 
-    @State private var selectedExpertId: UUID?
+    @State private var selectedExpertId: String?
     @State private var selectedSaturday: Date = Calendar.current.startOfDay(for: Date())
     @State private var inlineError: String?
 
@@ -1143,7 +1156,7 @@ struct NewOnCallSaturdayView: View {
                 }, set: { newVal in
                     selectedExpertId = newVal
                 })) {
-                    Text("Bitte auswählen").tag(UUID?.none)
+                    Text("Bitte auswählen").tag(String?.none)
                     ForEach(eligibleUsers) { u in
                         Text(u.name).tag(Optional(u.id))
                     }
@@ -1210,7 +1223,7 @@ struct EditOnCallSaturdayView: View {
     
     let existingRequest: LeaveRequest
     
-    @State private var selectedUserId: UUID?
+    @State private var selectedUserId: String?
     @State private var selectedSaturday: Date = Date()
     @State private var inlineError: String?
     @State private var didLoadInitialValues: Bool = false
@@ -1297,7 +1310,7 @@ struct EditOnCallSaturdayView: View {
                 }, set: { newVal in
                     selectedUserId = newVal
                 })) {
-                    Text("Bitte auswählen").tag(UUID?.none)
+                    Text("Bitte auswählen").tag(String?.none)
                     ForEach(eligibleUsers) { u in
                         Text(u.name).tag(Optional(u.id))
                     }
