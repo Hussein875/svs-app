@@ -722,6 +722,7 @@ struct EditUserView: View {
 
     @State private var showNewRequest: Bool = false
     @State private var showPinResetAlert: Bool = false
+    @State private var showLoginAlert: Bool = false
 
     private let availableColors: [String] = ["blue", "green", "orange", "purple", "red", "pink", "teal", "indigo", "yellow", "gray"]
 
@@ -736,17 +737,17 @@ struct EditUserView: View {
                 }
             }
 
-            Section(header: Text("Login")) {
-                TextField("PIN", text: binding(for: \.pin))
-                    .keyboardType(.numberPad)
+            Section(header: Text("Login"), footer: Text("Passwörter werden über Firebase Auth verwaltet.")) {
+                Text(user.email)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
 
                 Button {
-                    user.pin = "0000"
-                    showPinResetAlert = true
+                    appState.sendPasswordReset(to: user.email)
+                    showLoginAlert = true
                 } label: {
-                    Label("PIN auf 0000 setzen", systemImage: "key")
+                    Label("Passwort-Reset senden", systemImage: "envelope")
                 }
-                .font(.subheadline)
             }
 
             Section(header: Text("Urlaub")) {
@@ -792,10 +793,10 @@ struct EditUserView: View {
                     .environmentObject(appState)
             }
         }
-        .alert("PIN geändert", isPresented: $showPinResetAlert) {
+        .alert("Passwort-Reset", isPresented: $showLoginAlert) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text("Der PIN wurde auf 0000 gesetzt. Bitte speichern.")
+            Text("Wenn der Account existiert, wurde eine Passwort-Reset E-Mail an \(user.email) gesendet.")
         }
     }
 
@@ -812,8 +813,8 @@ struct AddUserView: View {
     @Environment(\.dismiss) var dismiss
 
     @State private var name: String = ""
+    @State private var email: String = ""
     @State private var role: UserRole = .employee
-    @State private var pin: String = ""
     @State private var annualLeaveDays: Int = 30
     @State private var colorName: String = "gray"
 
@@ -823,16 +824,15 @@ struct AddUserView: View {
         Form {
             Section(header: Text("Allgemein")) {
                 TextField("Name", text: $name)
+                TextField("E-Mail", text: $email)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
                 Picker("Rolle", selection: $role) {
                     Text("Admin").tag(UserRole.admin)
                     Text("Mitarbeiter").tag(UserRole.employee)
                     Text("Sachverständiger").tag(UserRole.expert)
                 }
-            }
-
-            Section(header: Text("Login")) {
-                TextField("PIN", text: $pin)
-                    .keyboardType(.numberPad)
             }
 
             Section(header: Text("Urlaub")) {
@@ -851,14 +851,26 @@ struct AddUserView: View {
 
             Section {
                 Button("Mitarbeiter erstellen") {
-                    appState.addUser(name: name,
-                                     role: role,
-                                     pin: pin,
-                                     colorName: colorName,
-                                     annualLeaveDays: annualLeaveDays)
-                    dismiss()
+                    let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    let cleanName  = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    _Concurrency.Task {
+                        await appState.adminCreateUserViaFunction(
+                            name: cleanName,
+                            email: cleanEmail,
+                            role: role,
+                            colorName: colorName,
+                            annualLeaveDays: annualLeaveDays
+                        )
+                        // Optional: Passwort-Reset senden (funktioniert nur, wenn der Auth-User existiert!)
+                        appState.sendPasswordReset(to: cleanEmail)
+                        dismiss()
+                    }
                 }
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || pin.isEmpty)
+                .disabled(
+                    name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
             }
         }
         .navigationTitle("Neuer Mitarbeiter")

@@ -7,8 +7,82 @@
 import Foundation
 import SwiftUI
 import Combine
+import FirebaseAuth
+import FirebaseFirestore
+import FirebaseFunctions
+
+
+struct UserProfile: Codable {
+    var name: String
+    var roleRaw: String
+    var colorName: String
+    var annualLeaveDays: Int
+    var email: String
+
+    init(name: String,
+         roleRaw: String,
+         colorName: String,
+         annualLeaveDays: Int,
+         email: String) {
+        self.name = name
+        self.roleRaw = roleRaw
+        self.colorName = colorName
+        self.annualLeaveDays = annualLeaveDays
+        self.email = email
+    }
+
+    init(from user: User) {
+        self.name = user.name
+        self.roleRaw = user.role.rawValue
+        self.colorName = user.colorName
+        self.annualLeaveDays = user.annualLeaveDays
+        self.email = user.email
+    }
+
+    init?(from data: [String: Any]) {
+        guard
+            let name = data["name"] as? String,
+            let roleRaw = data["roleRaw"] as? String,
+            let colorName = data["colorName"] as? String,
+            let annualLeaveDays = data["annualLeaveDays"] as? Int,
+            let email = data["email"] as? String
+        else { return nil }
+
+        self.name = name
+        self.roleRaw = roleRaw
+        self.colorName = colorName
+        self.annualLeaveDays = annualLeaveDays
+        self.email = email
+    }
+
+    func toDictionary() -> [String: Any] {
+        [
+            "name": name,
+            "roleRaw": roleRaw,
+            "colorName": colorName,
+            "annualLeaveDays": annualLeaveDays,
+            "email": email
+        ]
+    }
+
+    func toUser(id: UUID = UUID()) -> User {
+        User(
+            id: id,
+            name: name,
+            role: UserRole(rawValue: roleRaw) ?? .employee,
+            colorName: colorName,
+            annualLeaveDays: annualLeaveDays,
+            email: email
+        )
+    }
+}
 
 class AppState: ObservableObject {
+    private var cancellables = Set<AnyCancellable>()
+    private let db = Firestore.firestore()
+    
+    @Published var auth = AuthManager()
+    
     @Published var users: [User] {
         didSet { saveUsers() }
     }
@@ -63,12 +137,7 @@ class AppState: ObservableObject {
            let decoded = try? JSONDecoder().decode([User].self, from: data) {
             self.users = decoded
         } else {
-            self.users = [
-                User(id: UUID(), name: "Hussein", role: .admin,   pin: "1111", colorName: "blue",   annualLeaveDays: 30),
-                User(id: UUID(), name: "Ahmet",   role: .employee, pin: "2222", colorName: "green",  annualLeaveDays: 30),
-                User(id: UUID(), name: "Hadi",    role: .employee, pin: "3333", colorName: "orange", annualLeaveDays: 30),
-                User(id: UUID(), name: "Osama",   role: .employee, pin: "4444", colorName: "purple", annualLeaveDays: 30)
-            ]
+            self.users = []
         }
         self.currentUser = nil
 
@@ -112,10 +181,103 @@ class AppState: ObservableObject {
             self.sessionUserId = nil
         }
 
-        // Auto-Restore: wenn Session vorhanden, direkt einloggen
-        if let sid = self.sessionUserId,
-           let u = self.users.first(where: { $0.id == sid }) {
-            self.currentUser = u
+        // Firebase Auth -> Firestore Profil laden/anlegen (Quelle der Wahrheit für Profil-Daten)
+        auth.$user
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] fbUser in
+                guard let self else { return }
+
+                // Wenn ausgeloggt: lokalen User leeren + Session IDs zurücksetzen
+                guard let fbUser else {
+                    self.currentUser = nil
+                    self.sessionUserId = nil
+                    return
+                }
+
+                _Concurrency.Task { [weak self] in
+                    await self?.loadOrCreateProfile(for: fbUser)
+                }
+            }
+            .store(in: &cancellables)
+    }
+    
+    func sendPasswordReset(to email: String) {
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !cleanEmail.isEmpty else {
+            self.uiErrorMessage = "Bitte eine gültige E-Mail-Adresse angeben."
+            return
+        }
+
+        Auth.auth().sendPasswordReset(withEmail: cleanEmail) { [weak self] error in
+            DispatchQueue.main.async {
+                if let error = error {
+                    self?.uiErrorMessage = "Passwort-Reset fehlgeschlagen: \(error.localizedDescription)"
+                } else {
+                    self?.uiErrorMessage = nil
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func adminCreateUserViaFunction(name: String,
+                                    email: String,
+                                    role: UserRole,
+                                    colorName: String,
+                                    annualLeaveDays: Int) async {
+        let functions = Functions.functions(region: "us-central1")
+
+        do {
+            let result = try await functions.httpsCallable("adminCreateUserInvite").call([
+                "name": name,
+                "email": email,
+                "roleRaw": role.rawValue,
+                "colorName": colorName,
+                "annualLeaveDays": annualLeaveDays
+            ])
+
+            if let data = result.data as? [String: Any], (data["ok"] as? Bool) == true {
+                // Jetzt kann der Admin direkt Passwort-Reset senden (Firebase verschickt E-Mail)
+                sendPasswordReset(to: email)
+            }
+            self.uiErrorMessage = nil
+        } catch {
+            self.uiErrorMessage = "Cloud Function Fehler: \(error.localizedDescription)"
+        }
+    }
+    
+    @MainActor
+    func adminUpsertUserProfile(name: String,
+                               email: String,
+                               role: UserRole,
+                               colorName: String,
+                               annualLeaveDays: Int) async {
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let cleanName  = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleanEmail.isEmpty else {
+            self.uiErrorMessage = "Bitte eine gültige E-Mail-Adresse angeben."
+            return
+        }
+        guard !cleanName.isEmpty else {
+            self.uiErrorMessage = "Bitte einen Namen angeben."
+            return
+        }
+
+        let profile = UserProfile(
+            name: cleanName,
+            roleRaw: role.rawValue,
+            colorName: colorName,
+            annualLeaveDays: annualLeaveDays,
+            email: cleanEmail
+        )
+
+        do {
+            // Admin legt zunächst ein Invite an (Quelle: E-Mail). Beim ersten Login wird es nach users/<uid> übernommen.
+            try await db.collection("invites").document(cleanEmail).setData(profile.toDictionary(), merge: true)
+            self.uiErrorMessage = nil
+        } catch {
+            self.uiErrorMessage = "Profil konnte nicht gespeichert werden: \(error.localizedDescription)"
         }
     }
 
@@ -137,8 +299,15 @@ class AppState: ObservableObject {
         }
     }
 
-    func addUser(name: String, role: UserRole, pin: String, colorName: String, annualLeaveDays: Int) {
-        let newUser = User(id: UUID(), name: name, role: role, pin: pin, colorName: colorName, annualLeaveDays: annualLeaveDays)
+    func addUser(name: String, role: UserRole, colorName: String, annualLeaveDays: Int, email: String) {
+        let newUser = User(
+            id: UUID(),
+            name: name,
+            role: role,
+            colorName: colorName,
+            annualLeaveDays: annualLeaveDays,
+            email: email.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         users.append(newUser)
     }
 
@@ -512,5 +681,90 @@ class AppState: ObservableObject {
         commissions[idx].status = .paid
         commissions[idx].paidAt = Date()
         commissions[idx].paidByUserId = admin.id
+    }
+
+    // MARK: - Firestore User Profile
+
+    @MainActor
+    private func loadOrCreateProfile(for fbUser: FirebaseAuth.User) async {
+        let uid = fbUser.uid
+        let email = (fbUser.email ?? "").lowercased()
+        let docRef = db.collection("users").document(uid)
+        
+
+        do {
+            let snap = try await docRef.getDocument()
+
+            if snap.exists {
+                // Profil existiert -> in App laden
+                if let data = snap.data(), let profile = UserProfile(from: data) {
+                    // PIN kommt weiterhin aus der lokalen User-Liste (nur für UI/Komfort, nicht Cloud)
+                    let localId = users.first(where: { $0.email.lowercased() == profile.email.lowercased() })?.id ?? UUID()
+
+                    let mapped = profile.toUser(id: localId)
+                    self.currentUser = mapped
+                    self.sessionUserId = mapped.id
+                    self.lastUserId = mapped.id
+                    self.uiErrorMessage = nil
+                    self.upsertLocalUser(mapped)
+                    return
+                }
+            }
+            
+            let inviteRef = db.collection("invites").document(email)
+            let inviteSnap = try await inviteRef.getDocument()
+
+            if inviteSnap.exists, let data = inviteSnap.data(), let invited = UserProfile(from: data) {
+                try await docRef.setData(invited.toDictionary(), merge: true)
+                try await inviteRef.delete()
+
+                let mapped = invited.toUser(id: UUID())
+                self.currentUser = mapped
+                self.sessionUserId = mapped.id
+                self.lastUserId = mapped.id
+                self.uiErrorMessage = nil
+                return
+            }
+
+            // Profil fehlt oder konnte nicht decodiert werden -> aus lokaler Liste seed-en
+            if let seed = users.first(where: { $0.email.lowercased() == email }) {
+                let profile = UserProfile(from: seed)
+                try await docRef.setData(profile.toDictionary(), merge: true)
+
+                self.currentUser = seed
+                self.sessionUserId = seed.id
+                self.lastUserId = seed.id
+                self.uiErrorMessage = nil
+                self.upsertLocalUser(seed)
+            } else {
+                // Eingeloggt, aber kein lokales Seed-Profil vorhanden
+                let isBootstrapAdmin = (email.lowercased() == "hussein@sv-souleiman.de")
+                let fallback = UserProfile(
+                    name: fbUser.displayName ?? email,
+                    roleRaw: isBootstrapAdmin ? UserRole.admin.rawValue : UserRole.employee.rawValue,
+                    colorName: "blue",
+                    annualLeaveDays: 30,
+                    email: email
+                )
+                try await docRef.setData(fallback.toDictionary(), merge: true)
+
+                let mapped = fallback.toUser(id: UUID())
+                self.currentUser = mapped
+                self.sessionUserId = mapped.id
+                self.lastUserId = mapped.id
+                self.uiErrorMessage = isBootstrapAdmin ? nil : "Mitarbeiter-Profil wurde neu angelegt. Bitte im Admin-Bereich prüfen."
+                self.upsertLocalUser(mapped)
+            }
+        } catch {
+            self.uiErrorMessage = "Firestore Profil konnte nicht geladen werden: \(error.localizedDescription)"
+        }
+    }
+
+    private func upsertLocalUser(_ user: User) {
+        if let idx = users.firstIndex(where: { $0.email.lowercased() == user.email.lowercased() }) {
+            users[idx] = user
+        } else {
+            users.append(user)
+        }
     }
 }

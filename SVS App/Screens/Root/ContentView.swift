@@ -8,7 +8,7 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .top) {
             Group {
-                if appState.currentUser == nil {
+                if appState.auth.user == nil {
                     LoginView()
                 } else {
                     MainView()

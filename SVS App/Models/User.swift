@@ -11,9 +11,9 @@ struct User: Identifiable, Hashable, Codable {
     let id: UUID
     var name: String
     var role: UserRole
-    var pin: String
     var colorName: String
     var annualLeaveDays: Int
+    var email: String
 
     var color: Color {
         switch colorName {

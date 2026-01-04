@@ -6,6 +6,7 @@
 //
 import Foundation
 import SwiftUI
+import FirebaseAuth
 
     struct MenuView: View {
         @EnvironmentObject var appState: AppState
@@ -31,10 +32,23 @@ import SwiftUI
                                         .foregroundColor(.accentColor)
                                 }
                             }
+                            else {
+                                Text("Nicht eingeloggt")
+                                    .foregroundColor(.secondary)
+                            }
                         }
                         
                         Section(header: Text("Aktionen")) {
                             Button(role: .destructive) {
+                                // 1) Firebase Auth abmelden
+                                do {
+                                    try appState.auth.signOut()
+                                } catch {
+                                    appState.uiErrorMessage = "Abmeldung fehlgeschlagen: \(error.localizedDescription)"
+                                    return
+                                }
+
+                                // 2) Lokale Session/State bereinigen
                                 appState.currentUser = nil
                                 appState.sessionUserId = nil
                             } label: {

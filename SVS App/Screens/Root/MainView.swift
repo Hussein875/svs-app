@@ -32,12 +32,12 @@ struct MainView: View {
 
             // Admin-spezifische Tabs
             if let user = appState.currentUser {
-                if user.role == .admin {
+            //    if user.role == .admin {
                     AdminConsoleView()
                         .tabItem {
                             Label("Admin", systemImage: "shield.lefthalf.filled")
                         }
-                }
+            //    }
 
                 // Provisionen nur für Admin & Sachverständige
                 if user.role == .admin || user.role == .expert {
