@@ -57,151 +57,140 @@ struct MyRequestsScreen: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                // Header (match Kalender style)
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Meine Anträge")
-                        .font(.largeTitle.weight(.bold))
+        VStack(alignment: .leading, spacing: 12) {
+            if myRequests.isEmpty {
+                // Clean empty state (no List top inset / no huge header gap)
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Noch keine Anträge")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(Color(.secondarySystemBackground))
+                        .frame(height: 68)
+                        .overlay(
+                            HStack {
+                                Text("Noch keine Anträge")
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 18)
+                        )
 
                     Spacer()
-
-                    NavigationLink(destination: NewLeaveRequestView()) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .semibold))
-                            .frame(width: 40, height: 40)
-                            .background(Circle().fill(Color(.secondarySystemBackground)))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Neuen Antrag erstellen")
                 }
                 .padding(.horizontal, 18)
-                .padding(.top, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .background(Color(.systemGroupedBackground))
+            } else {
+                List {
+                    // Aktuell / kommende Anträge
+                    Section {
+                        if currentRequests.isEmpty {
+                            HStack {
+                                Text("Keine aktuellen Anträge")
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                            }
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        } else {
+                            ForEach(currentRequests) { r in
+                                MyLeaveRequestCard(request: r) {
+                                    // Samstags-Bereitschaft soll nicht bearbeitet werden
+                                    guard r.type != .onCallSaturday else { return }
+                                    if appState.canEditOrDelete(r, by: appState.currentUser) {
+                                        editingRequest = r
+                                    }
+                                }
+                                .swipeActions {
+                                    // Für Samstags-Bereitschaft: nur Löschen (kein Bearbeiten)
+                                    if r.type == .onCallSaturday {
+                                        Button(role: .destructive) {
+                                            appState.deleteLeaveRequest(r)
+                                        } label: {
+                                            Label("Löschen", systemImage: "trash")
+                                        }
+                                    } else if appState.canEditOrDelete(r, by: appState.currentUser) {
+                                        Button {
+                                            editingRequest = r
+                                        } label: {
+                                            Label("Bearbeiten", systemImage: "pencil")
+                                        }
 
-                Group {
-                    if myRequests.isEmpty {
-                        // Clean empty state (no List top inset / no huge header gap)
-                        VStack(alignment: .leading, spacing: 14) {
-                            Text("Noch keine Anträge")
-                                .font(.headline)
+                                        Button(role: .destructive) {
+                                            appState.deleteLeaveRequest(r)
+                                        } label: {
+                                            Label("Löschen", systemImage: "trash")
+                                        }
+                                    }
+                                }
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            }
+                        }
+                    } header: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Aktuelle Anträge")
+                            if counts.pending + counts.approved + counts.rejected > 0 {
+                                HStack(spacing: 8) {
+                                    if counts.pending > 0 { Text("Offen: \(counts.pending)") }
+                                    if counts.approved > 0 { Text("Genehmigt: \(counts.approved)") }
+                                    if counts.rejected > 0 { Text("Abgelehnt: \(counts.rejected)") }
+                                }
+                                .font(.caption)
                                 .foregroundColor(.secondary)
-
-                            RoundedRectangle(cornerRadius: 18)
-                                .fill(Color(.secondarySystemBackground))
-                                .frame(height: 68)
-                                .overlay(
-                                    HStack {
-                                        Text("Noch keine Anträge")
-                                            .foregroundColor(.secondary)
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 18)
-                                )
-
-                            Spacer()
+                            }
                         }
-                        .padding(.horizontal, 18)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .background(Color(.systemGroupedBackground))
-                    } else {
-                        List {
-                            // Aktuell / kommende Anträge
-                            Section {
-                                if currentRequests.isEmpty {
-                                    HStack {
-                                        Text("Keine aktuellen Anträge")
-                                            .foregroundColor(.secondary)
-                                        Spacer()
-                                    }
-                                    .listRowBackground(Color.clear)
-                                    .listRowSeparator(.hidden)
-                                } else {
-                                    ForEach(currentRequests) { r in
-                                        MyLeaveRequestCard(request: r) {
-                                            // Samstags-Bereitschaft soll nicht bearbeitet werden
-                                            guard r.type != .onCallSaturday else { return }
-                                            if appState.canEditOrDelete(r, by: appState.currentUser) {
-                                                editingRequest = r
-                                            }
-                                        }
-                                        .swipeActions {
-                                            // Für Samstags-Bereitschaft: nur Löschen (kein Bearbeiten)
-                                            if r.type == .onCallSaturday {
-                                                Button(role: .destructive) {
-                                                    appState.deleteLeaveRequest(r)
-                                                } label: {
-                                                    Label("Löschen", systemImage: "trash")
-                                                }
-                                            } else if appState.canEditOrDelete(r, by: appState.currentUser) {
-                                                Button {
-                                                    editingRequest = r
-                                                } label: {
-                                                    Label("Bearbeiten", systemImage: "pencil")
-                                                }
+                        .textCase(nil)
+                    }
 
-                                                Button(role: .destructive) {
-                                                    appState.deleteLeaveRequest(r)
-                                                } label: {
-                                                    Label("Löschen", systemImage: "trash")
-                                                }
-                                            }
-                                        }
-                                        .listRowSeparator(.hidden)
-                                        .listRowBackground(Color.clear)
-                                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                                    }
-                                }
-                            } header: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Aktuelle Anträge")
-                                    if counts.pending + counts.approved + counts.rejected > 0 {
-                                        HStack(spacing: 8) {
-                                            if counts.pending > 0 { Text("Offen: \(counts.pending)") }
-                                            if counts.approved > 0 { Text("Genehmigt: \(counts.approved)") }
-                                            if counts.rejected > 0 { Text("Abgelehnt: \(counts.rejected)") }
-                                        }
-                                        .font(.caption)
+                    // Vergangene Anträge (separater Screen)
+                    if !pastRequests.isEmpty {
+                        Section {
+                            NavigationLink {
+                                PastRequestsScreen(requests: pastRequests)
+                                    .environmentObject(appState)
+                            } label: {
+                                HStack {
+                                    Text("Vergangene Anträge")
+                                    Spacer()
+                                    Text("\(pastRequests.count)")
+                                        .font(.caption.weight(.semibold))
                                         .foregroundColor(.secondary)
-                                    }
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4)
+                                        .background(
+                                            Capsule().fill(Color(.secondarySystemBackground))
+                                        )
                                 }
-                                .textCase(nil)
-                            }
-
-                            // Vergangene Anträge (separater Screen)
-                            if !pastRequests.isEmpty {
-                                Section {
-                                    NavigationLink {
-                                        PastRequestsScreen(requests: pastRequests)
-                                            .environmentObject(appState)
-                                    } label: {
-                                        HStack {
-                                            Text("Vergangene Anträge")
-                                            Spacer()
-                                            Text("\(pastRequests.count)")
-                                                .font(.caption.weight(.semibold))
-                                                .foregroundColor(.secondary)
-                                                .padding(.horizontal, 10)
-                                                .padding(.vertical, 4)
-                                                .background(
-                                                    Capsule().fill(Color(.secondarySystemBackground))
-                                                )
-                                        }
-                                        .padding(.vertical, 6)
-                                    }
-                                }
+                                .padding(.vertical, 6)
                             }
                         }
-                        .listStyle(.insetGrouped)
-                        .scrollContentBackground(.hidden)
-                        .background(Color(.systemGroupedBackground))
                     }
                 }
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(Color(.systemGroupedBackground))
             }
-            .background(Color(.systemGroupedBackground))
-            .sheet(item: $editingRequest) { request in
-                NavigationStack {
-                    EditLeaveRequestView(request: request)
+        }
+        .background(Color(.systemGroupedBackground))
+        .sheet(item: $editingRequest) { request in
+            NavigationStack {
+                EditLeaveRequestView(request: request)
+            }
+        }
+        .navigationTitle("Meine Anträge")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    NewLeaveRequestView()
+                } label: {
+                    Image(systemName: "plus")
                 }
+                .accessibilityLabel("Neuen Antrag erstellen")
             }
         }
     }
