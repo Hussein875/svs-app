@@ -12,7 +12,21 @@ struct TasksView: View {
     @State private var showNewTask = false
     @State private var editingTask: Task? = nil
 
+    enum AdminTaskScope: String, CaseIterable {
+        case mine = "Meine"
+        case team = "Team"
+    }
+
+    @State private var adminScope: AdminTaskScope = .mine
+
     private var currentUser: User? { appState.currentUser }
+
+    private var adminScopeTint: Color {
+        switch adminScope {
+        case .mine: return .blue
+        case .team: return .indigo
+        }
+    }
 
     // Aufgaben-Sichten für Admin / Mitarbeiter
     private var myOpenTasks: [Task] {
@@ -45,7 +59,7 @@ struct TasksView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Aufgaben")
                         .font(.largeTitle.weight(.bold))
@@ -64,31 +78,33 @@ struct TasksView: View {
                     .accessibilityLabel("Neue Aufgabe")
                 }
                 .padding(.horizontal, 18)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+                .padding(.top, 2)
+                .padding(.bottom, 2)
 
                 // Übersicht
                 if let _ = currentUser {
                     HStack {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 2) {
                             Text("Meine offenen Aufgaben")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
 
                             Text("\(myOpenTasks.count)")
-                                .font(.title2.weight(.bold))
+                                .font(.title3.weight(.semibold))
                         }
 
                         Spacer()
                     }
-                    .padding(14)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
                     .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .fill(Color(.secondarySystemBackground))
                     )
                     .padding(.horizontal, 18)
-                    .padding(.bottom, 6)
+                    .padding(.bottom, 0)
                 }
+
 
                 Group {
                     // Leer, wenn wirklich gar keine Aufgaben existieren
@@ -107,41 +123,61 @@ struct TasksView: View {
                         .background(Color(.systemGroupedBackground))
                     } else {
                         List {
-                            
+                            // Admin: Sticky Segment-Header unter dem "Aufgaben"-Header
                             if let user = currentUser, user.role == .admin {
-                                // Admin: Meine offenen Aufgaben
-                                if !myOpenTasks.isEmpty {
-                                    Section(header: Text("Meine Aufgaben – Offen").textCase(nil)) {
-                                        ForEach(myOpenTasks) { task in
-                                            TaskRow(
-                                                task: task,
-                                                isAdmin: true,
-                                                assignedUserName: appState.userName(for: task.assignedUserId),
-                                                onEdit: { editingTask = task },
-                                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                                onDelete: { appState.deleteTask(task) }
-                                            )
+                                Section {
+                                    EmptyView()
+                                } header: {
+                                    Picker("Ansicht", selection: $adminScope) {
+                                        ForEach(AdminTaskScope.allCases, id: \.self) { scope in
+                                            Text(scope.rawValue).tag(scope)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .tint(adminScopeTint)
+                                    .padding(.horizontal, 18)
+                                    .padding(.vertical, 2)
+                                    .background(Color(.systemGroupedBackground))
+                                }
+                                .textCase(nil)
+                                .headerProminence(.increased)
+                            }
+
+                            if let user = currentUser, user.role == .admin {
+                                switch adminScope {
+                                case .mine:
+                                    if !myOpenTasks.isEmpty {
+                                        Section(header: Text("Meine Aufgaben – Offen").textCase(nil)) {
+                                            ForEach(myOpenTasks) { task in
+                                                TaskRow(
+                                                    task: task,
+                                                    isAdmin: true,
+                                                    assignedUserName: appState.userName(for: task.assignedUserId),
+                                                    onEdit: { editingTask = task },
+                                                    onToggleStatus: { appState.toggleTaskStatus(for: task) },
+                                                    onDelete: { appState.deleteTask(task) }
+                                                )
+                                            }
+                                        }
+                                    }
+                                case .team:
+                                    if !otherOpenTasks.isEmpty {
+                                        Section(header: Text("Team – Offene Aufgaben").textCase(nil)) {
+                                            ForEach(otherOpenTasks) { task in
+                                                TaskRow(
+                                                    task: task,
+                                                    isAdmin: true,
+                                                    assignedUserName: appState.userName(for: task.assignedUserId),
+                                                    onEdit: { editingTask = task },
+                                                    onToggleStatus: { appState.toggleTaskStatus(for: task) },
+                                                    onDelete: { appState.deleteTask(task) }
+                                                )
+                                            }
                                         }
                                     }
                                 }
 
-                                // Admin: Offene Aufgaben anderer
-                                if !otherOpenTasks.isEmpty {
-                                    Section(header: Text("Andere Aufgaben – Offen").textCase(nil)) {
-                                        ForEach(otherOpenTasks) { task in
-                                            TaskRow(
-                                                task: task,
-                                                isAdmin: true,
-                                                assignedUserName: appState.userName(for: task.assignedUserId),
-                                                onEdit: { editingTask = task },
-                                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                                onDelete: { appState.deleteTask(task) }
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Link zu erledigten Aufgaben (nur wenn es welche gibt)
+                                // Erledigte Aufgaben Link (bleibt immer sichtbar, wenn vorhanden)
                                 if !myDoneTasks.isEmpty || !otherDoneTasks.isEmpty {
                                     Section {
                                         NavigationLink {
@@ -188,7 +224,8 @@ struct TasksView: View {
                                 }
                             }
                         }
-                        .padding(.top, 6)
+                        .padding(.top, 2)
+                        .listRowSeparator(.hidden)
                         .listStyle(.insetGrouped)
                         .scrollContentBackground(.hidden)
                         .background(Color(.systemGroupedBackground))
@@ -204,6 +241,7 @@ struct TasksView: View {
                 NewTaskView(mode: .edit, task: task)
                     .environmentObject(appState)
             }
+            
             .navigationBarHidden(true)
         }
     }
@@ -288,6 +326,10 @@ struct CompletedTasksView: View {
                 }
             }
         }
+        .listRowSeparator(.hidden)
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
         .sheet(item: $editingTask) { task in
             NewTaskView(mode: .edit, task: task)
                 .environmentObject(appState)
@@ -308,43 +350,88 @@ struct TaskRow: View {
     let onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
+        let accent: Color = {
+            if task.status == .done { return .green }
+            if let due = task.dueDate, due < Date() { return .red }
+            return .blue
+        }()
+
+        HStack(alignment: .top, spacing: 12) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(accent.opacity(0.9))
+                .frame(width: 4)
+                .padding(.top, 2)
+
             Button(action: onToggleStatus) {
                 Image(systemName: task.status == .done ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22, weight: .semibold))
                     .foregroundColor(task.status == .done ? .green : .gray)
+                    .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
+            .padding(.top, 2)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(task.title)
-                    .font(.body)
+                    .font(.body.weight(.semibold))
+                    .foregroundColor(.primary)
                     .strikethrough(task.status == .done, color: .secondary)
 
                 if !task.details.isEmpty {
                     Text(task.details)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
 
                 HStack(spacing: 8) {
                     if let due = task.dueDate {
-                        Text("Fällig: \(formattedShort(due))")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 6) {
+                            Image(systemName: "calendar")
+                                .font(.caption2)
+                            Text("Fällig: \(formattedShort(due))")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color(.secondarySystemBackground)))
                     }
+
                     if isAdmin {
-                        Text("für \(assignedUserName)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 6) {
+                            Image(systemName: "person")
+                                .font(.caption2)
+                            Text(assignedUserName)
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color(.secondarySystemBackground)))
                     }
+
+                    Spacer(minLength: 0)
                 }
+                .padding(.top, 2)
             }
 
-            Spacer()
-
+            Spacer(minLength: 0)
         }
+        .padding(.vertical, 12)
+        .padding(.horizontal, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(accent.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 6)
         .contentShape(Rectangle())
+        .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
+        .listRowBackground(Color.clear)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             Button {
                 onEdit()
