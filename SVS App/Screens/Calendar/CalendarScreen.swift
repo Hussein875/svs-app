@@ -70,10 +70,14 @@ struct CalendarScreen: View {
                             .foregroundColor(.secondary)
                     } else {
                         ForEach(requests) { r in
+                            // Wenn LeaveRequest noch einen Fallback-User enthält (z.B. Name==E-Mail),
+                            // versuchen wir für die Anzeige immer den aktuellen User aus `appState.users` zu nehmen.
+                            let displayUser = appState.users.first(where: { $0.id == r.user.id }) ?? r.user
+
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(r.user.name)
+                                Text(displayUser.name)
                                     .font(.headline)
-                                    .foregroundColor(r.user.color)
+                                    .foregroundColor(displayUser.color)
                                 Text("\(dateRange(r.startDate, r.endDate))")
                                     .font(.subheadline)
                                 Text(r.type.rawValue)
@@ -189,7 +193,12 @@ struct CalendarGrid: View {
                         ? appState.requests(for: date).filter { $0.status == .approved }
                         : []
 
-                    let approvedColors = approvedRequests.map { $0.user.color }
+                    let approvedColors: [Color] = approvedRequests.map { req in
+                        if let u = appState.users.first(where: { $0.id == req.user.id }) {
+                            return u.color
+                        }
+                        return req.user.color
+                    }
                     let isHoliday = isCurrentMonth ? isPublicHolidayBremen(date) : false
 
                     DayCell(

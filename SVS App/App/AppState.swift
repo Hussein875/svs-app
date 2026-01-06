@@ -84,6 +84,7 @@ class AppState: ObservableObject {
     private var usersListener: ListenerRegistration?
     private var invitesListener: ListenerRegistration?
     private var leaveRequestsListener: ListenerRegistration?
+    private var tasksListener: ListenerRegistration?
     
     // Run snapshot processing off the main thread
     private let firestoreListenerQueue = DispatchQueue(label: "svs.firestore.listeners", qos: .userInitiated)
@@ -517,6 +518,20 @@ class AppState: ObservableObject {
         guard user.id == request.user.id else { return false }
         return request.type == .vacation && request.status == .pending
     }
+
+    /// Task-Rechte:
+    /// - Admin: darf immer bearbeiten/löschen
+    /// - Nicht-Admins: dürfen bearbeiten/löschen, wenn Task ihnen zugewiesen ist
+    func canEditTask(_ task: Task, by user: User?) -> Bool {
+        guard let user else { return false }
+        if user.role == .admin { return true }
+        return task.assignedUserId == user.id
+    }
+
+    func canDeleteTask(_ task: Task, by user: User?) -> Bool {
+        // Aktuell identisch zu canEditTask – separiert für spätere Regeln
+        canEditTask(task, by: user)
+    }
     
     @discardableResult
     func updateLeaveRequest(_ updated: LeaveRequest) -> Bool {
@@ -558,7 +573,7 @@ class AppState: ObservableObject {
     }
     
     // MARK: - Task Management
-    
+
     func createTask(title: String,
                     details: String,
                     dueDate: Date?,
@@ -572,24 +587,51 @@ class AppState: ObservableObject {
             status: .open,
             assignedUserId: assignedUser.id,
             creatorUserId: creator.id,
-            createdAt: Date()
+            createdAt: Date(),
+            updatedAt: nil
         )
-        tasks.append(newTask)
+
+        // Optimistic UI
+        tasks.insert(newTask, at: 0)
+        upsertTaskToFirestore(newTask)
     }
-    
+
     func updateTask(_ task: Task) {
-        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
-            tasks[index] = task
+        guard canEditTask(task, by: currentUser) else {
+            showToast(.error, "Sie dürfen diesen Task nicht bearbeiten.")
+            return
         }
+
+        var patched = task
+        patched.updatedAt = Date()
+
+        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks[index] = patched
+        } else {
+            tasks.insert(patched, at: 0)
+        }
+
+        upsertTaskToFirestore(patched)
     }
-    
+
     func toggleTaskStatus(for task: Task) {
-        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
-            tasks[index].status = (tasks[index].status == .open) ? .done : .open
+        guard canEditTask(task, by: currentUser) else {
+            showToast(.error, "Sie dürfen diesen Task nicht ändern.")
+            return
         }
+
+        var updated = task
+        updated.status = (task.status == .open) ? .done : .open
+        updateTask(updated)
     }
-    
+
     func deleteTask(_ task: Task) {
+        guard canDeleteTask(task, by: currentUser) else {
+            showToast(.error, "Sie dürfen diesen Task nicht löschen.")
+            return
+        }
+
+        deleteTaskFromFirestore(task)
         tasks.removeAll { $0.id == task.id }
     }
     
@@ -710,6 +752,159 @@ class AppState: ObservableObject {
         commissions[idx].status = .paid
         commissions[idx].paidAt = Date()
         commissions[idx].paidByUserId = admin.id
+    }
+    
+    // MARK: - Firestore Tasks DTO
+
+    private struct TaskDTO {
+        var id: String
+        var title: String
+        var details: String
+        var dueDate: Timestamp?
+        var statusRaw: String
+        var assignedUserId: String
+        var creatorUserId: String
+        var createdAt: Timestamp
+        var updatedAt: Timestamp?
+
+        init?(id: String, data: [String: Any]) {
+            guard
+                let title = data["title"] as? String,
+                let details = data["details"] as? String,
+                let statusRaw = data["statusRaw"] as? String,
+                let assignedUserId = data["assignedUserId"] as? String,
+                let creatorUserId = data["creatorUserId"] as? String,
+                let createdAt = data["createdAt"] as? Timestamp
+            else { return nil }
+
+            self.id = id
+            self.title = title
+            self.details = details
+            self.statusRaw = statusRaw
+            self.assignedUserId = assignedUserId
+            self.creatorUserId = creatorUserId
+            self.createdAt = createdAt
+            self.dueDate = data["dueDate"] as? Timestamp
+            self.updatedAt = data["updatedAt"] as? Timestamp
+        }
+
+        init(from task: Task) {
+            self.id = task.id.uuidString
+            self.title = task.title
+            self.details = task.details
+            self.statusRaw = task.status.rawValue
+            self.assignedUserId = task.assignedUserId
+            self.creatorUserId = task.creatorUserId
+            self.createdAt = Timestamp(date: task.createdAt)
+            self.dueDate = task.dueDate.map { Timestamp(date: $0) }
+            self.updatedAt = task.updatedAt.map { Timestamp(date: $0) }
+        }
+
+        func toDictionary() -> [String: Any] {
+            var d: [String: Any] = [
+                "title": title,
+                "details": details,
+                "statusRaw": statusRaw,
+                "assignedUserId": assignedUserId,
+                "creatorUserId": creatorUserId,
+                "createdAt": createdAt
+            ]
+            if let dueDate { d["dueDate"] = dueDate }
+            if let updatedAt { d["updatedAt"] = updatedAt }
+            return d
+        }
+    }
+
+    // MARK: - Firestore Tasks Listener
+
+    private func startTasksListenerIfNeeded() {
+        guard tasksListener == nil else { return }
+        guard let me = currentUser else { return }
+
+        var query: Query = db.collection("tasks")
+
+        // Admin: sieht alles, andere: nur zugewiesene Tasks
+        if me.role != .admin {
+            query = query.whereField("assignedUserId", isEqualTo: me.id)
+        }
+
+        query = query.order(by: "createdAt", descending: true)
+
+        tasksListener = query.addSnapshotListener(includeMetadataChanges: false) { [weak self] snapshot, error in
+            guard let self else { return }
+            if let error {
+                DispatchQueue.main.async {
+                    self.uiErrorMessage = "Tasks konnten nicht geladen werden: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            let docs = snapshot?.documents ?? []
+
+            self.firestoreListenerQueue.async { [weak self] in
+                guard let self else { return }
+
+                let mapped: [Task] = docs.compactMap { doc in
+                    guard let dto = TaskDTO(id: doc.documentID, data: doc.data()) else { return nil }
+                    guard let uuid = UUID(uuidString: dto.id) else { return nil }
+
+                    let status = TaskStatus(rawValue: dto.statusRaw) ?? .open
+
+                    return Task(
+                        id: uuid,
+                        title: dto.title,
+                        details: dto.details,
+                        dueDate: dto.dueDate?.dateValue(),
+                        status: status,
+                        assignedUserId: dto.assignedUserId,
+                        creatorUserId: dto.creatorUserId,
+                        createdAt: dto.createdAt.dateValue(),
+                        updatedAt: dto.updatedAt?.dateValue()
+                    )
+                }
+
+                DispatchQueue.main.async { [weak self] in
+                    self?.tasks = mapped
+                }
+            }
+        }
+    }
+
+    private func upsertTaskToFirestore(_ task: Task) {
+        let dto = TaskDTO(from: task)
+
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.db.collection("tasks").document(dto.id)
+                    .setData(dto.toDictionary(), merge: true)
+                print("[Firestore][tasks][upsert] OK for \(dto.id)")
+            } catch {
+                let msg = "Task konnte nicht gespeichert werden: \(error.localizedDescription)"
+                print("[Firestore][tasks][upsert] FAILED for \(dto.id): \(msg)")
+                await MainActor.run {
+                    self.uiErrorMessage = msg
+                    self.showToast(.error, msg)
+                }
+            }
+        }
+    }
+
+    private func deleteTaskFromFirestore(_ task: Task) {
+        let docId = task.id.uuidString
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.db.collection("tasks").document(docId).delete()
+            } catch {
+                let msg = "Task konnte nicht gelöscht werden: \(error.localizedDescription)"
+                print("[Firestore][tasks][delete] FAILED for \(docId): \(msg)")
+                await MainActor.run {
+                    self.uiErrorMessage = msg
+                    self.showToast(.error, msg)
+                }
+            }
+        }
     }
     
     // MARK: - Firestore LeaveRequests DTO
@@ -932,10 +1127,12 @@ class AppState: ObservableObject {
     private func stopUsersListeners() {
         usersListener?.remove(); usersListener = nil
         invitesListener?.remove(); invitesListener = nil
+        leaveRequestsListener?.remove(); leaveRequestsListener = nil
+        tasksListener?.remove(); tasksListener = nil
         usersSnapshotCache = []
         invitesSnapshotCache = []
-        leaveRequestsListener?.remove(); leaveRequestsListener = nil
         leaveRequests = []
+        tasks = []
         didStartRealtimeListeners = false
         isProfileReady = false
     }
@@ -950,6 +1147,7 @@ class AppState: ObservableObject {
         didStartRealtimeListeners = true
         startUsersListenersIfNeeded()
         startLeaveRequestsListenerIfNeeded()
+        startTasksListenerIfNeeded()
     }
     
     private func startUsersListenersIfNeeded() {

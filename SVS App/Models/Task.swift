@@ -16,4 +16,5 @@ struct Task: Identifiable, Codable, Equatable {
     var assignedUserId: String
     var creatorUserId: String
     var createdAt: Date
+    var updatedAt: Date? = nil
 }
