@@ -204,6 +204,23 @@ extension AppState {
     }
 }
 
+private func germanColorName(_ key: String) -> String {
+    switch key {
+    case "blue": return "Blau"
+    case "indigo": return "Indigo"
+    case "purple": return "Lila"
+    case "pink": return "Pink"
+    case "red": return "Rot"
+    case "orange": return "Orange"
+    case "yellow": return "Gelb"
+    case "green": return "Grün"
+    case "teal": return "Türkis"
+    case "cyan": return "Cyan"
+    case "gray": return "Grau"
+    default: return key.capitalized
+    }
+}
+
 private struct EditMyProfileView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
@@ -243,7 +260,7 @@ private struct EditMyProfileView: View {
                             Circle()
                                 .fill(item.color)
                                 .frame(width: 12, height: 12)
-                            Text(item.name.capitalized)
+                            Text(germanColorName(item.name))
                         }
                         .tag(item.name)
                     }

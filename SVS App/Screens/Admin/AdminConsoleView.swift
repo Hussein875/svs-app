@@ -691,6 +691,23 @@ struct AdminUsersScreen: View {
     }
 }
 
+// MARK: - Color Name Translation Helper
+private func germanColorName(_ key: String) -> String {
+    switch key {
+    case "blue": return "Blau"
+    case "green": return "Grün"
+    case "orange": return "Orange"
+    case "purple": return "Lila"
+    case "red": return "Rot"
+    case "pink": return "Pink"
+    case "teal": return "Türkis"
+    case "indigo": return "Indigo"
+    case "yellow": return "Gelb"
+    case "gray": return "Grau"
+    default: return key.capitalized
+    }
+}
+
 struct EditUserView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) var dismiss
@@ -736,7 +753,7 @@ struct EditUserView: View {
             Section(header: Text("Farbe")) {
                 Picker("Farbe", selection: binding(for: \.colorName)) {
                     ForEach(availableColors, id: \.self) { color in
-                        Text(color.capitalized).tag(color)
+                        Text(germanColorName(color)).tag(color)
                     }
                 }
             }
@@ -783,6 +800,7 @@ struct EditUserView: View {
             set: { user[keyPath: keyPath] = $0 }
         )
     }
+
 }
 
 /**
@@ -835,7 +853,7 @@ struct AddUserView: View {
             Section(header: Text("Farbe")) {
                 Picker("Farbe", selection: $colorName) {
                     ForEach(availableColors, id: \.self) { color in
-                        Text(color.capitalized).tag(color)
+                        Text(germanColorName(color)).tag(color)
                     }
                 }
             }
