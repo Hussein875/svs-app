@@ -6,6 +6,7 @@
 //
 import Foundation
 import SwiftUI
+import FirebaseFirestore
 
 struct AdminConsoleView: View {
     @EnvironmentObject var appState: AppState
@@ -75,6 +76,16 @@ struct AdminConsoleView: View {
                                             subtitle: "Samstage zuweisen",
                                             systemImage: "person.badge.clock")
                             }
+                            
+                            NavigationLink {
+                                AdminAutomationsScreen(automationId: "auto_gutachten_ablage")
+                                    .environmentObject(appState)
+                            } label: {
+                                AdminNavRow(title: "Automatisierungen",
+                                            subtitle: "Make-Status und letzte Läufe",
+                                            systemImage: "bolt.badge.clock")
+                            }
+                            
                         }
                         .padding(.horizontal, 18)
                     }
@@ -1424,5 +1435,392 @@ struct EditOnCallSaturdayView: View {
             selectedUserId = existingRequest.user.id
             selectedSaturday = Calendar.current.startOfDay(for: existingRequest.startDate)
         }
+    }
+}
+
+// MARK: - Admin Automations Screen (Make Status)
+
+private struct AutomationEvent: Identifiable {
+    let id: String
+    let status: String
+    let message: String
+    let runAt: Date?
+    let nextRunAt: Date?
+}
+
+private struct AutomationStatusDoc {
+    var status: String
+    var lastRunAt: Date?
+    var nextRunAt: Date?
+    var lastMessage: String
+    var events: [AutomationEvent]
+}
+
+struct AdminAutomationsScreen: View {
+    @EnvironmentObject var appState: AppState
+
+    let automationId: String
+
+    @State private var doc: AutomationStatusDoc?
+    @State private var isLoading: Bool = true
+    @State private var listener: ListenerRegistration?
+    @State private var eventsListener: ListenerRegistration?
+    
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Automatisierungen")
+                        .font(.largeTitle.weight(.bold))
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Make")
+                        .font(.headline)
+                        .padding(.horizontal, 18)
+
+                    automationCard
+                        .padding(.horizontal, 18)
+
+                    Text("Letzte 10 Läufe")
+                        .font(.headline)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 8)
+
+                    eventsList
+                        .padding(.horizontal, 18)
+                }
+
+                Spacer(minLength: 18)
+            }
+            .padding(.bottom, 18)
+        }
+        .background(Color(.systemGroupedBackground))
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { startListening() }
+        .onDisappear {
+            listener?.remove()
+            listener = nil
+            eventsListener?.remove()
+            eventsListener = nil
+        }
+        .refreshable {
+            await refreshNow()
+        }
+    }
+    
+    private func shortStatusTitle(_ s: String) -> String {
+        switch s {
+        case "ok": return "OK"
+        case "error": return "Fehler"
+        default: return "Hinweis"
+        }
+    }
+
+    private func fetchOnce(completion: @escaping () -> Void = {}) {
+        isLoading = true
+
+        let ref = Firestore.firestore().collection("automations").document(automationId)
+        let eventsRef = ref.collection("events")
+            .order(by: "runAt", descending: true)
+            .limit(to: 10)
+
+        let group = DispatchGroup()
+
+        var status: String = "warn"
+        var lastMessage: String = ""
+        var lastRunAt: Date? = nil
+        var nextRunAt: Date? = nil
+        var events: [AutomationEvent] = []
+
+        group.enter()
+        ref.getDocument { snap, err in
+            defer { group.leave() }
+
+            if let err {
+                print("[automations] fetch doc error:", err)
+                return
+            }
+
+            guard let data = snap?.data() else { return }
+            status = (data["status"] as? String) ?? "warn"
+            lastMessage = (data["lastMessage"] as? String) ?? ""
+            lastRunAt = (data["lastRunAt"] as? Timestamp)?.dateValue()
+            nextRunAt = (data["nextRunAt"] as? Timestamp)?.dateValue()
+        }
+
+        group.enter()
+        eventsRef.getDocuments { snap, err in
+            defer { group.leave() }
+
+            if let err {
+                print("[automations] fetch events error:", err)
+                return
+            }
+
+            events = (snap?.documents ?? []).map { d in
+                let data = d.data()
+                let s = (data["status"] as? String) ?? "warn"
+                let m = (data["message"] as? String) ?? ""
+                let r = (data["runAt"] as? Timestamp)?.dateValue()
+                let n = (data["nextRunAt"] as? Timestamp)?.dateValue()
+                return AutomationEvent(id: d.documentID, status: s, message: m, runAt: r, nextRunAt: n)
+            }
+        }
+
+        group.notify(queue: .main) {
+            self.doc = AutomationStatusDoc(
+                status: status,
+                lastRunAt: lastRunAt,
+                nextRunAt: nextRunAt,
+                lastMessage: lastMessage,
+                events: events
+            )
+            self.isLoading = false
+            completion()
+        }
+    }
+
+    private func refreshNow() async {
+        await withCheckedContinuation { cont in
+            fetchOnce {
+                cont.resume()
+            }
+        }
+    }
+
+    private var automationCard: some View {
+        Group {
+            if isLoading {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text("Status wird geladen…")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+            } else if let doc {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 10) {
+                        statusDot(doc.status)
+                        Text(statusLabel(doc.status))
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+
+                    HStack(spacing: 10) {
+                        Label(lastRunText(doc.lastRunAt), systemImage: "clock")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Spacer()
+
+                        Label(nextRunText(doc.nextRunAt), systemImage: "arrow.clockwise")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    if !doc.lastMessage.isEmpty {
+                        Text(doc.lastMessage)
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Noch kein Status vorhanden")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Sobald Make den ersten Lauf meldet, erscheint hier der Status.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+            }
+        }
+    }
+    
+    private var eventsList: some View {
+        Group {
+            let items = doc?.events ?? []
+            if items.isEmpty {
+                HStack(spacing: 10) {
+                    Text("Noch keine Läufe vorhanden")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(items) { e in
+                        HStack(alignment: .top, spacing: 10) {
+                            statusDot(e.status)
+                                .padding(.top, 2)
+
+                            VStack(alignment: .leading, spacing: 4) {
+
+                                HStack(spacing: 8) {
+                                    Text(shortStatusTitle(e.status))
+                                        .font(.footnote.weight(.semibold))
+
+                                    Text(e.runAt?.formatted(date: .abbreviated, time: .shortened) ?? "–")
+                                        .font(.footnote.weight(.semibold))
+
+                                    Spacer(minLength: 0)
+                                }
+
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+
+                                    Text("Nächster:")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+
+                                    Text(e.nextRunAt?.formatted(date: .abbreviated, time: .shortened) ?? "–")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+
+                                    Spacer(minLength: 0)
+                                }
+
+                                if !e.message.isEmpty {
+                                    Text(e.message)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func eventTitle(_ e: AutomationEvent) -> String {
+        let run = e.runAt?.formatted(date: .abbreviated, time: .shortened) ?? "–"
+        let next = e.nextRunAt?.formatted(date: .abbreviated, time: .shortened) ?? "–"
+        switch e.status {
+        case "ok": return "OK • \(run) • Nächster: \(next)"
+        case "error": return "Fehler • \(run) • Nächster: \(next)"
+        default: return "Hinweis • \(run) • Nächster: \(next)"
+        }
+    }
+
+    private func startListening() {
+        isLoading = true
+        listener?.remove()
+        eventsListener?.remove()
+
+        let ref = Firestore.firestore().collection("automations").document(automationId)
+        listener = ref.addSnapshotListener { snap, err in
+            if let err {
+                print("[automations] snapshot error:", err)
+                self.doc = nil
+                self.isLoading = false
+                return
+            }
+
+            guard let data = snap?.data() else {
+                self.doc = nil
+                self.isLoading = false
+                return
+            }
+
+            let status = (data["status"] as? String) ?? "warn"
+            let lastMessage = (data["lastMessage"] as? String) ?? ""
+            let lastRunAt = (data["lastRunAt"] as? Timestamp)?.dateValue()
+            let nextRunAt = (data["nextRunAt"] as? Timestamp)?.dateValue()
+
+            self.doc = AutomationStatusDoc(
+                status: status,
+                lastRunAt: lastRunAt,
+                nextRunAt: nextRunAt,
+                lastMessage: lastMessage,
+                events: self.doc?.events ?? []
+            )
+            self.isLoading = false
+        }
+        
+        let eventsRef = ref.collection("events")
+            .order(by: "runAt", descending: true)
+            .limit(to: 10)
+
+        eventsListener = eventsRef.addSnapshotListener { snap, err in
+            if let err {
+                print("[automations] events snapshot error:", err)
+                return
+            }
+
+            let items: [AutomationEvent] = (snap?.documents ?? []).map { d in
+                let data = d.data()
+                let status = (data["status"] as? String) ?? "warn"
+                let message = (data["message"] as? String) ?? ""
+                let runAt = (data["runAt"] as? Timestamp)?.dateValue()
+                let nextRunAt = (data["nextRunAt"] as? Timestamp)?.dateValue()
+                return AutomationEvent(id: d.documentID, status: status, message: message, runAt: runAt, nextRunAt: nextRunAt)
+            }
+
+            if var existing = self.doc {
+                existing.events = items
+                self.doc = existing
+            } else {
+                self.doc = AutomationStatusDoc(status: "warn", lastRunAt: nil, nextRunAt: nil, lastMessage: "", events: items)
+            }
+        }
+    }
+
+    private func statusLabel(_ s: String) -> String {
+        switch s {
+        case "ok": return "✅ Läuft"
+        case "error": return "❌ Fehler"
+        default: return "⚠️ Hinweis"
+        }
+    }
+
+    @ViewBuilder
+    private func statusDot(_ s: String) -> some View {
+        let c: Color = {
+            switch s {
+            case "ok": return .green
+            case "error": return .red
+            default: return .orange
+            }
+        }()
+        Circle().fill(c).frame(width: 10, height: 10)
+    }
+
+    private func lastRunText(_ d: Date?) -> String {
+        guard let d else { return "Letzter Lauf: –" }
+        return "Letzter Lauf: \(d.formatted(date: .abbreviated, time: .shortened))"
+    }
+
+    private func nextRunText(_ d: Date?) -> String {
+        guard let d else { return "Nächster: –" }
+        return "Nächster: \(d.formatted(date: .abbreviated, time: .shortened))"
     }
 }
