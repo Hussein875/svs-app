@@ -123,6 +123,17 @@ private struct WorkHomeView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    
+                    NavigationLink {
+                        DashboardView()
+                    } label: {
+                        WorkCard(
+                            title: "Dashboard",
+                            subtitle: "Dashboard",
+                            systemImage: "chart.bar.xaxis", trailingValue: 0
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, 4)

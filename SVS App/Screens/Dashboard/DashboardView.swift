@@ -11,19 +11,11 @@ import WebKit
 struct DashboardView: View {
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Dashboard")
-                        .font(.largeTitle.weight(.bold))
-                    Spacer()
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-
-                DashboardWebView(url: URL(string: "https://dashboard.sv-souleiman.de")!)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            DashboardWebView(url: URL(string: "https://dashboard.sv-souleiman.de")!)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .navigationTitle("Dashboard")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
