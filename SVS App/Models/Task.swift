@@ -7,7 +7,7 @@
 import Foundation
 import SwiftUI
 
-struct Task: Identifiable, Codable, Equatable {
+struct Task: Identifiable, Codable, Equatable, Hashable {
     let id: UUID
     var title: String
     var details: String

@@ -19,7 +19,7 @@ struct TasksView: View {
         self.isPresentedModally = isPresentedModally
     }
 
-    @State private var showNewTask = false
+    @State private var showNewTaskNav = false
     @State private var editingTask: Task? = nil
 
     enum AdminTaskScope: String, CaseIterable {
@@ -120,6 +120,7 @@ struct TasksView: View {
                                                 onToggleStatus: { appState.toggleTaskStatus(for: task) },
                                                 onDelete: { appState.deleteTask(task) }
                                             )
+                                            .listRowSeparator(.hidden)
                                         }
                                     }
                                 }
@@ -135,6 +136,7 @@ struct TasksView: View {
                                                 onToggleStatus: { appState.toggleTaskStatus(for: task) },
                                                 onDelete: { appState.deleteTask(task) }
                                             )
+                                            .listRowSeparator(.hidden)
                                         }
                                     }
                                 }
@@ -165,6 +167,7 @@ struct TasksView: View {
                                             onToggleStatus: { appState.toggleTaskStatus(for: task) },
                                             onDelete: { appState.deleteTask(task) }
                                         )
+                                        .listRowSeparator(.hidden)
                                     }
                                 }
                             }
@@ -193,11 +196,11 @@ struct TasksView: View {
             }
         }
         .background(Color(.systemGroupedBackground))
-        .sheet(isPresented: $showNewTask) {
+        .navigationDestination(isPresented: $showNewTaskNav) {
             NewTaskView(mode: .new, task: nil)
                 .environmentObject(appState)
         }
-        .sheet(item: $editingTask) { task in
+        .navigationDestination(item: $editingTask) { task in
             NewTaskView(mode: .edit, task: task)
                 .environmentObject(appState)
         }
@@ -216,7 +219,7 @@ struct TasksView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 10) {
                     Button {
-                        showNewTask = true
+                        showNewTaskNav = true
                     } label: {
                         Image(systemName: "plus")
                     }
@@ -263,6 +266,7 @@ struct CompletedTasksView: View {
                                 onToggleStatus: { appState.toggleTaskStatus(for: task) },
                                 onDelete: { appState.deleteTask(task) }
                             )
+                            .listRowSeparator(.hidden)
                         }
                     }
                 }
@@ -278,6 +282,7 @@ struct CompletedTasksView: View {
                                 onToggleStatus: { appState.toggleTaskStatus(for: task) },
                                 onDelete: { appState.deleteTask(task) }
                             )
+                            .listRowSeparator(.hidden)
                         }
                     }
                 }
@@ -298,6 +303,7 @@ struct CompletedTasksView: View {
                                 onToggleStatus: { appState.toggleTaskStatus(for: task) },
                                 onDelete: { appState.deleteTask(task) }
                             )
+                            .listRowSeparator(.hidden)
                         }
                     }
                 } else {
@@ -306,7 +312,7 @@ struct CompletedTasksView: View {
                 }
             }
         }
-        .listRowSeparator(.hidden)
+                    .listRowSeparator(.hidden)
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Color(.systemGroupedBackground))
@@ -459,72 +465,85 @@ struct NewTaskView: View {
     private var isEditing: Bool { task != nil }
 
     var body: some View {
-        NavigationView {
-            Form {
-                Section(header: Text("Aufgabe")) {
-                    TextField("Titel", text: $title)
+        Form {
+            Section {
+                TextField("Titel", text: $title)
+                    .textInputAutocapitalization(.sentences)
+                    .submitLabel(.next)
 
-                    TextField("Details (optional)", text: $details, axis: .vertical)
-                        .lineLimit(1...4)
+                TextField("Details (optional)", text: $details, axis: .vertical)
+                    .lineLimit(2...6)
+                    .textInputAutocapitalization(.sentences)
+            } header: {
+                Label("Aufgabe", systemImage: "text.badge.checkmark")
+            }
+
+            Section {
+                Toggle("Fälligkeitsdatum setzen", isOn: $hasDueDate.animation(.easeInOut(duration: 0.2)))
+
+                if hasDueDate {
+                    DatePicker("Fällig am", selection: $dueDate, displayedComponents: .date)
+                        .datePickerStyle(.compact)
                 }
+            } header: {
+                Label("Fälligkeit", systemImage: "calendar")
+            } footer: {
+                Text(hasDueDate
+                     ? "Wird in der Aufgabenliste als Fälligkeitsdatum angezeigt."
+                     : "Ohne Fälligkeitsdatum erscheint die Aufgabe nur als offen/erledigt.")
+            }
 
-                Section(header: Text("Fälligkeit")) {
-                    Toggle("Fälligkeitsdatum setzen", isOn: $hasDueDate)
-                    if hasDueDate {
-                        DatePicker("Fällig am", selection: $dueDate, displayedComponents: .date)
-                    }
-                }
-
-                if let current = appState.currentUser {
-                    Section(header: Text("Zuständig")) {
-                        if current.role == .admin {
-                            Picker("Mitarbeiter", selection: Binding(
-                                get: { assignedUser?.id ?? current.id },
-                                set: { id in
-                                    assignedUser = appState.users.first(where: { $0.id == id }) ?? current
-                                })
-                            ) {
-                                ForEach(appState.users) { user in
-                                    Text(user.name).tag(user.id)
-                                }
+            if let current = appState.currentUser {
+                Section {
+                    if current.role == .admin {
+                        Picker("Mitarbeiter", selection: Binding(
+                            get: { assignedUser?.id ?? current.id },
+                            set: { id in
+                                assignedUser = appState.users.first(where: { $0.id == id }) ?? current
+                            })
+                        ) {
+                            ForEach(appState.users) { user in
+                                Text(user.name).tag(user.id)
                             }
-                        } else {
+                        }
+                    } else {
+                        HStack {
+                            Text("Zuständig")
+                            Spacer()
                             Text(current.name)
-                            Text("Aufgaben, die Sie erstellen, werden automatisch Ihnen zugewiesen.")
-                                .font(.caption)
                                 .foregroundColor(.secondary)
                         }
-                    }
-                }
 
-                if isEditing {
-                    Section(header: Text("Status")) {
-                        Picker("Status", selection: $status) {
-                            Text("Offen").tag(TaskStatus.open)
-                            Text("Erledigt").tag(TaskStatus.done)
-                        }
-                        .pickerStyle(.segmented)
+                        Text("Aufgaben, die Sie erstellen, werden automatisch Ihnen zugewiesen.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
+                } header: {
+                    Label("Zuständigkeit", systemImage: "person")
                 }
             }
-            .navigationTitle(isEditing ? "Aufgabe bearbeiten" : "Neue Aufgabe")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Abbrechen") {
-                        dismiss()
+
+            if isEditing {
+                Section {
+                    Picker("Status", selection: $status) {
+                        Text("Offen").tag(TaskStatus.open)
+                        Text("Erledigt").tag(TaskStatus.done)
                     }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Label("Status", systemImage: "checkmark.seal")
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Speichern") {
-                        save()
-                    }
-                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || appState.currentUser == nil)
-                }
-            }
-            .onAppear {
-                configureInitialState()
             }
         }
+        .navigationTitle(isEditing ? "Aufgabe bearbeiten" : "Neue Aufgabe")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Speichern") { save() }
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || appState.currentUser == nil)
+            }
+        }
+        .onAppear { configureInitialState() }
     }
 
     private func configureInitialState() {

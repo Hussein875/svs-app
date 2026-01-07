@@ -176,10 +176,9 @@ struct MyRequestsScreen: View {
             }
         }
         .background(Color(.systemGroupedBackground))
-        .sheet(item: $editingRequest) { request in
-            NavigationStack {
-                EditLeaveRequestView(request: request)
-            }
+        .navigationDestination(item: $editingRequest) { request in
+            EditLeaveRequestView(request: request)
+                .environmentObject(appState)
         }
         .navigationTitle("Meine Anträge")
         .navigationBarTitleDisplayMode(.inline)
@@ -320,10 +319,9 @@ struct PastRequestsScreen: View {
         }
         .navigationTitle("Vergangene Anträge")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $editingRequest) { request in
-            NavigationStack {
-                EditLeaveRequestView(request: request)
-            }
+        .navigationDestination(item: $editingRequest) { request in
+            EditLeaveRequestView(request: request)
+                .environmentObject(appState)
         }
     }
 }
