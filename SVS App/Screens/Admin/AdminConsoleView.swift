@@ -9,7 +9,6 @@ import SwiftUI
 
 struct AdminConsoleView: View {
     @EnvironmentObject var appState: AppState
-    @State private var showNewRequestSheet: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -21,17 +20,6 @@ struct AdminConsoleView: View {
                             .font(.largeTitle.weight(.bold))
 
                         Spacer()
-
-                        Button {
-                            showNewRequestSheet = true
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(.system(size: 16, weight: .semibold))
-                                .frame(width: 40, height: 40)
-                                .background(Circle().fill(Color(.secondarySystemBackground)))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Antrag erstellen")
                     }
                     .padding(.horizontal, 18)
                     .padding(.top, 8)
@@ -96,12 +84,6 @@ struct AdminConsoleView: View {
                 .padding(.top, 2)
             }
             .background(Color(.systemGroupedBackground))
-            .sheet(isPresented: $showNewRequestSheet) {
-                NavigationStack {
-                    NewLeaveRequestView()
-                        .environmentObject(appState)
-                }
-            }
         }
     }
     
@@ -275,6 +257,18 @@ struct AdminRequestsScreen: View {
 
                     Spacer()
 
+                    Button {
+                        showEditScreen = true
+                        editingRequest = nil
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(Color(.secondarySystemBackground)))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Neuen Antrag erstellen")
+
                     Menu {
                         Picker("Filter", selection: $filterMode) {
                             ForEach(AdminQuickFilter.allCases) { mode in
@@ -328,6 +322,9 @@ struct AdminRequestsScreen: View {
                         EditLeaveRequestView(request: request)
                             .environmentObject(appState)
                             .onDisappear { editingRequest = nil }
+                    } else {
+                        NewLeaveRequestView()
+                            .environmentObject(appState)
                     }
                 }
             }
@@ -830,6 +827,7 @@ struct AddUserView: View {
     @State private var role: UserRole = .employee
     @State private var annualLeaveDays: Int = 30
     @State private var colorName: String = "gray"
+    @State private var isCreating: Bool = false
 
     private let availableColors: [String] = ["blue", "green", "orange", "purple", "red", "pink", "teal", "indigo", "yellow", "gray"]
 
@@ -863,9 +861,12 @@ struct AddUserView: View {
             }
 
             Section {
-                Button("Mitarbeiter erstellen") {
+                Button {
                     let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                     let cleanName  = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                    guard !isCreating else { return }
+                    isCreating = true
 
                     _Concurrency.Task {
                         await appState.adminCreateUserViaFunction(
@@ -875,15 +876,56 @@ struct AddUserView: View {
                             colorName: colorName,
                             annualLeaveDays: annualLeaveDays
                         )
-                        // Optional: Passwort-Reset senden (funktioniert nur, wenn der Auth-User existiert!)
-                        appState.sendPasswordReset(to: cleanEmail)
+
+                        isCreating = false
                         dismiss()
                     }
+                } label: {
+                    HStack(spacing: 10) {
+                        if isCreating {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "person.badge.plus")
+                        }
+
+                        Text(isCreating ? "Wird erstellt…" : "Mitarbeiter erstellen")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 6)
                 }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
                 .disabled(
+                    isCreating ||
                     name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                     email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 )
+            }
+        }
+        .overlay {
+            if isCreating {
+                ZStack {
+                    Color.black.opacity(0.12)
+                        .ignoresSafeArea()
+
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Mitarbeiter wird erstellt…")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(18)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                    )
+                }
             }
         }
         .navigationTitle("Neuer Mitarbeiter")
