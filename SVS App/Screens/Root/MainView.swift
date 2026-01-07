@@ -94,7 +94,7 @@ private struct WorkHomeView: View {
                     } label: {
                         WorkCard(
                             title: "Anträge",
-                            subtitle: "Urlaub, Krankheit, Bereitschaft",
+                            subtitle: "Urlaub, Krankheit",
                             systemImage: "doc.text",
                             trailingValue: myActiveRequestsCount
                         )
@@ -106,9 +106,20 @@ private struct WorkHomeView: View {
                     } label: {
                         WorkCard(
                             title: "Aufgaben",
-                            subtitle: "To-dos und Zuständigkeiten",
+                            subtitle: "To-dos",
                             systemImage: "checklist",
                             trailingValue: myOpenTasksCount
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    
+                    NavigationLink {
+                        ProvisionenView()
+                    } label: {
+                        WorkCard(
+                            title: "Provision",
+                            subtitle: "Vermittlungsprovision",
+                            systemImage: "eurosign.circle", trailingValue: 0
                         )
                     }
                     .buttonStyle(.plain)
