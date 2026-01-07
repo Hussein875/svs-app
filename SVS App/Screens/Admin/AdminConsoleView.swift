@@ -184,14 +184,7 @@ struct AdminRequestsScreen: View {
     @EnvironmentObject var appState: AppState
     @State private var editingRequest: LeaveRequest?
     @State private var showEditScreen: Bool = false
-    @State private var searchText: String = ""
     @State private var filterMode: AdminQuickFilter = .all
-
-    private func matchesSearch(_ request: LeaveRequest) -> Bool {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return true }
-        return request.user.name.lowercased().contains(q.lowercased())
-    }
 
     private func matchesQuickFilter(_ request: LeaveRequest) -> Bool {
         let cal = Calendar.current
@@ -215,7 +208,7 @@ struct AdminRequestsScreen: View {
     private var openRequests: [LeaveRequest] {
         appState.leaveRequests
             .filter { $0.type == .vacation && $0.status == .pending }
-            .filter { matchesSearch($0) && matchesQuickFilter($0) }
+            .filter { matchesQuickFilter($0) }
             .sorted { $0.startDate > $1.startDate }
     }
 
@@ -223,7 +216,7 @@ struct AdminRequestsScreen: View {
     private var answeredRequests: [LeaveRequest] {
         appState.leaveRequests
             .filter { !($0.type == .vacation && $0.status == .pending) }
-            .filter { matchesSearch($0) && matchesQuickFilter($0) }
+            .filter { matchesQuickFilter($0) }
             .sorted { $0.startDate > $1.startDate }
     }
 
@@ -316,7 +309,6 @@ struct AdminRequestsScreen: View {
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
                 .background(Color(.systemGroupedBackground))
-                .searchable(text: $searchText, prompt: "Mitarbeiter suchen")
                 .navigationDestination(isPresented: $showEditScreen) {
                     if let request = editingRequest {
                         EditLeaveRequestView(request: request)
@@ -523,15 +515,8 @@ enum AdminUserSortMode: String, CaseIterable, Identifiable {
 struct AdminUsersScreen: View {
     @EnvironmentObject var appState: AppState
     @State private var showAddUser = false
-    @State private var searchText: String = ""
     @State private var roleFilter: AdminUserRoleFilter = .all
     @State private var sortMode: AdminUserSortMode = .name
-    
-    private func matchesSearch(_ user: User) -> Bool {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return true }
-        return user.name.lowercased().contains(q.lowercased())
-    }
 
     private func matchesRole(_ user: User) -> Bool {
         switch roleFilter {
@@ -545,7 +530,6 @@ struct AdminUsersScreen: View {
     private var filteredUsers: [User] {
         let base = appState.users
             .filter { matchesRole($0) }
-            .filter { matchesSearch($0) }
 
         switch sortMode {
         case .name:
@@ -627,10 +611,6 @@ struct AdminUsersScreen: View {
                         }
                     }
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
-                .background(Color(.systemGroupedBackground))
-                .searchable(text: $searchText, prompt: "Mitarbeiter suchen")
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
                 .background(Color(.systemGroupedBackground))

@@ -82,11 +82,6 @@ struct CalendarScreen: View {
                                     .font(.subheadline)
                                 Text(r.type.rawValue)
                                     .font(.caption)
-                                // Bei Krankheit keinen Status-Text anzeigen
-                                if r.type != .sick {
-                                    Text(r.status.rawValue)
-                                        .font(.caption2)
-                                }
                             }
                         }
                     }
