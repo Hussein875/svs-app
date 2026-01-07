@@ -7,7 +7,7 @@
 import Foundation
 import SwiftUI
 
-struct LeaveRequest: Identifiable, Codable {
+struct LeaveRequest: Identifiable, Codable, Hashable {
     let id: UUID
     var user: User
     var startDate: Date
