@@ -416,6 +416,9 @@ struct TaskRow: View {
         )
         .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 6)
         .contentShape(Rectangle())
+        .onTapGesture {
+            onEdit()
+        }
         .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
         .listRowBackground(Color.clear)
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
