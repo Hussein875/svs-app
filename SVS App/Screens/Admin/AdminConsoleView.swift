@@ -700,7 +700,27 @@ struct EditUserView: View {
     @State private var showPinResetAlert: Bool = false
     @State private var showLoginAlert: Bool = false
 
+    @State private var showUnsavedConfirm: Bool = false
+    @State private var initialSnapshot: UserEditSnapshot? = nil
+
     private let availableColors: [String] = ["blue", "green", "orange", "purple", "red", "pink", "teal", "indigo", "yellow", "gray"]
+
+    private struct UserEditSnapshot: Equatable {
+        let name: String
+        let role: UserRole
+        let annualLeaveDays: Int
+        let colorName: String
+    }
+
+    private var hasUnsavedChanges: Bool {
+        guard let s = initialSnapshot else { return false }
+        return s != UserEditSnapshot(
+            name: user.name,
+            role: user.role,
+            annualLeaveDays: user.annualLeaveDays,
+            colorName: user.colorName
+        )
+    }
 
     var body: some View {
         Form {
@@ -741,11 +761,6 @@ struct EditUserView: View {
             }
 
             Section {
-                Button("Änderungen speichern") {
-                    appState.updateUser(user)
-                    dismiss()
-                }
-
                 Button("Mitarbeiter löschen", role: .destructive) {
                     appState.deleteUser(user)
                     dismiss()
@@ -753,6 +768,53 @@ struct EditUserView: View {
             }
         }
         .navigationTitle("Mitarbeiter bearbeiten")
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    if hasUnsavedChanges {
+                        showUnsavedConfirm = true
+                    } else {
+                        dismiss()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                        Text("Zurück")
+                    }
+                }
+            }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Speichern") {
+                    appState.updateUser(user)
+                    // Update snapshot so we don't re-prompt if the user stays on screen
+                    initialSnapshot = UserEditSnapshot(
+                        name: user.name,
+                        role: user.role,
+                        annualLeaveDays: user.annualLeaveDays,
+                        colorName: user.colorName
+                    )
+                    dismiss()
+                }
+                .font(.subheadline.weight(.semibold))
+                .disabled(!hasUnsavedChanges)
+            }
+        }
+        .alert("Ungespeicherte Änderungen", isPresented: $showUnsavedConfirm) {
+            Button("Speichern") {
+                appState.updateUser(user)
+                dismiss()
+            }
+
+            Button("Verwerfen", role: .destructive) {
+                dismiss()
+            }
+
+            Button("Abbrechen", role: .cancel) { }
+        } message: {
+            Text("Speichern?")
+        }
         .sheet(isPresented: $showNewRequest) {
             NavigationStack {
                 NewLeaveRequestView(preselectedUserId: user.id)
@@ -763,6 +825,16 @@ struct EditUserView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text("Wenn der Account existiert, wurde eine Passwort-Reset E-Mail an \(user.email) gesendet.")
+        }
+        .onAppear {
+            if initialSnapshot == nil {
+                initialSnapshot = UserEditSnapshot(
+                    name: user.name,
+                    role: user.role,
+                    annualLeaveDays: user.annualLeaveDays,
+                    colorName: user.colorName
+                )
+            }
         }
     }
 
