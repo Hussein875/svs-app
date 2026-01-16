@@ -525,7 +525,6 @@ enum AdminUserSortMode: String, CaseIterable, Identifiable {
 
 struct AdminUsersScreen: View {
     @EnvironmentObject var appState: AppState
-    @State private var showAddUser = false
     @State private var roleFilter: AdminUserRoleFilter = .all
     @State private var sortMode: AdminUserSortMode = .name
 
@@ -561,8 +560,9 @@ struct AdminUsersScreen: View {
 
                     Spacer()
 
-                    Button {
-                        showAddUser = true
+                    NavigationLink {
+                        AddUserView()
+                            .environmentObject(appState)
                     } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 16, weight: .semibold))
@@ -582,34 +582,11 @@ struct AdminUsersScreen: View {
                         }
                     }
                     .pickerStyle(.segmented)
-
-                    HStack(spacing: 10) {
-                        Menu {
-                            Picker("Sortierung", selection: $sortMode) {
-                                ForEach(AdminUserSortMode.allCases) { m in
-                                    Text(m.rawValue).tag(m)
-                                }
-                            }
-                        } label: {
-                            Label("Sortieren", systemImage: "arrow.up.arrow.down")
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
-                        }
-                        .buttonStyle(.plain)
-
-                        Spacer()
-
-                        Text("\(filteredUsers.count) Mitarbeiter")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
-                }
                 .padding(.horizontal, 18)
 
                 List {
-                    Section(header: Text("Mitarbeiter & Resturlaub")) {
+                    Section(header: Text("Mitarbeiter")) {
                         ForEach(filteredUsers) { user in
                             NavigationLink {
                                 EditUserView(user: user).environmentObject(appState)
@@ -627,12 +604,6 @@ struct AdminUsersScreen: View {
                 .background(Color(.systemGroupedBackground))
             }
             .background(Color(.systemGroupedBackground))
-            .sheet(isPresented: $showAddUser) {
-                NavigationStack {
-                    AddUserView()
-                        .environmentObject(appState)
-                }
-            }
         }
     }
     
@@ -769,16 +740,6 @@ struct EditUserView: View {
                 }
             }
 
-            if appState.currentUser?.role == .admin {
-                Section(header: Text("Aktionen")) {
-                    Button {
-                        showNewRequest = true
-                    } label: {
-                        Label("Antrag für diesen Mitarbeiter erstellen", systemImage: "plus.circle")
-                    }
-                }
-            }
-
             Section {
                 Button("Änderungen speichern") {
                     appState.updateUser(user)
@@ -834,7 +795,7 @@ struct AddUserView: View {
     @State private var name: String = ""
     @State private var email: String = ""
     @State private var role: UserRole = .employee
-    @State private var annualLeaveDays: Int = 30
+    @State private var annualLeaveDays: Int = 24
     @State private var colorName: String = "gray"
     @State private var isCreating: Bool = false
 
@@ -948,6 +909,7 @@ struct AdminOnCallSaturdaysScreen: View {
     @State private var showNew: Bool = false
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var editingRequest: LeaveRequest?
+    @State private var showEdit: Bool = false
 
     private var upcomingOnCalls: [LeaveRequest] {
         let cal = Calendar.current
@@ -1085,6 +1047,7 @@ struct AdminOnCallSaturdaysScreen: View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 editingRequest = req
+                                showEdit = true
                             }
                             .swipeActions {
                                 Button(role: .destructive) {
@@ -1102,16 +1065,20 @@ struct AdminOnCallSaturdaysScreen: View {
             .background(Color(.systemGroupedBackground))
         }
         .background(Color(.systemGroupedBackground))
-        .sheet(isPresented: $showNew) {
-            NavigationStack {
-                NewOnCallSaturdayView()
-                    .environmentObject(appState)
-            }
+        .navigationDestination(isPresented: $showNew) {
+            NewOnCallSaturdayView()
+                .environmentObject(appState)
         }
-        .sheet(item: $editingRequest) { req in
-            NavigationStack {
+        .navigationDestination(isPresented: $showEdit) {
+            if let req = editingRequest {
                 EditOnCallSaturdayView(existingRequest: req)
                     .environmentObject(appState)
+                    .onDisappear {
+                        editingRequest = nil
+                    }
+            } else {
+                // Fallback (should not happen)
+                EmptyView()
             }
         }
     }
@@ -1445,13 +1412,11 @@ private struct AutomationEvent: Identifiable {
     let status: String
     let message: String
     let runAt: Date?
-    let nextRunAt: Date?
 }
 
 private struct AutomationStatusDoc {
     var status: String
     var lastRunAt: Date?
-    var nextRunAt: Date?
     var lastMessage: String
     var events: [AutomationEvent]
 }
@@ -1465,6 +1430,7 @@ struct AdminAutomationsScreen: View {
     @State private var isLoading: Bool = true
     @State private var listener: ListenerRegistration?
     @State private var eventsListener: ListenerRegistration?
+    @State private var showRuns: Bool = false
     
     var body: some View {
         ScrollView {
@@ -1485,13 +1451,25 @@ struct AdminAutomationsScreen: View {
                     automationCard
                         .padding(.horizontal, 18)
 
-                    Text("Letzte 10 Läufe")
-                        .font(.headline)
-                        .padding(.horizontal, 18)
-                        .padding(.top, 8)
+                    DisclosureGroup(isExpanded: $showRuns) {
+                        eventsList
+                            .padding(.top, 10)
+                    } label: {
+                        HStack {
+                            Text("Letzte 10 Läufe")
+                                .font(.headline)
 
-                    eventsList
+                            Spacer()
+
+                            let count = doc?.events.count ?? 0
+                            Text("\(count)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                         .padding(.horizontal, 18)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
                 }
 
                 Spacer(minLength: 18)
@@ -1533,7 +1511,6 @@ struct AdminAutomationsScreen: View {
         var status: String = "warn"
         var lastMessage: String = ""
         var lastRunAt: Date? = nil
-        var nextRunAt: Date? = nil
         var events: [AutomationEvent] = []
 
         group.enter()
@@ -1549,7 +1526,6 @@ struct AdminAutomationsScreen: View {
             status = (data["status"] as? String) ?? "warn"
             lastMessage = (data["lastMessage"] as? String) ?? ""
             lastRunAt = (data["lastRunAt"] as? Timestamp)?.dateValue()
-            nextRunAt = (data["nextRunAt"] as? Timestamp)?.dateValue()
         }
 
         group.enter()
@@ -1566,8 +1542,7 @@ struct AdminAutomationsScreen: View {
                 let s = (data["status"] as? String) ?? "warn"
                 let m = (data["message"] as? String) ?? ""
                 let r = (data["runAt"] as? Timestamp)?.dateValue()
-                let n = (data["nextRunAt"] as? Timestamp)?.dateValue()
-                return AutomationEvent(id: d.documentID, status: s, message: m, runAt: r, nextRunAt: n)
+                return AutomationEvent(id: d.documentID, status: s, message: m, runAt: r)
             }
         }
 
@@ -1575,7 +1550,6 @@ struct AdminAutomationsScreen: View {
             self.doc = AutomationStatusDoc(
                 status: status,
                 lastRunAt: lastRunAt,
-                nextRunAt: nextRunAt,
                 lastMessage: lastMessage,
                 events: events
             )
@@ -1619,10 +1593,6 @@ struct AdminAutomationsScreen: View {
                             .foregroundColor(.secondary)
 
                         Spacer()
-
-                        Label(nextRunText(doc.nextRunAt), systemImage: "arrow.clockwise")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
 
                     if !doc.lastMessage.isEmpty {
@@ -1683,22 +1653,6 @@ struct AdminAutomationsScreen: View {
                                     Spacer(minLength: 0)
                                 }
 
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.caption2)
-                                        .foregroundColor(.secondary)
-
-                                    Text("Nächster:")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-
-                                    Text(e.nextRunAt?.formatted(date: .abbreviated, time: .shortened) ?? "–")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-
-                                    Spacer(minLength: 0)
-                                }
-
                                 if !e.message.isEmpty {
                                     Text(e.message)
                                         .font(.caption)
@@ -1721,15 +1675,6 @@ struct AdminAutomationsScreen: View {
         }
     }
 
-    private func eventTitle(_ e: AutomationEvent) -> String {
-        let run = e.runAt?.formatted(date: .abbreviated, time: .shortened) ?? "–"
-        let next = e.nextRunAt?.formatted(date: .abbreviated, time: .shortened) ?? "–"
-        switch e.status {
-        case "ok": return "OK • \(run) • Nächster: \(next)"
-        case "error": return "Fehler • \(run) • Nächster: \(next)"
-        default: return "Hinweis • \(run) • Nächster: \(next)"
-        }
-    }
 
     private func startListening() {
         isLoading = true
@@ -1754,12 +1699,10 @@ struct AdminAutomationsScreen: View {
             let status = (data["status"] as? String) ?? "warn"
             let lastMessage = (data["lastMessage"] as? String) ?? ""
             let lastRunAt = (data["lastRunAt"] as? Timestamp)?.dateValue()
-            let nextRunAt = (data["nextRunAt"] as? Timestamp)?.dateValue()
 
             self.doc = AutomationStatusDoc(
                 status: status,
                 lastRunAt: lastRunAt,
-                nextRunAt: nextRunAt,
                 lastMessage: lastMessage,
                 events: self.doc?.events ?? []
             )
@@ -1781,15 +1724,14 @@ struct AdminAutomationsScreen: View {
                 let status = (data["status"] as? String) ?? "warn"
                 let message = (data["message"] as? String) ?? ""
                 let runAt = (data["runAt"] as? Timestamp)?.dateValue()
-                let nextRunAt = (data["nextRunAt"] as? Timestamp)?.dateValue()
-                return AutomationEvent(id: d.documentID, status: status, message: message, runAt: runAt, nextRunAt: nextRunAt)
+                return AutomationEvent(id: d.documentID, status: status, message: message, runAt: runAt)
             }
 
             if var existing = self.doc {
                 existing.events = items
                 self.doc = existing
             } else {
-                self.doc = AutomationStatusDoc(status: "warn", lastRunAt: nil, nextRunAt: nil, lastMessage: "", events: items)
+                self.doc = AutomationStatusDoc(status: "warn", lastRunAt: nil, lastMessage: "", events: items)
             }
         }
     }
@@ -1817,10 +1759,5 @@ struct AdminAutomationsScreen: View {
     private func lastRunText(_ d: Date?) -> String {
         guard let d else { return "Letzter Lauf: –" }
         return "Letzter Lauf: \(d.formatted(date: .abbreviated, time: .shortened))"
-    }
-
-    private func nextRunText(_ d: Date?) -> String {
-        guard let d else { return "Nächster: –" }
-        return "Nächster: \(d.formatted(date: .abbreviated, time: .shortened))"
     }
 }
