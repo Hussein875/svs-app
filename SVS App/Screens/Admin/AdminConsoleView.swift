@@ -383,7 +383,9 @@ private struct AdminLeaveRequestCard: View {
 
     private var isVacation: Bool { request.type == .vacation }
     private var accent: Color {
-        request.type == .sick ? Color.gray : colorForLeaveStatus(request.status)
+        if request.type == .onCallSaturday { return .blue }
+        if request.type == .sick { return .gray }
+        return colorForLeaveStatus(request.status)
     }
     @State private var showAudit: Bool = false
 
@@ -402,8 +404,8 @@ private struct AdminLeaveRequestCard: View {
 
                         Spacer()
 
-                        // Krankheit: kein Status-Badge
-                        if request.type != .sick {
+                        // Krankheit + Samstags-Bereitschaft: kein Status-Badge
+                        if request.type != .sick && request.type != .onCallSaturday {
                             statusBadgeView(request.status)
                         }
                     }
@@ -412,9 +414,13 @@ private struct AdminLeaveRequestCard: View {
                         .font(.subheadline)
 
                     HStack(spacing: 8) {
-                        Image(systemName: request.type == .sick ? "cross.case" : "beach.umbrella")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Image(systemName: {
+                            if request.type == .sick { return "cross.case" }
+                            if request.type == .onCallSaturday { return "person.badge.clock" }
+                            return "beach.umbrella"
+                        }())
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                         Text(request.type.rawValue)
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -452,46 +458,6 @@ private struct AdminLeaveRequestCard: View {
             let createdBy = appState.userName(for: request.createdByUserId)
             let updatedBy = request.updatedByUserId.map { appState.userName(for: $0) }
             let hasUpdate = (request.updatedAt != nil && updatedBy != nil)
-
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    showAudit.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: showAudit ? "chevron.down" : "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.secondary)
-
-                    Text(showAudit ? "Audit ausblenden" : "Audit anzeigen")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundColor(.secondary)
-
-                    Spacer()
-
-                    // Optional: kleine Kurzinfo, damit man ohne Aufklappen Kontext hat
-                    Text(shortDateString(request.createdAt))
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 2)
-
-            if showAudit {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Erstellt von: \(createdBy) • \(shortDateString(request.createdAt))")
-                    if let uAt = request.updatedAt, let uBy = updatedBy {
-                        Text("Geändert: \(uBy) • \(shortDateString(uAt))")
-                    } else if !hasUpdate {
-                        Text("Noch nicht geändert")
-                    }
-                }
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
         }
         .padding(14)
         .background(
@@ -516,8 +482,6 @@ enum AdminUserRoleFilter: String, CaseIterable, Identifiable {
 
 enum AdminUserSortMode: String, CaseIterable, Identifiable {
     case name = "Name"
-    case remainingAsc = "Resturlaub ↑"
-    case remainingDesc = "Resturlaub ↓"
     var id: String { rawValue }
 }
 
@@ -544,10 +508,6 @@ struct AdminUsersScreen: View {
         switch sortMode {
         case .name:
             return base.sorted { $0.name.lowercased() < $1.name.lowercased() }
-        case .remainingAsc:
-            return base.sorted { appState.remainingLeaveDays(for: $0) < appState.remainingLeaveDays(for: $1) }
-        case .remainingDesc:
-            return base.sorted { appState.remainingLeaveDays(for: $0) > appState.remainingLeaveDays(for: $1) }
         }
     }
 

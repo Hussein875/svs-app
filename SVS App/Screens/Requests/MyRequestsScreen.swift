@@ -354,7 +354,16 @@ private struct MyLeaveRequestCard: View {
             HStack(spacing: 10) {
                 // Farb-Leiste links
                 RoundedRectangle(cornerRadius: 3)
-                    .fill(request.type == .sick ? Color.gray.opacity(0.35) : colorForLeaveStatus(request.status).opacity(0.9))
+                    .fill({
+                        switch request.type {
+                        case .sick:
+                            return Color.gray.opacity(0.35)
+                        case .onCallSaturday:
+                            return Color.blue.opacity(0.9)
+                        case .vacation:
+                            return colorForLeaveStatus(request.status).opacity(0.9)
+                        }
+                    }())
                     .frame(width: 6)
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -365,7 +374,7 @@ private struct MyLeaveRequestCard: View {
                         Spacer()
 
                         // Status nur bei Urlaub anzeigen
-                        if request.type != .sick {
+                        if request.type != .sick && request.type != .onCallSaturday {
                             statusBadgeView(request.status)
                         }
                     }
@@ -398,7 +407,16 @@ private struct MyLeaveRequestCard: View {
         .overlay(
             RoundedRectangle(cornerRadius: 16)
                 .stroke(
-                    (request.type == .sick ? Color.gray : colorForLeaveStatus(request.status)).opacity(0.18),
+                    ({
+                        switch request.type {
+                        case .sick:
+                            return Color.gray
+                        case .onCallSaturday:
+                            return Color.blue
+                        case .vacation:
+                            return colorForLeaveStatus(request.status)
+                        }
+                    }()).opacity(0.18),
                     lineWidth: 1
                 )
         )
