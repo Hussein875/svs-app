@@ -51,6 +51,29 @@ struct MainView: View {
 private struct WorkHomeView: View {
     @EnvironmentObject var appState: AppState
 
+    private var displayName: String {
+        let name = appState.currentUser?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? "" : name
+    }
+
+    private var userAccentColor: Color {
+        let key = (appState.currentUser?.colorName ?? "").lowercased()
+        switch key {
+        case "blau", "blue": return .blue
+        case "grün", "gruen", "green": return .green
+        case "rot", "red": return .red
+        case "orange": return .orange
+        case "lila", "purple": return .purple
+        case "pink": return .pink
+        case "gelb", "yellow": return .yellow
+        case "grau", "gray", "grey": return .gray
+        case "mint": return .mint
+        case "teal": return .teal
+        case "indigo": return .indigo
+        default: return .blue
+        }
+    }
+
     // Quick numbers
     private var myOpenTasksCount: Int {
         guard let me = appState.currentUser else { return 0 }
@@ -68,79 +91,100 @@ private struct WorkHomeView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // MARK: Header (clean)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "car.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.tint)
 
-                // Header
-                HStack {
-                    Text("Mein Bereich")
-                        .font(.largeTitle.bold())
-                    Spacer()
+                            Text("Mein Bereich")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.secondary)
+
+                            Spacer(minLength: 0)
+                        }
+
+                        Text(displayName.isEmpty ? "Mein Bereich" : "Hallo, \(displayName)")
+                            .font(.largeTitle.bold())
+                            .foregroundColor(.primary)
+
+                        // Subtle accent underline
+                        Capsule(style: .continuous)
+                            .fill(.tint)
+                            .frame(width: 54, height: 4)
+                            .padding(.top, 4)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+
+                    // MARK: Quick numbers
+                    HStack(spacing: 12) {
+                        StatPill(title: "Aktive Anträge", value: myActiveRequestsCount, systemImage: "doc.text")
+                        StatPill(title: "Offene Aufgaben", value: myOpenTasksCount, systemImage: "checklist")
+                    }
+                    .padding(.horizontal, 18)
+
+                    // MARK: Cards
+                    VStack(spacing: 12) {
+                        NavigationLink {
+                            MyRequestsScreen()
+                        } label: {
+                            WorkCard(
+                                title: "Anträge",
+                                subtitle: "Urlaub, Krankheit",
+                                systemImage: "doc.text",
+                                trailingValue: myActiveRequestsCount
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            TasksView()
+                        } label: {
+                            WorkCard(
+                                title: "Aufgaben",
+                                subtitle: "To-dos",
+                                systemImage: "checklist",
+                                trailingValue: myOpenTasksCount
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            ProvisionenView()
+                        } label: {
+                            WorkCard(
+                                title: "Provision",
+                                subtitle: "Vermittlungsprovision",
+                                systemImage: "eurosign.circle",
+                                trailingValue: 0
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            DashboardView()
+                        } label: {
+                            WorkCard(
+                                title: "Dashboard",
+                                subtitle: "Übersicht",
+                                systemImage: "chart.bar.xaxis",
+                                trailingValue: 0
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 18)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 2)
-                .padding(.bottom, 2)
-
-                // Small overview row
-                HStack(spacing: 12) {
-                    StatPill(title: "Aktive Anträge", value: myActiveRequestsCount, systemImage: "doc.text")
-                    StatPill(title: "Offene Aufgaben", value: myOpenTasksCount, systemImage: "checklist")
-                }
-                .padding(.horizontal, 18)
-
-                // Two clear entries (cards)
-                VStack(spacing: 12) {
-                    NavigationLink {
-                        MyRequestsScreen()
-                    } label: {
-                        WorkCard(
-                            title: "Anträge",
-                            subtitle: "Urlaub, Krankheit",
-                            systemImage: "doc.text",
-                            trailingValue: myActiveRequestsCount
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    NavigationLink {
-                        TasksView()
-                    } label: {
-                        WorkCard(
-                            title: "Aufgaben",
-                            subtitle: "To-dos",
-                            systemImage: "checklist",
-                            trailingValue: myOpenTasksCount
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    
-                    NavigationLink {
-                        ProvisionenView()
-                    } label: {
-                        WorkCard(
-                            title: "Provision",
-                            subtitle: "Vermittlungsprovision",
-                            systemImage: "eurosign.circle", trailingValue: 0
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    
-                    NavigationLink {
-                        DashboardView()
-                    } label: {
-                        WorkCard(
-                            title: "Dashboard",
-                            subtitle: "Dashboard",
-                            systemImage: "chart.bar.xaxis", trailingValue: 0
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 4)
-
-                Spacer(minLength: 0)
             }
             .background(Color(.systemGroupedBackground))
+            .tint(userAccentColor)
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
@@ -154,7 +198,7 @@ private struct StatPill: View {
         HStack(spacing: 10) {
             Image(systemName: systemImage)
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.secondary)
+                .foregroundStyle(.tint)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -168,7 +212,7 @@ private struct StatPill: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
         .padding(.horizontal, 12)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -190,12 +234,12 @@ private struct WorkCard: View {
     var body: some View {
         HStack(spacing: 14) {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.blue.opacity(0.12))
+                .fill(.tint.opacity(0.12))
                 .frame(width: 44, height: 44)
                 .overlay(
                     Image(systemName: systemImage)
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.blue)
+                        .foregroundStyle(.tint)
                 )
 
             VStack(alignment: .leading, spacing: 3) {
