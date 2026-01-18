@@ -544,8 +544,6 @@ async function buildProvisionPdfBuffer(args: {
 
     doc.text(`Bestätigt am: ${acceptedLabel}`);
 
-    doc.text(`Bestätigt am: ${acceptedLabel}`);
-
     doc.moveDown(1);
 
     // Signature
