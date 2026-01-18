@@ -1,3 +1,12 @@
 .DS_Store
 xcuserdata/
 *.xcuserstate
+
+# macOS
+.DS_Store
+
+# Firebase logs
+firebase-debug.log
+
+# build artifacts
+svs-provision-form.zip
