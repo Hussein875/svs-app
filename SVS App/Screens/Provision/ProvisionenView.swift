@@ -1,16 +1,35 @@
 import SwiftUI
 import UIKit
+import FirebaseAuth
+import FirebaseFirestore
 
 /// Provisionen werden nicht mehr in der App erfasst.
 /// Stattdessen erzeugt die App einen Einmal-Link, den du dem Kunden schicken kannst.
 /// Das Provisionsformular wird online ausgefüllt (inkl. Unterschrift).
 struct ProvisionenView: View {
     @EnvironmentObject var appState: AppState
+    
+    @State private var amountText: String = ""
+    @FocusState private var amountFocused: Bool
+    @State private var selectedCommission: CommissionRow? = nil
+
+    @State private var commissions: [CommissionRow] = []
+    @State private var isLoadingCommissions: Bool = false
+    @State private var commissionsError: String? = nil
+    @State private var isAdmin: Bool = false
+    @State private var commissionsListener: ListenerRegistration? = nil
 
     // MARK: - Link Generation
 
     /// Basis-URL deines Online-Formulars. (Server muss Token validieren / einmalig machen.)
     private let provisionFormBaseURL = URL(string: "https://sv-souleiman.de/provision")!
+
+    private let createProvisionLinkEndpoint = URL(
+        string: "https://createprovisionlink-df5lzkocnq-uc.a.run.app"
+    )!
+
+    /// Wie lange der Link gültig sein soll (Tage)
+    private let defaultTTLDays: Int = 30
 
     @State private var isGenerating: Bool = false
     @State private var generatedURL: URL? = nil
@@ -23,28 +42,69 @@ struct ProvisionenView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-
+                VStack(alignment: .leading, spacing: 14) {
+                    
                     header
-
+                    
                     if showInlineError {
                         InlineErrorBanner(message: inlineErrorMessage)
                             .padding(.horizontal, 18)
                             .transition(.opacity)
                     }
-
+                    
                     SectionCard(title: "Einmal-Link", systemImage: "link") {
                         VStack(alignment: .leading, spacing: 10) {
-                            Text("Erzeuge einen Einmal-Link für das Online-Provisionsformular. Den Link kannst du dem Kunden schicken. Das Formular wird online ausgefüllt und dort unterschrieben.")
+                            Text("Erzeuge einen Einmal-Link für das Online-Provisionsformular. Den Link kannst du dem Vermittler schicken. Das Formular wird online ausgefüllt und dort unterschrieben.")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
-
+                            
                             if let lastGeneratedAt {
                                 Text("Zuletzt erstellt: \(lastGeneratedAt.formatted(date: .abbreviated, time: .shortened))")
                                     .font(.footnote)
                                     .foregroundColor(.secondary)
                             }
+                            
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Betrag")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                HStack(spacing: 10) {
+                                    Image(systemName: "eurosign.circle")
+                                        .foregroundColor(.secondary)
+                                    
+                                    TextField("z. B. 50,00", text: $amountText)
+                                        .keyboardType(.numbersAndPunctuation)
+                                        .focused($amountFocused)
+                                        .textInputAutocapitalization(.never)
+                                        .autocorrectionDisabled(true)
+                                        .textContentType(.none)
+                                        .submitLabel(.done)
+                                        .onSubmit {
+                                            amountFocused = false
+                                        }
+                                        .onChange(of: amountFocused) { _, focused in
+                                            if !focused {
+                                                amountText = normalizeAmountText(amountText)
+                                            }
+                                        }
+                                    
+                                    Text("EUR")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(.tertiarySystemBackground))
+                                )
 
+                                Text("Hinweis: Der Betrag wird nicht im Webformular angezeigt, sondern nur im Hintergrund gespeichert.")
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                            }
+                            
                             Button {
                                 _Concurrency.Task {
                                     await generateOneTimeLink()
@@ -64,24 +124,24 @@ struct ProvisionenView: View {
                                 .padding(.vertical, 14)
                             }
                             .buttonStyle(.borderedProminent)
-                            .tint(Color(.secondaryLabel))
+                            .tint(Color.accentColor)
                             .foregroundColor(.white)
                             .disabled(isGenerating)
-
+                            
                             if let generatedURL {
                                 Divider().opacity(0.18)
-
+                                
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("Link")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
-
+                                    
                                     Text(generatedURL.absoluteString)
                                         .font(.footnote)
                                         .foregroundColor(.primary)
                                         .textSelection(.enabled)
                                         .lineLimit(3)
-
+                                    
                                     HStack(spacing: 10) {
                                         Button {
                                             UIPasteboard.general.string = generatedURL.absoluteString
@@ -103,24 +163,99 @@ struct ProvisionenView: View {
                         }
                     }
                     .padding(.horizontal, 18)
-
+                    
                     SectionCard(title: "Übersicht", systemImage: "list.bullet.rectangle") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Die eingereichten Provisionen werden hier automatisch angezeigt, sobald das Online-Formular in Firestore schreibt (z. B. Collection \"commissions\").")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-
-                            Text("Hinweis: Dieses Fenster dient nur der Übersicht und dem Erzeugen des Einmal-Links.")
+                        VStack(alignment: .leading, spacing: 10) {
+                            
+                            if let commissionsError {
+                                InlineErrorBanner(message: commissionsError)
+                            }
+                            
+                            if isLoadingCommissions {
+                                HStack(spacing: 10) {
+                                    ProgressView()
+                                    Text("Lade Provisionen …")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            
+                            if commissions.isEmpty && !isLoadingCommissions {
+                                Text("Noch keine Einträge.")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            ForEach(commissions) { row in
+                                Button {
+                                    selectedCommission = row
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        HStack(alignment: .firstTextBaseline) {
+                                            Text(row.recommenderName)
+                                                .font(.headline)
+                                                .lineLimit(1)
+                                            
+                                            Spacer()
+                                            
+                                            if let a = row.amount {
+                                                Text(formatEUR(a))
+                                                    .font(.headline)
+                                            }
+                                        }
+                                        
+                                        HStack(spacing: 10) {
+                                            Label(
+                                                row.payoutMethod.uppercased(),
+                                                systemImage: row.payoutMethod == "paypal" ? "p.circle" : "building.columns"
+                                            )
+                                            .font(.footnote)
+                                            .foregroundColor(.secondary)
+                                            
+                                            Spacer()
+                                            
+                                            if let d = row.createdAt {
+                                                Text(d.formatted(date: .abbreviated, time: .shortened))
+                                                    .font(.footnote)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                            
+                                            Image(systemName: "chevron.right")
+                                                .font(.footnote.weight(.semibold))
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    .padding(12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 14)
+                                            .fill(Color(.tertiarySystemBackground))
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            
+                            Text(isAdmin ? "Admin-Ansicht: alle Einträge." : "Nur deine Einträge (nach Ersteller des Einmal-Links).")
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
+                                .padding(.top, 4)
                         }
+                        
                     }
-                    .padding(.horizontal, 18)
-
+                    .padding(.top, 0)
                 }
-                .padding(.top, 0)
             }
             .background(Color(.systemGroupedBackground))
+            .scrollDismissesKeyboard(.interactively)
+            .onAppear {
+                startCommissionsListenerIfNeeded()
+            }
+            .onDisappear {
+                commissionsListener?.remove()
+                commissionsListener = nil
+            }
+            .sheet(item: $selectedCommission) { row in
+                CommissionDetailSheet(row: row)
+            }
         }
     }
 
@@ -142,35 +277,193 @@ struct ProvisionenView: View {
 
     // MARK: - Actions
 
-    @MainActor
     private func generateOneTimeLink() async {
-        clearInlineError()
-        isGenerating = true
-        defer { isGenerating = false }
-
-        // Token lokal erzeugen. Der Server muss diesen Token validieren (einmalig + Ablaufzeit).
-        // Sobald deine Cloud Function / Web-App steht, ersetzt du diese Stelle durch einen Call
-        // an die Function, die den Token in Firestore persistiert und den finalen Link zurückgibt.
-        let token = UUID().uuidString
-
-        var comps = URLComponents(url: provisionFormBaseURL, resolvingAgainstBaseURL: false)
-        let existing = comps?.queryItems ?? []
-        comps?.queryItems = existing + [
-            URLQueryItem(name: "token", value: token)
-        ]
-
-        guard let url = comps?.url else {
-            showError("Link konnte nicht erstellt werden.")
-            return
+        await MainActor.run {
+            clearInlineError()
+            isGenerating = true
         }
+        defer {
+            _Concurrency.Task { @MainActor in
+                isGenerating = false
+            }
+        }
+        do {
+            guard let user = Auth.auth().currentUser else {
+                await MainActor.run {
+                    showError("Nicht angemeldet. Bitte erneut einloggen.")
+                }
+                return
+            }
+            
+            let idToken = try await user.getIDToken()
+            
+            var request = URLRequest(url: createProvisionLinkEndpoint)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+            
+            var payload: [String: Any] = ["ttlDays": defaultTTLDays]
+            if let amount = parseAmountToDouble(amountText) {
+                payload["amount"] = amount
+            }
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+            
+            let (data, response) = try await URLSession.shared.data(for: request)
+            
+            guard let http = response as? HTTPURLResponse else {
+                await MainActor.run {
+                    showError("Serverantwort ungültig.")
+                }
+                return
+            }
+            
+            guard (200...299).contains(http.statusCode) else {
+                let serverText = String(data: data, encoding: .utf8) ?? ""
+                await MainActor.run {
+                    showError("Link konnte nicht erstellt werden (\(http.statusCode)). \(serverText)".trimmed)
+                }
+                return
+            }
+            
+            struct CreateLinkResponse: Decodable {
+                let ok: Bool?
+                let token: String?
+                let url: String?
+                let expiresAt: String?
+            }
+            
+            let decoded = try JSONDecoder().decode(CreateLinkResponse.self, from: data)
+            
+            let finalURL: URL?
+            if let urlString = decoded.url, let u = URL(string: urlString) {
+                finalURL = u
+            } else if let token = decoded.token {
+                var comps = URLComponents(url: provisionFormBaseURL, resolvingAgainstBaseURL: false)
+                let existing = comps?.queryItems ?? []
+                comps?.queryItems = existing + [URLQueryItem(name: "token", value: token)]
+                finalURL = comps?.url
+            } else {
+                finalURL = nil
+            }
+            
+            guard let url = finalURL else {
+                await MainActor.run {
+                    showError("Server hat keinen gültigen Link zurückgegeben.")
+                }
+                return
+            }
+            
+            await MainActor.run {
+                generatedURL = url
+                lastGeneratedAt = Date()
 
-        generatedURL = url
-        lastGeneratedAt = Date()
-
-        // Optional: direkt kopieren
-        UIPasteboard.general.string = url.absoluteString
-        appState.showToast(.success, "Einmal-Link erstellt und kopiert")
+                UIPasteboard.general.string = url.absoluteString
+                appState.showToast(.success, "Einmal-Link erstellt und kopiert")
+            }
+        } catch {
+            await MainActor.run {
+                showError("Link konnte nicht erstellt werden: \(error.localizedDescription)")
+            }
+        }
     }
+        
+        @MainActor
+        private func startCommissionsListenerIfNeeded() {
+            guard commissionsListener == nil else { return }
+            guard let user = Auth.auth().currentUser else { return }
+
+            isLoadingCommissions = true
+            commissionsError = nil
+
+            let db = Firestore.firestore()
+
+            db.collection("users").document(user.uid).getDocument { snap, err in
+                if let err {
+                    _Concurrency.Task { @MainActor in
+                        self.isLoadingCommissions = false
+                        self.commissionsError = "Rolle konnte nicht geladen werden: \(err.localizedDescription)"
+                    }
+                    return
+                }
+
+                let roleRaw = (snap?.data()?["roleRaw"] as? String) ?? ""
+                let admin = roleRaw == "admin"
+
+                _Concurrency.Task { @MainActor in
+                    self.isAdmin = admin
+                }
+
+                var q: Query = db.collection("commissions")
+                    .order(by: "acceptedAtServer", descending: true)
+                    .limit(to: 50)
+
+                if !admin {
+                    q = q.whereField("createdByUid", isEqualTo: user.uid)
+                }
+
+                let listener = q.addSnapshotListener { snap, err in
+                    if let err {
+                        _Concurrency.Task { @MainActor in
+                            self.isLoadingCommissions = false
+                            self.commissionsError = "Provisionen konnten nicht geladen werden: \(err.localizedDescription)"
+                        }
+                        return
+                    }
+
+                    let docs = snap?.documents ?? []
+                    let mapped: [CommissionRow] = docs.map { d in
+                        let data = d.data()
+
+                        func clean(_ s: String?) -> String? {
+                            guard let s else { return nil }
+                            let v = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                            return v.isEmpty ? nil : v
+                        }
+
+                        let name = (data["recommenderName"] as? String) ?? "—"
+
+                        let street = clean(data["recommenderStreet"] as? String)
+                        let zip = clean(data["recommenderZip"] as? String)
+                        let city = clean(data["recommenderCity"] as? String)
+
+                        let payout = (data["payoutMethod"] as? String) ?? "—"
+                        let payoutIban = clean(data["payoutIban"] as? String)
+                        let payoutPaypal = clean(data["payoutPaypal"] as? String)
+
+                        let amount = data["amount"] as? Double
+                        let notes = clean(data["notes"] as? String)
+
+                        let ts = data["acceptedAtServer"] as? Timestamp
+                        let createdByUid = clean(data["createdByUid"] as? String)
+
+                        return CommissionRow(
+                            id: d.documentID,
+                            recommenderName: name,
+                            recommenderStreet: street,
+                            recommenderZip: zip,
+                            recommenderCity: city,
+                            payoutMethod: payout,
+                            payoutIban: payoutIban,
+                            payoutPaypal: payoutPaypal,
+                            amount: amount,
+                            notes: notes,
+                            createdAt: ts?.dateValue(),
+                            createdByUid: createdByUid
+                        )
+                    }
+
+                    _Concurrency.Task { @MainActor in
+                        self.isLoadingCommissions = false
+                        self.commissions = mapped
+                    }
+                }
+
+                _Concurrency.Task { @MainActor in
+                    self.commissionsListener = listener
+                }
+            }
+        }
+    
 
     private func showError(_ msg: String) {
         inlineErrorMessage = msg
@@ -185,7 +478,40 @@ struct ProvisionenView: View {
     }
 }
 
-// MARK: - Mini Components
+
+
+
+private struct CopyableValueRow: View {
+    let title: String
+    let value: String
+    let copyValue: String?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+
+            Spacer()
+
+            Text(value)
+                .font(.footnote)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
+
+            if let copyValue, !copyValue.isEmpty {
+                Button {
+                    UIPasteboard.general.string = copyValue
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.footnote.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Kopieren")
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
 
 private struct SectionCard<Content: View>: View {
     let title: String
@@ -205,8 +531,145 @@ private struct SectionCard<Content: View>: View {
 
             content
         }
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+}
+
+private struct CommissionDetailSheet: View {
+    let row: CommissionRow
+    @Environment(\.dismiss) private var dismiss
+    @State private var createdByLabel: String? = nil
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Empfehlender") {
+                    LabeledContent("Name", value: row.recommenderName)
+                    
+                    let street = row.recommenderStreet
+                    let zipCity: String = {
+                        switch (row.recommenderZip, row.recommenderCity) {
+                        case let (z?, c?): return "\(z) \(c)"
+                        case let (z?, nil): return z
+                        case let (nil, c?): return c
+                        default: return ""
+                        }
+                    }()
+                    
+                    if street == nil && zipCity.isEmpty {
+                        LabeledContent("Adresse", value: "—")
+                    } else {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Adresse")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            if let street { Text(street) }
+                            if !zipCity.isEmpty {
+                                Text(zipCity)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+                
+                Section("Provision") {
+                    if let a = row.amount {
+                        LabeledContent("Betrag", value: formatEUR(a))
+                    } else {
+                        LabeledContent("Betrag", value: "—")
+                    }
+                    
+                    LabeledContent("Auszahlungsart", value: row.payoutMethod.uppercased())
+                    
+                    if row.payoutMethod == "iban" {
+                        CopyableValueRow(
+                            title: "IBAN",
+                            value: row.payoutIban ?? "—",
+                            copyValue: row.payoutIban
+                        )
+                    } else if row.payoutMethod == "paypal" {
+                        CopyableValueRow(
+                            title: "PayPal",
+                            value: row.payoutPaypal ?? "—",
+                            copyValue: row.payoutPaypal
+                        )
+                    }
+                    
+                    if let notes = row.notes {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Referenz / Notiz")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(notes)
+                        }
+                    } else {
+                        LabeledContent("Referenz / Notiz", value: "—")
+                    }
+                }
+                
+                Section("Zeit") {
+                    if let d = row.createdAt {
+                        LabeledContent(
+                            "Übermittelt",
+                            value: d.formatted(date: .complete, time: .shortened)
+                        )
+                    } else {
+                        LabeledContent("Übermittelt", value: "—")
+                    }
+                }
+                
+                Section("Dokument") {
+                    LabeledContent("ID", value: row.id)
+                    LabeledContent(
+                        "Veranlasst durch",
+                        value: createdByLabel ?? (row.createdByUid ?? "—")
+                    )
+                }
+            }
+            .onAppear {
+                resolveCreatedByLabelIfNeeded()
+            }
+            .navigationTitle("Provision")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Schließen") { dismiss() }
+                }
+            }
+        }
+    }
+    
+    private func resolveCreatedByLabelIfNeeded() {
+        guard createdByLabel == nil else { return }
+        guard let uid = row.createdByUid, !uid.isEmpty else {
+            createdByLabel = "—"
+            return
+        }
+
+        if let current = Auth.auth().currentUser?.uid, current == uid {
+            createdByLabel = "Du"
+            return
+        }
+
+        let db = Firestore.firestore()
+        db.collection("users").document(uid).getDocument { snap, _ in
+            let data = snap?.data() ?? [:]
+            let candidates: [String] = [
+                (data["displayName"] as? String) ?? "",
+                (data["name"] as? String) ?? "",
+                (data["fullName"] as? String) ?? "",
+                (data["email"] as? String) ?? ""
+            ]
+            let best = candidates.first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+            DispatchQueue.main.async {
+                self.createdByLabel = best ?? uid
+            }
+        }
     }
 }
 
@@ -229,6 +692,75 @@ private struct InlineErrorBanner: View {
 
 private extension String {
     var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+}
+
+private struct CommissionRow: Identifiable {
+    let id: String
+    let recommenderName: String
+
+    let recommenderStreet: String?
+    let recommenderZip: String?
+    let recommenderCity: String?
+
+    let payoutMethod: String
+    let payoutIban: String?
+    let payoutPaypal: String?
+
+    let amount: Double?
+    let notes: String?
+
+    let createdAt: Date?
+    let createdByUid: String?
+}
+
+
+private enum ProvisionFormatters {
+    static let eur: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = "EUR"
+        f.maximumFractionDigits = 2
+        return f
+    }()
+
+    static let decimal: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        f.decimalSeparator = ","
+        f.groupingSeparator = "."
+        f.usesGroupingSeparator = true
+        return f
+    }()
+}
+
+private func formatEUR(_ v: Double) -> String {
+    ProvisionFormatters.eur.string(from: NSNumber(value: v)) ??
+        String(format: "%.2f EUR", v)
+}
+
+private func normalizeAmountText(_ raw: String) -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return "" }
+
+    // Accept comma or dot
+    let normalized = trimmed.replacingOccurrences(of: ",", with: ".")
+    guard let value = Double(normalized) else { return raw }
+
+    return ProvisionFormatters.decimal.string(from: NSNumber(value: value)) ?? raw
+}
+
+private func parseAmountToDouble(_ raw: String) -> Double? {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    // Remove spaces and common grouping separators, then convert decimal comma to dot.
+    let noSpaces = trimmed.replacingOccurrences(of: " ", with: "")
+    let noGrouping = noSpaces.replacingOccurrences(of: ".", with: "")
+    let normalized = noGrouping.replacingOccurrences(of: ",", with: ".")
+
+    return Double(normalized)
 }
 
 #Preview {
