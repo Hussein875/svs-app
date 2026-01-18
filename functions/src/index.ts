@@ -1,15 +1,24 @@
 import * as admin from "firebase-admin";
 import * as crypto from "crypto";
 import {setGlobalOptions} from "firebase-functions/v2";
+import {defineSecret} from "firebase-functions/params";
 import {
   onCall,
   onRequest,
   HttpsError,
 } from "firebase-functions/v2/https";
+import {onDocumentCreated} from "firebase-functions/v2/firestore";
+import nodemailer from "nodemailer";
+import PDFDocument from "pdfkit";
 
 admin.initializeApp();
 
 setGlobalOptions({region: "us-central1"});
+
+// Gen2 Secrets (Firebase Functions)
+const SMTP_HOST_SECRET = defineSecret("SMTP_HOST");
+const SMTP_USER_SECRET = defineSecret("SMTP_USER");
+const SMTP_PASS_SECRET = defineSecret("SMTP_PASS");
 
 type Role = "admin" | "employee" | "expert";
 
@@ -372,6 +381,250 @@ function getHeaderIp(req: unknown): string | null {
   return raw || null;
 }
 
+// ------------------------------------------------------------------
+// Provision: PDF + Storage + E-Mail (automatisch nach Übermittlung)
+// Trigger: commissions/{commissionId} onCreate
+// - PDF inkl. Unterschrift (signaturePngBase64)
+// - Upload nach Firebase Storage: provision_pdfs/<commissionId>.pdf
+// - E-Mail an info@sv-souleiman.de (SMTP via ENV)
+// ------------------------------------------------------------------
+
+type ProvisionMailConfig = {
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+  from: string;
+  to: string;
+  secure: boolean;
+};
+
+/**
+ * Reads SMTP configuration for provision notifications.
+ *
+ * Host/user/pass are read from Gen2 Secrets first, then fall back to env.
+ *
+ * @return {ProvisionMailConfig} SMTP config.
+ */
+function getProvisionMailConfig(): ProvisionMailConfig {
+  const host = String(
+    SMTP_HOST_SECRET.value() || process.env.SMTP_HOST || ""
+  ).trim();
+
+  const portRaw = Number(process.env.SMTP_PORT ?? "587");
+  const port = Number.isFinite(portRaw) ? portRaw : 587;
+
+  const user = String(
+    SMTP_USER_SECRET.value() || process.env.SMTP_USER || ""
+  ).trim();
+
+  const pass = String(
+    SMTP_PASS_SECRET.value() || process.env.SMTP_PASS || ""
+  ).trim();
+
+  const from = String(
+    process.env.SMTP_FROM ?? "info@sv-souleiman.de"
+  ).trim();
+
+  const to = String(
+    process.env.PROVISION_NOTIFY_TO ?? "info@sv-souleiman.de"
+  ).trim();
+
+  const secure = String(process.env.SMTP_SECURE ?? "").trim() === "true";
+
+  if (!host || !user || !pass) {
+    throw new Error(
+      "SMTP config missing. Set secrets SMTP_HOST, SMTP_USER, SMTP_PASS."
+    );
+  }
+
+  return {host, port, user, pass, from, to, secure};
+}
+
+/**
+ * Returns a safe printable string for PDF/mail output.
+ *
+ * @param {unknown} v Any value.
+ * @return {string} Trimmed string or em dash.
+ */
+function safeStr(v: unknown): string {
+  return String(v ?? "").trim() || "—";
+}
+
+/**
+ * Formats a number as EUR for German locale.
+ *
+ * @param {unknown} v Any value.
+ * @return {string} Formatted amount or em dash.
+ */
+function formatEurAmount(v: unknown): string {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return new Intl.NumberFormat("de-DE", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 2,
+  }).format(n);
+}
+
+/**
+ * Builds the provision confirmation PDF including the signature.
+ *
+ * @param {object} args Function arguments.
+ * @param {string} args.commissionId Firestore document id.
+ * @param {Object<string, unknown>} args.data Firestore document data.
+ * @return {Promise<Buffer>} The PDF as buffer.
+ */
+async function buildProvisionPdfBuffer(args: {
+  commissionId: string;
+  data: Record<string, unknown>;
+}): Promise<Buffer> {
+  const {data} = args;
+
+  const doc = new PDFDocument({size: "A4", margin: 50});
+  const chunks: Buffer[] = [];
+
+  return await new Promise<Buffer>((resolve, reject) => {
+    doc.on("data", (c: Buffer) => {
+      chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+    });
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+
+    // Header
+    doc
+      .fontSize(16)
+      .font("Helvetica-Bold")
+      .text("Bestätigung über die Vereinbarung einer Vermittlungsprovision");
+    doc.moveDown(0.6);
+
+    // Vermittler
+    doc.fontSize(12).font("Helvetica-Bold").text("Vermittler");
+    doc.moveDown(0.2);
+    doc.fontSize(11).font("Helvetica")
+      .text(`Name: ${safeStr(data.recommenderName)}`);
+
+    const street = safeStr(data.recommenderStreet);
+    const zip = safeStr(data.recommenderZip);
+    const city = safeStr(data.recommenderCity);
+    doc.text(`Adresse: ${street}, ${zip} ${city}`);
+    doc.moveDown(0.8);
+
+    // Auszahlung
+    doc.fontSize(12).font("Helvetica-Bold").text("Auszahlung");
+    doc.moveDown(0.2);
+
+    const payoutMethod = String(data.payoutMethod ?? "").trim();
+    if (payoutMethod === "paypal") {
+      doc.text(`PayPal: ${safeStr(data.payoutPaypal)}`);
+    } else {
+      doc.text(`IBAN: ${safeStr(data.payoutIban)}`);
+    }
+    doc.text(`Provisionsbetrag: ${formatEurAmount(data.amount)}`);
+
+    const notes = safeStr(data.notes);
+    if (notes !== "—") {
+      doc.text(`Referenz/Notiz: ${notes}`);
+    }
+
+
+    const acceptedIsoRaw = data.acceptedAtClientIso;
+    const acceptedIso = typeof acceptedIsoRaw === "string" ?
+      acceptedIsoRaw : "";
+    const acceptedDate = acceptedIso ? new Date(acceptedIso) : null;
+
+    let acceptedLabel = safeStr(acceptedIsoRaw);
+    if (acceptedDate && !Number.isNaN(acceptedDate.getTime())) {
+      acceptedLabel = new Intl.DateTimeFormat("de-DE", {
+        dateStyle: "short",
+        timeStyle: "short",
+        timeZone: "Europe/Berlin",
+      }).format(acceptedDate);
+    }
+
+    doc.text(`Bestätigt am: ${acceptedLabel}`);
+
+    doc.text(`Bestätigt am: ${acceptedLabel}`);
+
+    doc.moveDown(1);
+
+    // Signature
+    doc.fontSize(12).font("Helvetica-Bold").text("Unterschrift Vermittler");
+    doc.moveDown(0.2);
+
+    const sigB64 = String(data.signaturePngBase64 ?? "").trim();
+    if (sigB64) {
+      try {
+        const sigBuf = Buffer.from(sigB64, "base64");
+        const x = doc.x;
+        const y = doc.y;
+        doc.rect(x, y, 500, 160).strokeColor("#d0d3dc").stroke();
+        doc.image(sigBuf, x + 10, y + 10, {fit: [480, 140]});
+        doc.moveDown(8);
+      } catch {
+        doc.fontSize(10).font("Helvetica").fillColor("#b00020")
+          .text("Unterschrift konnte nicht eingebettet werden.");
+        doc.fillColor("#000");
+      }
+    } else {
+      doc.fontSize(10).font("Helvetica").fillColor("#b00020")
+        .text("Keine Unterschrift übermittelt.");
+      doc.fillColor("#000");
+    }
+
+    doc.moveDown(1);
+    doc
+      .fontSize(9)
+      .fillColor("#666")
+      .text(
+        "Dieses Dokument wurde digital erstellt und ist mit der oben " +
+          "dargestellten Unterschrift gültig."
+      );
+    doc.moveDown(0.4);
+    doc.text(
+      "Aussteller: Sachverständigenbüro Souleiman, Leerkämpe 12, " +
+        "28259 Bremen"
+    );
+    doc.end();
+  });
+}
+
+/**
+ * Uploads the provision PDF to Firebase Storage.
+ *
+ * @param {object} args Upload arguments.
+ * @param {string} args.commissionId Firestore document id.
+ * @param {Buffer} args.pdf The PDF buffer.
+ * @return {Promise<object>} Result with storage path and optional signed URL.
+ */
+async function uploadProvisionPdf(args: {
+  commissionId: string;
+  pdf: Buffer;
+}): Promise<{path: string; url: string | null}> {
+  const bucket = admin.storage().bucket();
+  const path = `provision_pdfs/${args.commissionId}.pdf`;
+  const file = bucket.file(path);
+
+  await file.save(args.pdf, {
+    contentType: "application/pdf",
+    resumable: false,
+    metadata: {
+      cacheControl: "private, max-age=0, no-transform",
+    },
+  });
+
+  // Optional Signed URL (7 Tage)
+  try {
+    const [url] = await file.getSignedUrl({
+      action: "read",
+      expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+    });
+    return {path, url};
+  } catch {
+    return {path, url: null};
+  }
+}
+
 export const submitProvisionForm = onRequest(async (req, res) => {
   try {
     // --- CORS
@@ -695,3 +948,131 @@ export const createProvisionLink = onRequest(async (req, res) => {
     res.status(500).json({ok: false, error: msg});
   }
 });
+
+
+export const commissionCreatedSendPdf = onDocumentCreated(
+  {
+    document: "commissions/{commissionId}",
+    secrets: [SMTP_HOST_SECRET, SMTP_USER_SECRET, SMTP_PASS_SECRET],
+  },
+  async (event) => {
+    const commissionId = String(event.params.commissionId ?? "").trim();
+    const snap = event.data;
+    if (!snap) return;
+
+    const data = (snap.data() ?? {}) as Record<string, unknown>;
+
+    // Avoid double send
+    if (data.mailSentAt) return;
+
+    // Only for submitted commissions
+    const status = String(data.status ?? "").trim();
+    if (status && status !== "submitted") return;
+
+    let pdf: Buffer;
+    try {
+      pdf = await buildProvisionPdfBuffer({commissionId, data});
+    } catch (e) {
+      console.error("[commissionCreatedSendPdf] PDF failed", e);
+      await snap.ref.set(
+        {
+          mailError: "pdf_failed",
+          mailErrorAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        {merge: true}
+      );
+      return;
+    }
+
+    // Upload to Storage
+    const uploaded = await uploadProvisionPdf({commissionId, pdf});
+
+    let cfg: ProvisionMailConfig;
+    try {
+      cfg = getProvisionMailConfig();
+    } catch (e) {
+      console.error("[commissionCreatedSendPdf] SMTP config missing", e);
+      await snap.ref.set(
+        {
+          pdfPath: uploaded.path,
+          pdfUrl: uploaded.url,
+          mailError: "smtp_config_missing",
+          mailErrorAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        {merge: true}
+      );
+      return;
+    }
+
+    const transport = nodemailer.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      auth: {user: cfg.user, pass: cfg.pass},
+    });
+
+    const subject =
+      `Provision übermittelt – ${safeStr(data.recommenderName)}`;
+
+    const payoutMethod = String(data.payoutMethod ?? "").trim();
+    let payoutLine = "";
+    if (payoutMethod === "paypal") {
+      payoutLine = `PayPal: ${safeStr(data.payoutPaypal)}`;
+    } else {
+      payoutLine = `IBAN: ${safeStr(data.payoutIban)}`;
+    }
+
+    const bodyText =
+      "Eine Vermittlungsprovision wurde über das Webformular übermittelt.\n\n" +
+      `Vermittler: ${safeStr(data.recommenderName)}\n` +
+      `Adresse: ${safeStr(data.recommenderStreet)}, ` +
+      `${safeStr(data.recommenderZip)} ` +
+      `${safeStr(data.recommenderCity)}\n` +
+      `Auszahlung: ${payoutLine}\n` +
+      `Betrag: ${formatEurAmount(data.amount)}\n` +
+      `Referenz/Notiz: ${safeStr(data.notes)}\n\n` +
+      "PDF ist im Anhang.\n" +
+      `Storage-Pfad: ${uploaded.path}` +
+      (uploaded.url ? `\nSigned-URL (7 Tage): ${uploaded.url}` : "");
+
+    try {
+      await transport.sendMail({
+        from: cfg.from,
+        to: cfg.to,
+        subject,
+        text: bodyText,
+        attachments: [
+          {
+            filename: `Provision_${commissionId}.pdf`,
+            content: pdf,
+            contentType: "application/pdf",
+          },
+        ],
+      });
+
+      await snap.ref.set(
+        {
+          pdfPath: uploaded.path,
+          pdfUrl: uploaded.url,
+          mailSentAt: admin.firestore.FieldValue.serverTimestamp(),
+          mailTo: cfg.to,
+          mailSubject: subject,
+        },
+        {merge: true}
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[commissionCreatedSendPdf] mail failed", e);
+      await snap.ref.set(
+        {
+          pdfPath: uploaded.path,
+          pdfUrl: uploaded.url,
+          mailError: msg,
+          mailErrorAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        {merge: true}
+      );
+    }
+  }
+);
+// Ensure all string literals use double quotes
