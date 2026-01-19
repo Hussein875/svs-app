@@ -6,6 +6,11 @@ import FirebaseFirestore
 /// Provisionen werden nicht mehr in der App erfasst.
 /// Stattdessen erzeugt die App einen Einmal-Link, den du dem Kunden schicken kannst.
 /// Das Provisionsformular wird online ausgefüllt (inkl. Unterschrift).
+
+fileprivate enum PendingAdminAction {
+    case markPaid(CommissionRow)
+    case delete(CommissionRow)
+}
 struct ProvisionenView: View {
     @EnvironmentObject var appState: AppState
     
@@ -18,6 +23,10 @@ struct ProvisionenView: View {
     @State private var commissionsError: String? = nil
     @State private var isAdmin: Bool = false
     @State private var commissionsListener: ListenerRegistration? = nil
+    
+
+    @State private var pendingAdminAction: PendingAdminAction? = nil
+    @State private var amountFieldInvalid: Bool = false
 
     // MARK: - Link Generation
 
@@ -86,7 +95,11 @@ struct ProvisionenView: View {
                                         .onChange(of: amountFocused) { _, focused in
                                             if !focused {
                                                 amountText = normalizeAmountText(amountText)
+                                                amountFieldInvalid = false
                                             }
+                                        }
+                                        .onChange(of: amountText) { _, _ in
+                                            amountFieldInvalid = false
                                         }
                                     
                                     Text("EUR")
@@ -99,6 +112,10 @@ struct ProvisionenView: View {
                                     RoundedRectangle(cornerRadius: 12)
                                         .fill(Color(.tertiarySystemBackground))
                                 )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(amountFieldInvalid ? Color.red : Color.clear, lineWidth: 1)
+                                )
 
                                 Text("Hinweis: Der Betrag wird nicht im Webformular angezeigt, sondern nur im Hintergrund gespeichert.")
                                     .font(.footnote)
@@ -106,6 +123,12 @@ struct ProvisionenView: View {
                             }
                             
                             Button {
+                                if !canGenerateLink {
+                                    amountFieldInvalid = true
+                                    showError("Bitte einen gültigen Betrag eingeben, bevor du den Link erstellst.")
+                                    return
+                                }
+                                amountFieldInvalid = false
                                 _Concurrency.Task {
                                     await generateOneTimeLink()
                                 }
@@ -126,8 +149,8 @@ struct ProvisionenView: View {
                             .buttonStyle(.borderedProminent)
                             .tint(Color.accentColor)
                             .foregroundColor(.white)
-                            .disabled(isGenerating)
-                            
+                            .disabled(isGenerating || !canGenerateLink)
+
                             if let generatedURL {
                                 Divider().opacity(0.18)
                                 
@@ -187,51 +210,77 @@ struct ProvisionenView: View {
                             }
                             
                             ForEach(commissions) { row in
-                                Button {
-                                    selectedCommission = row
-                                } label: {
+                                HStack(alignment: .top, spacing: 12) {
+
                                     VStack(alignment: .leading, spacing: 8) {
                                         HStack(alignment: .firstTextBaseline) {
                                             Text(row.recommenderName)
                                                 .font(.headline)
                                                 .lineLimit(1)
-                                            
+
                                             Spacer()
-                                            
+
                                             if let a = row.amount {
                                                 Text(formatEUR(a))
                                                     .font(.headline)
                                             }
                                         }
-                                        
+
                                         HStack(spacing: 10) {
                                             Label(
                                                 row.payoutMethod.uppercased(),
-                                                systemImage: row.payoutMethod == "paypal" ? "p.circle" : "building.columns"
+                                                systemImage: row.payoutMethod == "paypal"
+                                                    ? "p.circle"
+                                                    : "building.columns"
                                             )
                                             .font(.footnote)
                                             .foregroundColor(.secondary)
-                                            
+
                                             Spacer()
-                                            
+
                                             if let d = row.createdAt {
                                                 Text(d.formatted(date: .abbreviated, time: .shortened))
                                                     .font(.footnote)
                                                     .foregroundColor(.secondary)
                                             }
-                                            
-                                            Image(systemName: "chevron.right")
-                                                .font(.footnote.weight(.semibold))
-                                                .foregroundColor(.secondary)
                                         }
                                     }
-                                    .padding(12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 14)
-                                            .fill(Color(.tertiarySystemBackground))
-                                    )
+
+                                    if isAdmin {
+                                        VStack(spacing: 10) {
+                                            Button {
+                                                pendingAdminAction = .markPaid(row)
+                                            } label: {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .font(.system(size: 18, weight: .semibold))
+                                            }
+                                            .buttonStyle(.plain)
+                                            .foregroundColor(.green)
+
+                                            Button(role: .destructive) {
+                                                pendingAdminAction = .delete(row)
+                                            } label: {
+                                                Image(systemName: "trash.fill")
+                                                    .font(.system(size: 16, weight: .semibold))
+                                            }
+                                            .buttonStyle(.plain)
+                                            .foregroundColor(.red)
+                                        }
+                                    } else {
+                                        Image(systemName: "chevron.right")
+                                            .font(.footnote.weight(.semibold))
+                                            .foregroundColor(.secondary)
+                                    }
                                 }
-                                .buttonStyle(.plain)
+                                .padding(12)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(Color(.tertiarySystemBackground))
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    selectedCommission = row
+                                }
                             }
                             
                             Text(isAdmin ? "Admin-Ansicht: alle Einträge." : "Nur deine Einträge (nach Ersteller des Einmal-Links).")
@@ -255,8 +304,51 @@ struct ProvisionenView: View {
             }
             .sheet(item: $selectedCommission) { row in
                 CommissionDetailSheet(row: row)
+                // When closing the sheet, also clear pendingAdminAction if set
+                .onDisappear {
+                    selectedCommission = nil
+                    pendingAdminAction = nil
+                }
             }
+            .overlay(alignment: .bottom) {
+                if let action = pendingAdminAction {
+                    AdminConfirmBar(
+                        action: action,
+                        onCancel: {
+                            withAnimation(.easeInOut) {
+                                pendingAdminAction = nil
+                            }
+                        },
+                        onConfirm: {
+                            let current = pendingAdminAction
+                            withAnimation(.easeInOut) {
+                                pendingAdminAction = nil
+                            }
+                            guard let current else { return }
+                            _Concurrency.Task {
+                                switch current {
+                                case let .markPaid(r):
+                                    await markCommissionAsPaid(r)
+                                case let .delete(r):
+                                    await deleteCommission(r)
+                                }
+                            }
+                        }
+                    )
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut, value: pendingAdminAction != nil)
         }
+    }
+    
+    private var parsedAmount: Double? { parseAmountToDouble(amountText) }
+
+    private var canGenerateLink: Bool {
+        if let a = parsedAmount { return a > 0 }
+        return false
     }
 
     private var header: some View {
@@ -302,10 +394,17 @@ struct ProvisionenView: View {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
             
-            var payload: [String: Any] = ["ttlDays": defaultTTLDays]
-            if let amount = parseAmountToDouble(amountText) {
-                payload["amount"] = amount
+            guard let amount = parseAmountToDouble(amountText), amount > 0 else {
+                await MainActor.run {
+                    showError("Bitte einen gültigen Betrag eingeben, bevor du den Link erstellst.")
+                }
+                return
             }
+
+            var payload: [String: Any] = [
+                "ttlDays": defaultTTLDays,
+                "amount": amount
+            ]
             request.httpBody = try JSONSerialization.data(withJSONObject: payload)
             
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -366,103 +465,138 @@ struct ProvisionenView: View {
             }
         }
     }
-        
-        @MainActor
-        private func startCommissionsListenerIfNeeded() {
-            guard commissionsListener == nil else { return }
-            guard let user = Auth.auth().currentUser else { return }
 
-            isLoadingCommissions = true
-            commissionsError = nil
-
+    private func markCommissionAsPaid(_ row: CommissionRow) async {
+        do {
             let db = Firestore.firestore()
+            let uid = Auth.auth().currentUser?.uid ?? ""
+            try await db.collection("commissions").document(row.id).updateData([
+                "status": "paid",
+                "paidAt": FieldValue.serverTimestamp(),
+                "paidByUid": uid
+            ])
 
-            db.collection("users").document(user.uid).getDocument { snap, err in
+            await MainActor.run {
+                appState.showToast(.success, "Als ausgezahlt markiert")
+            }
+        } catch {
+            await MainActor.run {
+                showError("Konnte nicht als ausgezahlt markieren: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func deleteCommission(_ row: CommissionRow) async {
+        do {
+            let db = Firestore.firestore()
+            try await db.collection("commissions").document(row.id).delete()
+            await MainActor.run {
+                appState.showToast(.success, "Eintrag gelöscht")
+            }
+        } catch {
+            await MainActor.run {
+                showError("Konnte nicht löschen: \(error.localizedDescription)")
+            }
+        }
+    }
+        
+    @MainActor
+    private func startCommissionsListenerIfNeeded() {
+        guard commissionsListener == nil else { return }
+        guard let user = Auth.auth().currentUser else { return }
+
+        isLoadingCommissions = true
+        commissionsError = nil
+
+        let db = Firestore.firestore()
+
+        db.collection("users").document(user.uid).getDocument { snap, err in
+            if let err {
+                _Concurrency.Task { @MainActor in
+                    self.isLoadingCommissions = false
+                    self.commissionsError = "Rolle konnte nicht geladen werden: \(err.localizedDescription)"
+                }
+                return
+            }
+
+            let roleRaw = (snap?.data()?["roleRaw"] as? String) ?? ""
+            let admin = roleRaw == "admin"
+
+            _Concurrency.Task { @MainActor in
+                self.isAdmin = admin
+            }
+
+            var q: Query = db.collection("commissions")
+                .order(by: "acceptedAtServer", descending: true)
+                .limit(to: 50)
+
+            if !admin {
+                q = q.whereField("createdByUid", isEqualTo: user.uid)
+            }
+
+            let listener = q.addSnapshotListener { snap, err in
                 if let err {
                     _Concurrency.Task { @MainActor in
                         self.isLoadingCommissions = false
-                        self.commissionsError = "Rolle konnte nicht geladen werden: \(err.localizedDescription)"
+                        self.commissionsError = "Provisionen konnten nicht geladen werden: \(err.localizedDescription)"
                     }
                     return
                 }
 
-                let roleRaw = (snap?.data()?["roleRaw"] as? String) ?? ""
-                let admin = roleRaw == "admin"
+                let docs = snap?.documents ?? []
+                let mapped: [CommissionRow] = docs.map { d in
+                    let data = d.data()
 
-                _Concurrency.Task { @MainActor in
-                    self.isAdmin = admin
-                }
-
-                var q: Query = db.collection("commissions")
-                    .order(by: "acceptedAtServer", descending: true)
-                    .limit(to: 50)
-
-                if !admin {
-                    q = q.whereField("createdByUid", isEqualTo: user.uid)
-                }
-
-                let listener = q.addSnapshotListener { snap, err in
-                    if let err {
-                        _Concurrency.Task { @MainActor in
-                            self.isLoadingCommissions = false
-                            self.commissionsError = "Provisionen konnten nicht geladen werden: \(err.localizedDescription)"
-                        }
-                        return
+                    func clean(_ s: String?) -> String? {
+                        guard let s else { return nil }
+                        let v = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return v.isEmpty ? nil : v
                     }
 
-                    let docs = snap?.documents ?? []
-                    let mapped: [CommissionRow] = docs.map { d in
-                        let data = d.data()
+                    let name = (data["recommenderName"] as? String) ?? "—"
 
-                        func clean(_ s: String?) -> String? {
-                            guard let s else { return nil }
-                            let v = s.trimmingCharacters(in: .whitespacesAndNewlines)
-                            return v.isEmpty ? nil : v
-                        }
+                    let street = clean(data["recommenderStreet"] as? String)
+                    let zip = clean(data["recommenderZip"] as? String)
+                    let city = clean(data["recommenderCity"] as? String)
 
-                        let name = (data["recommenderName"] as? String) ?? "—"
+                    let payout = (data["payoutMethod"] as? String) ?? "—"
+                    let payoutIban = clean(data["payoutIban"] as? String)
+                    let payoutPaypal = clean(data["payoutPaypal"] as? String)
 
-                        let street = clean(data["recommenderStreet"] as? String)
-                        let zip = clean(data["recommenderZip"] as? String)
-                        let city = clean(data["recommenderCity"] as? String)
+                    let amount = data["amount"] as? Double
+                    let notes = clean(data["notes"] as? String)
+                    let status = (data["status"] as? String) ?? "submitted"
+                    let ts = data["acceptedAtServer"] as? Timestamp
+                    let createdByUid = clean(data["createdByUid"] as? String)
 
-                        let payout = (data["payoutMethod"] as? String) ?? "—"
-                        let payoutIban = clean(data["payoutIban"] as? String)
-                        let payoutPaypal = clean(data["payoutPaypal"] as? String)
-
-                        let amount = data["amount"] as? Double
-                        let notes = clean(data["notes"] as? String)
-
-                        let ts = data["acceptedAtServer"] as? Timestamp
-                        let createdByUid = clean(data["createdByUid"] as? String)
-
-                        return CommissionRow(
-                            id: d.documentID,
-                            recommenderName: name,
-                            recommenderStreet: street,
-                            recommenderZip: zip,
-                            recommenderCity: city,
-                            payoutMethod: payout,
-                            payoutIban: payoutIban,
-                            payoutPaypal: payoutPaypal,
-                            amount: amount,
-                            notes: notes,
-                            createdAt: ts?.dateValue(),
-                            createdByUid: createdByUid
-                        )
-                    }
-
-                    _Concurrency.Task { @MainActor in
-                        self.isLoadingCommissions = false
-                        self.commissions = mapped
-                    }
+                    return CommissionRow(
+                        id: d.documentID,
+                        recommenderName: name,
+                        recommenderStreet: street,
+                        recommenderZip: zip,
+                        recommenderCity: city,
+                        payoutMethod: payout,
+                        payoutIban: payoutIban,
+                        payoutPaypal: payoutPaypal,
+                        amount: amount,
+                        notes: notes,
+                        status: status,
+                        createdAt: ts?.dateValue(),
+                        createdByUid: createdByUid
+                    )
                 }
 
                 _Concurrency.Task { @MainActor in
-                    self.commissionsListener = listener
+                    self.isLoadingCommissions = false
+                    self.commissions = mapped.filter { $0.status != "paid" }
                 }
             }
+
+            _Concurrency.Task { @MainActor in
+                self.commissionsListener = listener
+            }
         }
+    }
     
 
     private func showError(_ msg: String) {
@@ -478,8 +612,113 @@ struct ProvisionenView: View {
     }
 }
 
+private struct AdminConfirmBar: View {
+    let action: PendingAdminAction
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
 
+    private var title: String {
+        switch action {
+        case .markPaid:
+            return "Als ausgezahlt markieren?"
+        case .delete:
+            return "Eintrag löschen?"
+        }
+    }
 
+    private var message: String {
+        switch action {
+        case .markPaid:
+            return "Der Eintrag wird als erledigt markiert und verschwindet aus der Übersicht."
+        case .delete:
+            return "Der Eintrag wird endgültig gelöscht."
+        }
+    }
+
+    private var confirmTitle: String {
+        switch action {
+        case .markPaid:
+            return "Ausgezahlt"
+        case .delete:
+            return "Löschen"
+        }
+    }
+
+    private var confirmRoleDestructive: Bool {
+        switch action {
+        case .markPaid:
+            return false
+        case .delete:
+            return true
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Button {
+                    onCancel()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(8)
+                }
+                .buttonStyle(.plain)
+                .background(
+                    Circle().fill(Color(.tertiarySystemBackground))
+                )
+            }
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            HStack(spacing: 10) {
+                Button {
+                    onCancel()
+                } label: {
+                    Text("Abbrechen")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.bordered)
+
+                if confirmRoleDestructive {
+                    Button(role: .destructive) {
+                        onConfirm()
+                    } label: {
+                        Text(confirmTitle)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button {
+                        onConfirm()
+                    } label: {
+                        Text(confirmTitle)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.12), radius: 12, x: 0, y: 6)
+    }
+}
 
 private struct CopyableValueRow: View {
     let title: String
@@ -584,6 +823,18 @@ private struct CommissionDetailSheet: View {
                         LabeledContent("Betrag", value: "—")
                     }
                     
+                    if row.status == "paid" {
+                        Text("AUSGEZAHLT")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(.secondarySystemBackground))
+                            )
+                    }
+                    
                     LabeledContent("Auszahlungsart", value: row.payoutMethod.uppercased())
                     
                     if row.payoutMethod == "iban" {
@@ -624,6 +875,7 @@ private struct CommissionDetailSheet: View {
                 }
                 
                 Section("Dokument") {
+                    LabeledContent("Status", value: row.status.uppercased())
                     LabeledContent("ID", value: row.id)
                     LabeledContent(
                         "Veranlasst durch",
@@ -708,6 +960,7 @@ private struct CommissionRow: Identifiable {
 
     let amount: Double?
     let notes: String?
+    let status: String
 
     let createdAt: Date?
     let createdByUid: String?
