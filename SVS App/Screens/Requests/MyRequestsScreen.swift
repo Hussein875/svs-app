@@ -655,8 +655,8 @@ struct NewLeaveRequestView: View {
                         }
                         // For on-call Saturdays we keep start=end
                         // (endDate is not used for this type but kept consistent)
-                        .onChange(of: startDate) { newValue in
-                            let day = Calendar.current.startOfDay(for: newValue)
+                        .onChange(of: startDate) {
+                            let day = Calendar.current.startOfDay(for: startDate)
                             startDate = day
                             endDate = day
                         }
@@ -671,9 +671,9 @@ struct NewLeaveRequestView: View {
                     Section(header: Text("Zeitraum")) {
                         DatePicker("Von", selection: $startDate, displayedComponents: .date)
                             .datePickerStyle(.compact)
-                            .onChange(of: startDate) { newStart in
-                                if endDate < newStart {
-                                    endDate = newStart
+                            .onChange(of: startDate) {
+                                if endDate < startDate {
+                                    endDate = startDate
                                 }
                             }
 
@@ -738,21 +738,21 @@ struct NewLeaveRequestView: View {
                     .buttonBorderShape(.capsule)
                 }
             }
-            .onChange(of: inlineError) { value in
-                guard value != nil else { return }
+            .onChange(of: inlineError) {
+                guard inlineError != nil else { return }
                 withAnimation(.easeInOut) {
                     proxy.scrollTo("errorBanner", anchor: .top)
                 }
             }
-            .onChange(of: startDate) { _ in
+            .onChange(of: startDate) {
                 inlineError = nil
                 appState.uiErrorMessage = nil
             }
-            .onChange(of: endDate) { _ in
+            .onChange(of: endDate) {
                 inlineError = nil
                 appState.uiErrorMessage = nil
             }
-            .onChange(of: selectedType) { _ in
+            .onChange(of: selectedType) {
                 inlineError = nil
                 appState.uiErrorMessage = nil
                 if selectedType == .sick {
