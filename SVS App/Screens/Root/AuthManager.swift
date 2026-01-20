@@ -12,10 +12,11 @@ import FirebaseAuth
 @MainActor
 final class AuthManager: ObservableObject {
     @Published private(set) var user: FirebaseAuth.User?
+    private var authStateHandle: AuthStateDidChangeListenerHandle?
 
     init() {
         self.user = Auth.auth().currentUser
-        Auth.auth().addStateDidChangeListener { _, user in
+        authStateHandle = Auth.auth().addStateDidChangeListener { _, user in
             self.user = user
         }
     }
@@ -33,5 +34,11 @@ final class AuthManager: ObservableObject {
     func signOut() throws {
         try Auth.auth().signOut()
         self.user = nil
+    }
+
+    deinit {
+        if let handle = authStateHandle {
+            Auth.auth().removeStateDidChangeListener(handle)
+        }
     }
 }

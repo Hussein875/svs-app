@@ -453,11 +453,6 @@ private struct AdminLeaveRequestCard: View {
                     .padding(.top, 2)
                 }
             }
-
-            // AUDIT (einklappbar)
-            let createdBy = appState.userName(for: request.createdByUserId)
-            let updatedBy = request.updatedByUserId.map { appState.userName(for: $0) }
-            let hasUpdate = (request.updatedAt != nil && updatedBy != nil)
         }
         .padding(14)
         .background(

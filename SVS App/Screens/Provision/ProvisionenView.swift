@@ -388,7 +388,7 @@ struct ProvisionenView: View {
                 return
             }
 
-            var payload: [String: Any] = [
+            let payload: [String: Any] = [
                 "ttlDays": defaultTTLDays,
                 "amount": amount
             ]
