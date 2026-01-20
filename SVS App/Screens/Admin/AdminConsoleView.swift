@@ -1468,14 +1468,6 @@ struct AdminAutomationsScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Automatisierungen")
-                        .font(.largeTitle.weight(.bold))
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Make")
                         .font(.headline)
@@ -1511,6 +1503,7 @@ struct AdminAutomationsScreen: View {
         }
         .background(Color(.systemGroupedBackground))
         .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Automatisierungen")
         .onAppear { startListening() }
         .onDisappear {
             listener?.remove()
