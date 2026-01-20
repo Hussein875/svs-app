@@ -31,14 +31,14 @@ struct AdminConsoleView: View {
                             title: "Offene Anträge",
                             value: "\(openVacationRequestsCount)",
                             systemImage: "doc.text",
-                            accent: .secondary
+                            accent: appState.currentUser?.color ?? .secondary
                         )
 
                         AdminStatCard(
                             title: "Heute abwesend",
                             value: "\(todayAbsentCount)",
                             systemImage: "calendar.badge.clock",
-                            accent: .secondary
+                            accent: appState.currentUser?.color ?? .secondary
                         )
                     }
                     .padding(.horizontal, 18)
@@ -54,9 +54,12 @@ struct AdminConsoleView: View {
                                 AdminRequestsScreen()
                                     .environmentObject(appState)
                             } label: {
-                                AdminNavRow(title: "Anträge verwalten",
-                                            subtitle: "Genehmigen, ablehnen und filtern",
-                                            systemImage: "doc.text.magnifyingglass")
+                                AdminNavRow(
+                                    title: "Anträge verwalten",
+                                    subtitle: "Genehmigen, ablehnen und filtern",
+                                    systemImage: "doc.text.magnifyingglass",
+                                    accent: appState.currentUser?.color ?? .secondary
+                                )
                             }
 
                             NavigationLink {
@@ -64,8 +67,9 @@ struct AdminConsoleView: View {
                                     .environmentObject(appState)
                             } label: {
                                 AdminNavRow(title: "Mitarbeiter",
-                                            subtitle: "Urlaub, Rollen und Login verwalten",
-                                            systemImage: "person.2")
+                                            subtitle: "Daten, Rollen und Login verwalten",
+                                            systemImage: "person.2", accent: appState.currentUser?.color ?? .secondary
+)
                             }
 
                             NavigationLink {
@@ -74,7 +78,7 @@ struct AdminConsoleView: View {
                             } label: {
                                 AdminNavRow(title: "Samstags-Bereitschaft",
                                             subtitle: "Samstage zuweisen",
-                                            systemImage: "person.badge.clock")
+                                            systemImage: "person.badge.clock", accent: appState.currentUser?.color ?? .secondary)
                             }
                             
                             NavigationLink {
@@ -83,7 +87,7 @@ struct AdminConsoleView: View {
                             } label: {
                                 AdminNavRow(title: "Automatisierungen",
                                             subtitle: "Make-Status und letzte Läufe",
-                                            systemImage: "bolt.badge.clock")
+                                            systemImage: "bolt.badge.clock", accent: appState.currentUser?.color ?? .secondary)
                             }
                             
                         }
@@ -107,16 +111,16 @@ struct AdminConsoleView: View {
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Image(systemName: systemImage).foregroundColor(.secondary)
+                    Image(systemName: systemImage).foregroundColor(accent)
                     Spacer()
                 }
                 Text(value).font(.title2.weight(.bold))
-                Text(title).font(.caption).foregroundColor(.secondary)
+                Text(title).font(.caption).foregroundColor(accent.opacity(0.8))
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.secondary.opacity(0.18), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent.opacity(0.22), lineWidth: 1))
         }
     }
 
@@ -124,6 +128,7 @@ struct AdminConsoleView: View {
         let title: String
         let subtitle: String
         let systemImage: String
+        let accent: Color
 
         var body: some View {
             HStack(spacing: 12) {
@@ -136,7 +141,9 @@ struct AdminConsoleView: View {
                 .frame(width: 38, height: 38)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.subheadline.weight(.semibold))
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(accent)
                     Text(subtitle).font(.caption).foregroundColor(.secondary)
                 }
 
@@ -196,6 +203,9 @@ struct AdminRequestsScreen: View {
     @State private var editingRequest: LeaveRequest?
     @State private var showEditScreen: Bool = false
     @State private var filterMode: AdminQuickFilter = .all
+    private var accent: Color {
+        appState.currentUser?.color ?? .secondary
+    }
 
     private func matchesQuickFilter(_ request: LeaveRequest) -> Bool {
         let cal = Calendar.current
@@ -253,25 +263,56 @@ struct AdminRequestsScreen: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Anträge")
-                        .font(.largeTitle.weight(.bold))
+        List {
+            if openRequests.isEmpty && answeredRequests.isEmpty {
+                Section {
+                    Text("Keine Anträge vorhanden")
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                if !openRequests.isEmpty {
+                    Section(header: Text("Offen")) {
+                        ForEach(openRequests) { request in
+                            adminRequestRow(for: request)
+                        }
+                    }
+                }
 
-                    Spacer()
-
+                if !answeredRequestsByMonth.isEmpty {
+                    ForEach(answeredRequestsByMonth, id: \.monthStart) { group in
+                        Section(header: Text(monthTitle(group.monthStart))) {
+                            ForEach(group.requests) { request in
+                                adminRequestRow(for: request)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemGroupedBackground))
+        .navigationDestination(isPresented: $showEditScreen) {
+            if let request = editingRequest {
+                EditLeaveRequestView(request: request)
+                    .environmentObject(appState)
+                    .onDisappear { editingRequest = nil }
+            } else {
+                NewLeaveRequestView()
+                    .environmentObject(appState)
+            }
+        }
+        .navigationTitle("Anträge")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 8) {
                     Button {
                         showEditScreen = true
                         editingRequest = nil
                     } label: {
                         Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .semibold))
-                            .frame(width: 40, height: 40)
-                            .background(Circle().fill(Color(.secondarySystemBackground)))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Neuen Antrag erstellen")
 
                     Menu {
                         Picker("Filter", selection: $filterMode) {
@@ -281,57 +322,9 @@ struct AdminRequestsScreen: View {
                         }
                     } label: {
                         Image(systemName: "line.3.horizontal.decrease.circle")
-                            .font(.system(size: 16, weight: .semibold))
-                            .frame(width: 40, height: 40)
-                            .background(Circle().fill(Color(.secondarySystemBackground)))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Filter")
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-
-                List {
-                    if openRequests.isEmpty && answeredRequests.isEmpty {
-                        Section {
-                            Text("Keine Anträge vorhanden")
-                                .foregroundColor(.secondary)
-                        }
-                    } else {
-                        if !openRequests.isEmpty {
-                            Section(header: Text("Offen")) {
-                                ForEach(openRequests) { request in
-                                    adminRequestRow(for: request)
-                                }
-                            }
-                        }
-
-                        if !answeredRequestsByMonth.isEmpty {
-                            ForEach(answeredRequestsByMonth, id: \.monthStart) { group in
-                                Section(header: Text(monthTitle(group.monthStart))) {
-                                    ForEach(group.requests) { request in
-                                        adminRequestRow(for: request)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
-                .background(Color(.systemGroupedBackground))
-                .navigationDestination(isPresented: $showEditScreen) {
-                    if let request = editingRequest {
-                        EditLeaveRequestView(request: request)
-                            .environmentObject(appState)
-                            .onDisappear { editingRequest = nil }
-                    } else {
-                        NewLeaveRequestView()
-                            .environmentObject(appState)
                     }
                 }
             }
-            .background(Color(.systemGroupedBackground))
         }
     }
 
