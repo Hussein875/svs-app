@@ -66,8 +66,8 @@ struct AdminConsoleView: View {
                                 AdminUsersScreen()
                                     .environmentObject(appState)
                             } label: {
-                                AdminNavRow(title: "Mitarbeiter",
-                                            subtitle: "Daten, Rollen und Login verwalten",
+                                AdminNavRow(title: "Nutzerverwaltung",
+                                            subtitle: "Nutzer, Rollen und Login verwalten",
                                             systemImage: "person.2", accent: appState.currentUser?.color ?? .secondary
 )
                             }
@@ -464,7 +464,7 @@ enum AdminUserRoleFilter: String, CaseIterable, Identifiable {
     case all = "Alle"
     case admins = "Admins"
     case employees = "Mitarbeiter"
-    case experts = "Sachverständige"
+    case experts = "SV"
     var id: String { rawValue }
 }
 
@@ -502,27 +502,6 @@ struct AdminUsersScreen: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Mitarbeiter")
-                        .font(.largeTitle.weight(.bold))
-
-                    Spacer()
-
-                    NavigationLink {
-                        AddUserView()
-                            .environmentObject(appState)
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .semibold))
-                            .frame(width: 40, height: 40)
-                            .background(Circle().fill(Color(.secondarySystemBackground)))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Neuen Mitarbeiter erstellen")
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-
                 VStack(alignment: .leading, spacing: 10) {
                     Picker("Rolle", selection: $roleFilter) {
                         ForEach(AdminUserRoleFilter.allCases) { f in
@@ -552,6 +531,18 @@ struct AdminUsersScreen: View {
                 .background(Color(.systemGroupedBackground))
             }
             .background(Color(.systemGroupedBackground))
+            .navigationTitle("Nutzerverwaltung")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        AddUserView()
+                            .environmentObject(appState)
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
         }
     }
     
@@ -562,6 +553,25 @@ struct AdminUsersScreen: View {
         private var used: Int { appState.usedVacationDays(for: user) }
         private var remaining: Int { appState.remainingLeaveDays(for: user) }
         private var warning: Bool { remaining <= 5 }
+
+        private var sickCount: Int {
+            appState.leaveRequests
+                .filter { $0.user.id == user.id }
+                .filter { $0.type == .sick }
+                .filter { $0.status == .approved }
+                .count
+        }
+
+        private var onCallCountThisYear: Int {
+            let cal = Calendar.current
+            let year = cal.component(.year, from: Date())
+            return appState.leaveRequests
+                .filter { $0.user.id == user.id }
+                .filter { $0.type == .onCallSaturday }
+                .filter { $0.status == .approved }
+                .filter { cal.component(.year, from: $0.startDate) == year }
+                .count
+        }
 
         var body: some View {
             HStack(spacing: 12) {
@@ -580,26 +590,42 @@ struct AdminUsersScreen: View {
                             .foregroundColor(.secondary)
                     }
 
-                    HStack(spacing: 10) {
-                        Text("Urlaub: \(user.annualLeaveDays)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-
-                        Text("Genutzt: \(used)")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-
-                        Text("Rest: \(remaining)")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundColor(warning ? .red : .secondary)
-
-                        if warning {
-                            Image(systemName: "exclamationmark.triangle.fill")
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 10) {
+                            Text("Urlaub: \(user.annualLeaveDays)")
                                 .font(.caption2)
-                                .foregroundColor(.red)
+                                .foregroundColor(.secondary)
+
+                            Text("Genutzt: \(used)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+
+                            Text("Rest: \(remaining)")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundColor(warning ? .red : .secondary)
+
+                            if warning {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.caption2)
+                                    .foregroundColor(.red)
+                            }
+
+                            Spacer()
                         }
 
-                        Spacer()
+                        HStack(spacing: 10) {
+                            Text("Krank: \(sickCount)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+
+                            if user.role == .admin || user.role == .expert {
+                                Text("Bereitschaft: \(onCallCountThisYear)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+                        }
                     }
                 }
             }
@@ -716,23 +742,7 @@ struct EditUserView: View {
             }
         }
         .navigationTitle("Mitarbeiter bearbeiten")
-        .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    if hasUnsavedChanges {
-                        showUnsavedConfirm = true
-                    } else {
-                        dismiss()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.left")
-                        Text("Zurück")
-                    }
-                }
-            }
-
             ToolbarItem(placement: .topBarTrailing) {
                 Button("Speichern") {
                     appState.updateUser(user)
