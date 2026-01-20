@@ -48,13 +48,13 @@ struct LoginView: View {
             Circle()
                 .fill(Color.accentColor.opacity(0.10))
                 .frame(width: 280, height: 280)
-                .blur(radius: 18)
+                .blur(radius: 8)
                 .offset(x: -140, y: -220)
 
             Circle()
                 .fill(Color.accentColor.opacity(0.08))
                 .frame(width: 340, height: 340)
-                .blur(radius: 22)
+                .blur(radius: 10)
                 .offset(x: 170, y: 240)
 
             ScrollView(showsIndicators: false) {
@@ -175,7 +175,7 @@ struct LoginView: View {
                     .padding(18)
                     .background(
                         RoundedRectangle(cornerRadius: 18)
-                            .fill(.ultraThinMaterial)
+                            .fill(Color(.secondarySystemBackground).opacity(0.96))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 18)
