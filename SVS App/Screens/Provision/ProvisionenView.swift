@@ -53,8 +53,6 @@ struct ProvisionenView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     
-                    header
-                    
                     if showInlineError {
                         InlineErrorBanner(message: inlineErrorMessage)
                             .padding(.horizontal, 18)
@@ -290,6 +288,7 @@ struct ProvisionenView: View {
                         }
                         
                     }
+                    .padding(.horizontal, 18)
                     .padding(.top, 0)
                 }
             }
@@ -341,6 +340,8 @@ struct ProvisionenView: View {
                 }
             }
             .animation(.easeInOut, value: pendingAdminAction != nil)
+            .navigationTitle("Provision")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
     
@@ -351,21 +352,7 @@ struct ProvisionenView: View {
         return false
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Provision")
-                    .font(.largeTitle.weight(.bold))
-                Spacer()
-            }
-            Text("Einmal-Link erzeugen und Überblick behalten")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-        }
-        .padding(.horizontal, 18)
-        .padding(.top, 6)
-        .padding(.bottom, 2)
-    }
+    // header removed
 
     // MARK: - Actions
 
