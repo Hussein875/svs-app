@@ -979,26 +979,6 @@ struct AdminOnCallSaturdaysScreen: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Bereitschaft")
-                    .font(.largeTitle.weight(.bold))
-
-                Spacer()
-
-                Button {
-                    showNew = true
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 40, height: 40)
-                        .background(Circle().fill(Color(.secondarySystemBackground)))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Bereitschaft hinzufügen")
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 8)
-
             // Übersicht: Counts pro Mitarbeiter
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -1080,6 +1060,13 @@ struct AdminOnCallSaturdaysScreen: View {
                                 showEdit = true
                             }
                             .swipeActions {
+                                Button {
+                                    editingRequest = req
+                                    showEdit = true
+                                } label: {
+                                    Label("Bearbeiten", systemImage: "pencil")
+                                }
+
                                 Button(role: .destructive) {
                                     appState.deleteLeaveRequest(req)
                                 } label: {
@@ -1103,12 +1090,26 @@ struct AdminOnCallSaturdaysScreen: View {
             if let req = editingRequest {
                 EditOnCallSaturdayView(existingRequest: req)
                     .environmentObject(appState)
-                    .onDisappear {
-                        editingRequest = nil
-                    }
             } else {
                 // Fallback (should not happen)
                 EmptyView()
+            }
+        }
+        .onChange(of: showEdit) {
+            if !showEdit {
+                editingRequest = nil
+            }
+        }
+        .navigationTitle("Bereitschaft")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showNew = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("Bereitschaft hinzufügen")
             }
         }
     }
@@ -1121,6 +1122,7 @@ struct NewOnCallSaturdayView: View {
     @State private var selectedExpertId: String?
     @State private var selectedSaturday: Date = Calendar.current.startOfDay(for: Date())
     @State private var inlineError: String?
+    @State private var didLoadInitialValues: Bool = false
 
     private var eligibleUsers: [User] {
         appState.users
@@ -1190,8 +1192,11 @@ struct NewOnCallSaturdayView: View {
             }
 
             Section(header: Text("Samstag"), footer: Text("Es sind nur kommende Samstage auswählbar. Pro Samstag ist nur ein Eintrag möglich.")) {
-                Picker("Datum", selection: $selectedSaturday) {
-                    ForEach(saturdayPickerOptions, id: \.self) { d in
+                Picker("Datum", selection: Binding(
+                    get: { Calendar.current.startOfDay(for: selectedSaturday) },
+                    set: { selectedSaturday = Calendar.current.startOfDay(for: $0) }
+                )) {
+                    ForEach(saturdayPickerOptions.map { Calendar.current.startOfDay(for: $0) }, id: \.self) { d in
                         Text(d.formatted(date: .abbreviated, time: .omitted)).tag(d)
                     }
                 }
@@ -1245,16 +1250,16 @@ struct NewOnCallSaturdayView: View {
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.capsule)
                 .disabled(selectedExpertId == nil)
-
-                Button("Abbrechen", role: .cancel) {
-                    dismiss()
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .navigationTitle("Bereitschaft anlegen")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            // With `.pickerStyle(.navigationLink)` SwiftUI may re-trigger `onAppear`
+            // when coming back from the picker screen. Without this guard, the selection resets.
+            guard !didLoadInitialValues else { return }
+            didLoadInitialValues = true
+
             // Ensure the initial selection is a valid option/tag
             if let first = upcomingSaturdays.first {
                 selectedSaturday = Calendar.current.startOfDay(for: first)
@@ -1344,8 +1349,11 @@ struct EditOnCallSaturdayView: View {
             }
             
             Section(header: Text("Samstag"), footer: Text("Belegte Samstage sind nicht auswählbar.")) {
-                Picker("Datum", selection: $selectedSaturday) {
-                    ForEach(saturdayPickerOptions, id: \.self) { d in
+                Picker("Datum", selection: Binding(
+                    get: { Calendar.current.startOfDay(for: selectedSaturday) },
+                    set: { selectedSaturday = Calendar.current.startOfDay(for: $0) }
+                )) {
+                    ForEach(saturdayPickerOptions.map { Calendar.current.startOfDay(for: $0) }, id: \.self) { d in
                         Text(d.formatted(date: .abbreviated, time: .omitted)).tag(d)
                     }
                 }
@@ -1414,11 +1422,6 @@ struct EditOnCallSaturdayView: View {
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.capsule)
                 .disabled(selectedUserId == nil)
-                
-                Button("Schließen", role: .cancel) {
-                    dismiss()
-                }
-                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .navigationTitle("Bereitschaft")
