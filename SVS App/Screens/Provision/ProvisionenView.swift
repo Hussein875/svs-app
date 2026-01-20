@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
-import FirebaseAuth
-import FirebaseFirestore
+@preconcurrency import FirebaseAuth
+@preconcurrency import FirebaseFirestore
 
 /// Provisionen werden nicht mehr in der App erfasst.
 /// Stattdessen erzeugt die App einen Einmal-Link, den du dem Kunden schicken kannst.
