@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		155C7FCB2F216D7500F30807 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 155C7FCA2F216D7500F30807 /* FirebaseMessaging */; };
 		15D3BEA02F09DD1B009C14A4 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 15D3BE9F2F09DD1B009C14A4 /* FirebaseAuth */; };
 		15D3BEA22F09DD1B009C14A4 /* FirebaseAuthCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 15D3BEA12F09DD1B009C14A4 /* FirebaseAuthCombine-Community */; };
 		15D3BEA42F09DD1B009C14A4 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 15D3BEA32F09DD1B009C14A4 /* FirebaseFirestore */; };
@@ -21,22 +22,9 @@
 		15FBE8092EE86591006652EC /* SVS App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SVS App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		155C7F832F20F29B00F30807 /* Exceptions for "SVS App" folder in "SVS App" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				"SVS-App-Info.plist",
-			);
-			target = 15FBE8082EE86591006652EC /* SVS App */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		15FBE80B2EE86591006652EC /* SVS App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				155C7F832F20F29B00F30807 /* Exceptions for "SVS App" folder in "SVS App" target */,
-			);
 			path = "SVS App";
 			sourceTree = "<group>";
 		};
@@ -47,6 +35,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				155C7FCB2F216D7500F30807 /* FirebaseMessaging in Frameworks */,
 				15D3BEA02F09DD1B009C14A4 /* FirebaseAuth in Frameworks */,
 				15D3BEA62F09DD1B009C14A4 /* FirebaseFirestoreCombine-Community in Frameworks */,
 				15D3BEAE2F09DD1B009C14A4 /* FirebaseStorageCombine-Community in Frameworks */,
@@ -61,10 +50,18 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		155C7FC92F216D7500F30807 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		15FBE8002EE86591006652EC = {
 			isa = PBXGroup;
 			children = (
 				15FBE80B2EE86591006652EC /* SVS App */,
+				155C7FC92F216D7500F30807 /* Frameworks */,
 				15FBE80A2EE86591006652EC /* Products */,
 			);
 			sourceTree = "<group>";
@@ -105,6 +102,7 @@
 				15D3BEA92F09DD1B009C14A4 /* FirebaseFunctionsCombine-Community */,
 				15D3BEAB2F09DD1B009C14A4 /* FirebaseStorage */,
 				15D3BEAD2F09DD1B009C14A4 /* FirebaseStorageCombine-Community */,
+				155C7FCA2F216D7500F30807 /* FirebaseMessaging */,
 			);
 			productName = "SVS App";
 			productReference = 15FBE8092EE86591006652EC /* SVS App.app */;
@@ -292,6 +290,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "SVS App/SVS App.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -328,6 +327,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "SVS App/SVS App.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -394,6 +394,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		155C7FCA2F216D7500F30807 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 15D3BE9E2F09DD1B009C14A4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
 		15D3BE9F2F09DD1B009C14A4 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 15D3BE9E2F09DD1B009C14A4 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

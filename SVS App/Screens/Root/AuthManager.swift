@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import FirebaseAuth
+import FirebaseMessaging
 
 @MainActor
 final class AuthManager: ObservableObject {
@@ -34,6 +35,15 @@ final class AuthManager: ObservableObject {
     func signOut() throws {
         try Auth.auth().signOut()
         self.user = nil
+    }
+    
+    func onLoginSuccess(userId: String) {
+        Messaging.messaging().token { token, error in
+            if let token {
+                // hier dieselbe saveDeviceToken-Logik aufrufen
+                print("FCM Token after login:", token)
+            }
+        }
     }
 
     deinit {

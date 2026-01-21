@@ -7,6 +7,9 @@
 import Foundation
 import SwiftUI
 @preconcurrency import FirebaseAuth
+import FirebaseMessaging
+import FirebaseFirestore
+import UIKit
 
 // MARK: - Login
 
@@ -220,9 +223,43 @@ struct LoginView: View {
             do {
                 try await appState.auth.signIn(email: trimmedEmail, password: password)
                 appState.bootstrapCurrentUserIfNeeded()
+                await savePushTokenAfterLogin()
+                
             } catch {
                 errorText = "Anmeldung fehlgeschlagen. Bitte Zugangsdaten prüfen oder Admin kontaktieren."
             }
+        }
+    }
+
+    private func savePushTokenAfterLogin() async {
+        guard let userId = Auth.auth().currentUser?.uid else { return }
+
+        do {
+            // Ensure we have the latest FCM token (important because the token may arrive before login)
+            let token = try await Messaging.messaging().token()
+            guard !token.isEmpty else { return }
+
+            let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+            let db = Firestore.firestore()
+
+            let data: [String: Any] = [
+                "fcmToken": token,
+                "platform": "ios",
+                "deviceId": deviceId,
+                "updatedAt": FieldValue.serverTimestamp()
+            ]
+
+            try await db.collection("users")
+                .document(userId)
+                .collection("devices")
+                .document(deviceId)
+                .setData(data, merge: true)
+
+            print("Saved FCM token after login for user:", userId)
+
+        } catch {
+            // Do not block login if token save fails
+            print("Failed to save FCM token after login:", error)
         }
     }
 
