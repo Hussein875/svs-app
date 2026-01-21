@@ -1614,7 +1614,7 @@ struct AdminAutomationsScreen: View {
                                     Image(systemName: "play.circle.fill")
                                         .font(.system(size: 16, weight: .semibold))
 
-                                    Text("Make: Gutachtenablage manuell starten")
+                                    Text("Make: Gutachtenablage starten")
                                         .font(.subheadline.weight(.semibold))
                                         .lineLimit(1)
                                         .truncationMode(.tail)
