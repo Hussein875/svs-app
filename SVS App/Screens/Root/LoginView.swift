@@ -216,8 +216,10 @@ struct LoginView: View {
             isLoading = true
             defer { isLoading = false }
             errorText = nil
+            
             do {
                 try await appState.auth.signIn(email: trimmedEmail, password: password)
+                appState.bootstrapCurrentUserIfNeeded()
             } catch {
                 errorText = "Anmeldung fehlgeschlagen. Bitte Zugangsdaten prüfen oder Admin kontaktieren."
             }

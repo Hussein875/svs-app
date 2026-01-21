@@ -145,6 +145,10 @@ class AppState: ObservableObject {
                     return
                 }
                 
+                // Logged in: reset readiness and trigger bootstrap
+                self.isProfileReady = false
+                self.uiErrorMessage = nil
+
                 _Concurrency.Task { [weak self] in
                     await self?.loadOrCreateProfile(for: fbUser)
                 }
@@ -250,6 +254,18 @@ class AppState: ObservableObject {
         }
     }
     
+    // Public entry point to (re)load or create the Firestore user profile
+    @MainActor
+    func bootstrapCurrentUserIfNeeded() {
+        guard let fbUser = auth.user else { return }
+        isProfileReady = false
+        uiErrorMessage = nil
+
+        _Concurrency.Task { [weak self] in
+            await self?.loadOrCreateProfile(for: fbUser)
+        }
+    }
+
     // UI helper: Re-fetch the current user's profile from Firestore.
     // Used by the loading screen retry button.
     @MainActor
@@ -269,6 +285,7 @@ class AppState: ObservableObject {
         )
         users.append(newUser)
     }
+    
     
     func updateUser(_ user: User) {
         // 1) Local UI state
