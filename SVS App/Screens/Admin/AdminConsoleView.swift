@@ -1464,42 +1464,204 @@ struct AdminAutomationsScreen: View {
     @State private var listener: ListenerRegistration?
     @State private var eventsListener: ListenerRegistration?
     @State private var showRuns: Bool = false
+    // UltraExpert: Add state for stub button and alert
+    @State private var ultraExpertOpenCount: Int = 1
+    @State private var showUltraExpertStubAlert: Bool = false
+    @State private var showMakeManualRunAlert: Bool = false
+
+    private var accent: Color { appState.currentUser?.color ?? .secondary }
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Make")
-                        .font(.headline)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Übersicht (Quick Stats)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Make – Übersicht")
+                            .font(.headline)
+                            .padding(.horizontal, 18)
+
+                        Text("Quelle: Make (Gutachtenablage)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 18)
+                            .padding(.top, -6)
+
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                            AutomationMiniCard(
+                                title: "Status",
+                                value: statusLabel(doc?.status ?? (isLoading ? "warn" : "warn")),
+                                systemImage: "bolt.circle",
+                                accent: accent
+                            )
+
+                            AutomationMiniCard(
+                                title: "Letzter Lauf",
+                                value: lastRunValue(doc?.lastRunAt),
+                                systemImage: "clock",
+                                accent: accent
+                            )
+
+                            AutomationMiniCard(
+                                title: "Letzte Meldung",
+                                value: lastMessageValue(doc?.lastMessage),
+                                systemImage: "text.bubble",
+                                accent: accent
+                            )
+
+                            Button {
+                                withAnimation {
+                                    showRuns = true
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                    withAnimation {
+                                        proxy.scrollTo("runs_history", anchor: .top)
+                                    }
+                                }
+                            } label: {
+                                AutomationMiniCard(
+                                    title: "Läufe",
+                                    value: "\(doc?.events.count ?? 0)",
+                                    systemImage: "list.number",
+                                    accent: accent
+                                )
+                                .overlay(alignment: .bottomTrailing) {
+                                    HStack(spacing: 6) {
+                                        Text("Öffnen")
+                                            .font(.caption2.weight(.semibold))
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption2.weight(.semibold))
+                                    }
+                                    .foregroundColor(.secondary)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        Capsule().fill(Color(.systemGroupedBackground).opacity(0.85))
+                                    )
+                                    .overlay(
+                                        Capsule().stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+                                    )
+                                    .padding(10)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
                         .padding(.horizontal, 18)
 
-                    automationCard
+                        AutomationInfoCard(
+                            title: "Hinweis",
+                            text: "Diese Werte stammen aus Make (Gutachtenablage) und zeigen Status sowie die letzten Ausführungen. Bei Problemen wird der Status automatisch auf „Fehler“ gesetzt und die Meldung angezeigt.",
+                            systemImage: "info.circle",
+                            accent: accent
+                        )
                         .padding(.horizontal, 18)
+                    }
+                    .padding(.top, 2)
 
-                    DisclosureGroup(isExpanded: $showRuns) {
-                        eventsList
-                            .padding(.top, 10)
-                    } label: {
+                    // Aktionen (UltraExpert & Make – Platzhalter)
+                    VStack(alignment: .leading, spacing: 10) {
                         HStack {
-                            Text("Letzte 10 Läufe")
+                            Text("Aktionen")
                                 .font(.headline)
 
                             Spacer()
 
-                            let count = doc?.events.count ?? 0
-                            Text("\(count)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                            Stepper(value: $ultraExpertOpenCount, in: 1...10) {
+                                Text("\(ultraExpertOpenCount)x")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.secondary)
+                            }
+                            .labelsHidden()
                         }
                         .padding(.horizontal, 18)
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 8)
-                }
 
-                Spacer(minLength: 18)
+                        // UltraExpert (Platzhalter)
+                        Button {
+                            showUltraExpertStubAlert = true
+                        } label: {
+                            AutomationActionCard(accent: accent) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "doc.badge.plus")
+                                        .font(.system(size: 16, weight: .semibold))
+
+                                    Text(ultraExpertOpenCount == 1
+                                         ? "Akte in UltraExpert öffnen"
+                                         : "\(ultraExpertOpenCount) Akten in UltraExpert öffnen")
+                                        .font(.subheadline.weight(.semibold))
+
+                                    Spacer()
+
+                                    Image(systemName: "arrow.right")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 18)
+
+                        Text("Platzhalter: Die Automatisierung zum Öffnen neuer UltraExpert-Akten wird später implementiert.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 18)
+
+                        // Make (Platzhalter)
+                        Button {
+                            showMakeManualRunAlert = true
+                        } label: {
+                            AutomationActionCard(accent: accent) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "play.circle.fill")
+                                        .font(.system(size: 16, weight: .semibold))
+
+                                    Text("Make: Gutachtenablage manuell starten")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .minimumScaleFactor(0.9)
+
+                                    Spacer()
+
+                                    Image(systemName: "arrow.right")
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 18)
+
+                        Text("Platzhalter: Der manuelle Start der Make-Automatisierung wird später implementiert.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 18)
+                    }
+                    .padding(.top, 2)
+
+                    if showRuns {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Historie")
+                                    .font(.headline)
+                                Spacer()
+                                Button("Schließen") { withAnimation { showRuns = false } }
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 18)
+
+                            eventsList
+                                .padding(.horizontal, 18)
+                        }
+                        .id("runs_history")
+                        .padding(.top, 4)
+                    }
+
+
+                    Spacer(minLength: 18)
+                }
+                .padding(.bottom, 18)
             }
-            .padding(.bottom, 18)
         }
         .background(Color(.systemGroupedBackground))
         .navigationBarTitleDisplayMode(.inline)
@@ -1513,6 +1675,43 @@ struct AdminAutomationsScreen: View {
         }
         .refreshable {
             await refreshNow()
+        }
+        .alert("UltraExpert", isPresented: $showUltraExpertStubAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(ultraExpertOpenCount == 1
+                 ? "Platzhalter: Es würde jetzt 1 Akte in UltraExpert eröffnet werden."
+                 : "Platzhalter: Es würden jetzt \(ultraExpertOpenCount) Akten in UltraExpert eröffnet werden.")
+        }
+        .alert("Make", isPresented: $showMakeManualRunAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Platzhalter: Die Make-Automatisierung „Gutachtenablage“ würde jetzt manuell gestartet werden.")
+        }
+    }
+    
+    private struct AutomationActionCard<Content: View>: View {
+        let accent: Color
+        let content: Content
+
+        init(accent: Color, @ViewBuilder content: () -> Content) {
+            self.accent = accent
+            self.content = content()
+        }
+
+        var body: some View {
+            content
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .stroke(accent.opacity(0.28), lineWidth: 1)
+                )
         }
     }
     
@@ -1764,9 +1963,82 @@ struct AdminAutomationsScreen: View {
 
     private func statusLabel(_ s: String) -> String {
         switch s {
-        case "ok": return "✅ Läuft"
-        case "error": return "❌ Fehler"
-        default: return "⚠️ Hinweis"
+        case "ok": return "Läuft"
+        case "error": return "Fehler"
+        default: return "Hinweis"
+        }
+    }
+
+    private func lastRunValue(_ d: Date?) -> String {
+        guard let d else { return isLoading ? "Lädt…" : "–" }
+        return d.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private func lastMessageValue(_ s: String?) -> String {
+        let t = (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return isLoading ? "Lädt…" : "–" }
+        // Keep it compact for the mini card
+        return String(t.prefix(42)) + (t.count > 42 ? "…" : "")
+    }
+
+    private struct AutomationMiniCard: View {
+        let title: String
+        let value: String
+        let systemImage: String
+        let accent: Color
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: systemImage)
+                        .foregroundColor(accent)
+                    Spacer()
+                }
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(accent.opacity(0.18), lineWidth: 1)
+            )
+        }
+    }
+
+    private struct AutomationInfoCard: View {
+        let title: String
+        let text: String
+        let systemImage: String
+        let accent: Color
+
+        var body: some View {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: systemImage)
+                    .foregroundColor(accent)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    Text(text)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+            )
         }
     }
 
