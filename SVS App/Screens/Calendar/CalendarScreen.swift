@@ -12,6 +12,7 @@ struct CalendarScreen: View {
     @State private var currentMonth: Date = Date()
     @State private var selectedDate: Date = Date()
     @State private var monthPage: Int = 1 // 0 = prev, 1 = current, 2 = next
+    @State private var pagerWidth: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 12) {
@@ -55,21 +56,24 @@ struct CalendarScreen: View {
             TabView(selection: $monthPage) {
                 CalendarGrid(currentMonth: monthByAdding(-1, to: currentMonth),
                              selectedDate: $selectedDate)
-                    .padding(.horizontal)
                     .tag(0)
 
                 CalendarGrid(currentMonth: currentMonth,
                              selectedDate: $selectedDate)
-                    .padding(.horizontal)
                     .tag(1)
 
                 CalendarGrid(currentMonth: monthByAdding(1, to: currentMonth),
                              selectedDate: $selectedDate)
-                    .padding(.horizontal)
                     .tag(2)
             }
+            .padding(.horizontal, 20) // make calendar a bit narrower
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(maxHeight: 340) // keeps a stable height similar to the grid
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .preference(key: CalendarPagerWidthKey.self, value: geo.size.width)
+                }
+            )
             .onChange(of: monthPage) { newValue in
                 if newValue == 0 {
                     shiftMonth(by: -1)
@@ -82,6 +86,13 @@ struct CalendarScreen: View {
             .onAppear {
                 monthPage = 1
             }
+            .onPreferenceChange(CalendarPagerWidthKey.self) { w in
+                pagerWidth = w
+            }
+            .frame(
+                height: calendarPagerHeight(for: max(0, pagerWidth - 40), month: currentMonth),
+                alignment: .top
+            )
 
             List {
                 Section(header: Text("\(formatted(selectedDate))")) {
@@ -155,9 +166,43 @@ struct CalendarScreen: View {
         cal.firstWeekday = 2
         return cal.date(byAdding: .month, value: delta, to: base) ?? base
     }
+    
+    private func calendarPagerHeight(for width: CGFloat, month: Date) -> CGFloat {
+        // Fallback to a reasonable height before we have a measured width.
+        guard width > 0 else { return 340 }
+
+        let weeks = CalendarGrid.weeksInGrid(for: month)
+        let horizontalPadding: CGFloat = 0 // width already includes TabView padding measurement
+        let available = max(0, width - horizontalPadding * 2)
+
+        // Match grid spacing in CalendarGrid
+        let rowSpacing: CGFloat = 8
+        let colSpacing: CGFloat = 0 // GridItem(.flexible()) has implicit spacing handled by LazyVGrid spacing
+
+        // Cell size derived from width: 7 columns
+        let cell = floor((available - (rowSpacing * 6)) / 7)
+
+        // Weekday header height + spacing under header
+        let headerHeight: CGFloat = 18
+        let headerBottomGap: CGFloat = 6
+
+        // Total grid height (rows + spacing)
+        let gridHeight = (CGFloat(weeks) * cell) + (CGFloat(max(weeks - 1, 0)) * rowSpacing)
+
+        // Small internal top/bottom padding for breathing room
+        let verticalPadding: CGFloat = 6
+
+        return headerHeight + headerBottomGap + gridHeight + verticalPadding * 2
+    }
 }
 
-
+private struct CalendarPagerWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let n = nextValue()
+        if n > 0 { value = n }
+    }
+}
 
 // MARK: - User Legend
 
@@ -192,6 +237,33 @@ struct CalendarGrid: View {
     @EnvironmentObject var appState: AppState
     let currentMonth: Date
     @Binding var selectedDate: Date
+
+    static func weeksInGrid(for month: Date) -> Int {
+        var cal = Calendar.current
+        cal.firstWeekday = 2
+
+        guard let monthInterval = cal.dateInterval(of: .month, for: month) else { return 6 }
+        let startOfMonth = cal.startOfDay(for: monthInterval.start)
+        let endOfMonth = cal.date(byAdding: .day, value: -1, to: monthInterval.end).map { cal.startOfDay(for: $0) } ?? startOfMonth
+
+        func startOfWeek(_ date: Date) -> Date {
+            let weekday = cal.component(.weekday, from: date)
+            let diff = (weekday - cal.firstWeekday + 7) % 7
+            return cal.date(byAdding: .day, value: -diff, to: date).map { cal.startOfDay(for: $0) } ?? date
+        }
+
+        func endOfWeek(_ date: Date) -> Date {
+            let weekday = cal.component(.weekday, from: date)
+            let diff = (cal.firstWeekday + 6 - weekday + 7) % 7
+            return cal.date(byAdding: .day, value: diff, to: date).map { cal.startOfDay(for: $0) } ?? date
+        }
+
+        let gridStart = startOfWeek(startOfMonth)
+        let gridEnd = endOfWeek(endOfMonth)
+        let totalDays = (cal.dateComponents([.day], from: gridStart, to: gridEnd).day ?? 0) + 1
+        let weeks = Int(ceil(Double(totalDays) / 7.0))
+        return max(4, min(6, weeks))
+    }
 
     private var days: [Date] {
         var cal = Calendar.current
@@ -230,7 +302,7 @@ struct CalendarGrid: View {
     var body: some View {
         let columns = Array(repeating: GridItem(.flexible()), count: 7)
 
-        VStack {
+        VStack(spacing: 6) {
             HStack {
                 ForEach(["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"], id: \.self) { d in
                     Text(d)
@@ -271,8 +343,6 @@ struct CalendarGrid: View {
                 }
             }
         }
+        .padding(.vertical, 6)
     }
 }
-
-
-    
