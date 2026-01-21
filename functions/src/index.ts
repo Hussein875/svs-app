@@ -7,7 +7,10 @@ import {
   onRequest,
   HttpsError,
 } from "firebase-functions/v2/https";
-import {onDocumentCreated} from "firebase-functions/v2/firestore";
+import {
+  onDocumentCreated,
+  onDocumentUpdated,
+} from "firebase-functions/v2/firestore";
 import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
 
@@ -112,6 +115,288 @@ export const adminCreateUserInvite = onCall(async (request) => {
     email,
   };
 });
+
+// ------------------------------------------------------------------
+// Push Notifications (FCM)
+// - Neuer Antrag: leaveRequests/{requestId} onCreate -> Push an alle Admins
+// - Antrag genehmigt: leaveRequests/{requestId}
+// onUpdate statusRaw -> Push an Antragsteller
+// ------------------------------------------------------------------
+
+/**
+ * Represents an FCM token with its owning Firestore device document reference.
+ */
+type TokenRef = {
+  token: string;
+  ref: admin.firestore.DocumentReference;
+};
+
+/**
+ * Returns true if an FCM error indicates that a token is invalid/unregistered.
+ *
+ * @param {unknown} err The error object from FCM response.
+ * @return {boolean} True if the token should be removed.
+ */
+function isTokenGone(err: unknown): boolean {
+  const anyErr = err as {code?: unknown};
+  const code = String(anyErr?.code ?? "");
+  return code === "messaging/registration-token-not-registered" ||
+    code === "messaging/invalid-registration-token";
+}
+
+/**
+ * Removes invalid or unregistered FCM tokens from Firestore.
+ *
+ * Iterates over multicast send responses and deletes device documents
+ * whose tokens are reported by FCM as invalid or unregistered. This keeps
+ * the users/<uid>/devices subcollection clean and up to date.
+ *
+ * @param {TokenRef[]} tokenRefs - Token refs aligned with multicast order.
+ * @param {Array<Object>} responses - Multicast send responses from FCM.
+ * @return {Promise<void>} Resolves when invalid tokens are removed.
+ */
+async function cleanupDeadTokens(
+  tokenRefs: TokenRef[],
+  responses: Array<{success: boolean; error?: unknown}>
+): Promise<void> {
+  const toDelete: admin.firestore.DocumentReference[] = [];
+
+  responses.forEach((r, i) => {
+    if (!r.success && isTokenGone(r.error)) {
+      const tr = tokenRefs[i];
+      if (tr?.ref) toDelete.push(tr.ref);
+    }
+  });
+
+  if (toDelete.length === 0) return;
+
+  await Promise.all(
+    toDelete.map(async (ref) => {
+      try {
+        await ref.delete();
+      } catch (e) {
+        console.warn("[push][cleanup] delete failed", ref.path, e);
+      }
+    })
+  );
+}
+
+/**
+ * Logs per-token errors from an FCM multicast send response.
+ *
+ * @param {string} tag - Short tag like "new" or "approved".
+ * @param {string[]} tokens - Tokens used for the multicast send.
+ * @param {Array<Object>} responses - Multicast send responses from FCM.
+ * @return {void} Nothing.
+ */
+function logMulticastFailures(
+  tag: string,
+  tokens: string[],
+  responses: Array<{success: boolean; error?: unknown}>
+): void {
+  responses.forEach((r, i) => {
+    if (r.success) return;
+
+    const tok = String(tokens[i] ?? "");
+    const tokShort =
+      tok.length > 12 ? `${tok.slice(0, 6)}…${tok.slice(-6)}` : tok;
+
+    const anyErr = r.error as {code?: unknown; message?: unknown} | undefined;
+    const code = String(anyErr?.code ?? "unknown");
+    const msg = String(anyErr?.message ?? "no message");
+
+    console.warn("[push][" + tag + "] token failed", tokShort, code, msg);
+  });
+}
+
+/**
+ * Fetches all FCM token refs for users with roleRaw == "admin".
+ *
+ * @return {Promise<TokenRef[]>} A deduplicated list of admin device tokens.
+ */
+async function getAdminTokenRefs(): Promise<TokenRef[]> {
+  const adminsSnap = await admin.firestore()
+    .collection("users")
+    .where("roleRaw", "==", "admin")
+    .get();
+
+  const out: TokenRef[] = [];
+  const seen = new Set<string>();
+
+  for (const u of adminsSnap.docs) {
+    const devicesSnap = await admin.firestore()
+      .collection("users")
+      .doc(u.id)
+      .collection("devices")
+      .get();
+
+    for (const d of devicesSnap.docs) {
+      const t = d.data()?.fcmToken;
+      const token = typeof t === "string" ? t.trim() : "";
+      if (!token) continue;
+      if (seen.has(token)) continue;
+      seen.add(token);
+      out.push({token, ref: d.ref});
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Fetches all FCM token refs for a given user.
+ *
+ * @param {string} userId - Firebase Auth UID of the target user.
+ * @return {Promise<TokenRef[]>} Deduplicated list of user device tokens.
+ */
+async function getUserTokenRefs(userId: string): Promise<TokenRef[]> {
+  const devicesSnap = await admin
+    .firestore()
+    .collection("users")
+    .doc(userId)
+    .collection("devices")
+    .get();
+
+  const out: TokenRef[] = [];
+  const seen = new Set<string>();
+
+  for (const d of devicesSnap.docs) {
+    const t = d.data()?.fcmToken;
+    const token = typeof t === "string" ? t.trim() : "";
+    if (!token) continue;
+    if (seen.has(token)) continue;
+    seen.add(token);
+    out.push({token, ref: d.ref});
+  }
+
+  return out;
+}
+
+// Neuer Antrag -> Admins
+export const pushOnNewLeaveRequest =
+  onDocumentCreated(
+    "leaveRequests/{requestId}",
+    async (event) => {
+      const snap = event.data;
+      if (!snap) return;
+
+      const data = (snap.data() ?? {}) as Record<string, unknown>;
+
+      const requesterEmail = String(data.userEmail ?? "").trim() || "Unbekannt";
+      const typeRaw = String(data.typeRaw ?? "").trim() || "Antrag";
+
+      console.log(
+        "[push][new] requestId=",
+        String(event.params.requestId ?? "")
+      );
+
+      const tokenRefs = await getAdminTokenRefs();
+      const tokens = tokenRefs.map((t) => t.token);
+      if (tokens.length === 0) {
+        console.log("[push][new] no admin tokens");
+        return;
+      }
+
+      const resp = await admin.messaging().sendEachForMulticast({
+        tokens,
+        notification: {
+          title: "Neuer Antrag",
+          body: `${requesterEmail} • ${typeRaw}`,
+        },
+        data: {
+          type: "leave_request_new",
+          requestId: String(event.params.requestId ?? ""),
+        },
+      });
+
+      console.log(
+        "[push][new] sent",
+        resp.successCount,
+        "ok,",
+        resp.failureCount,
+        "failed"
+      );
+
+      logMulticastFailures(
+        "new",
+        tokens,
+        resp.responses as Array<{success: boolean; error?: unknown}>
+      );
+      await cleanupDeadTokens(
+        tokenRefs,
+        resp.responses as Array<{success: boolean; error?: unknown}>
+      );
+    }
+  );
+
+// Antrag genehmigt -> Antragsteller
+export const pushOnLeaveRequestApproved = onDocumentUpdated(
+  "leaveRequests/{requestId}",
+  async (event) => {
+    const before = event.data?.before;
+    const after = event.data?.after;
+    if (!before || !after) return;
+
+    const beforeData = (before.data() ?? {}) as Record<string, unknown>;
+    const afterData = (after.data() ?? {}) as Record<string, unknown>;
+
+    const beforeStatus = String(beforeData.statusRaw ?? "").trim();
+    const afterStatus = String(afterData.statusRaw ?? "").trim();
+
+    // Nur wenn sich statusRaw ändert und auf "Genehmigt" wechselt
+    if (beforeStatus === afterStatus) return;
+    if (afterStatus !== "Genehmigt") return;
+
+    const userId = String(afterData.userId ?? "").trim();
+    if (!userId) return;
+
+    console.log(
+      "[push][approved] requestId=",
+      String(event.params.requestId ?? ""),
+      "before=",
+      beforeStatus,
+      "after=",
+      afterStatus
+    );
+
+    const tokenRefs = await getUserTokenRefs(userId);
+    const tokens = tokenRefs.map((t) => t.token);
+    if (tokens.length === 0) {
+      console.log("[push][approved] no user tokens for", userId);
+      return;
+    }
+
+    const resp = await admin.messaging().sendEachForMulticast({
+      tokens,
+      notification: {
+        title: "Antrag genehmigt",
+        body: "Dein Antrag wurde genehmigt.",
+      },
+      data: {
+        type: "leave_request_approved",
+        requestId: String(event.params.requestId ?? ""),
+      },
+    });
+
+    console.log(
+      "[push][approved] sent",
+      resp.successCount,
+      "ok,",
+      resp.failureCount,
+      "failed"
+    );
+
+    logMulticastFailures(
+      "approved",
+      tokens,
+      resp.responses as Array<{success: boolean; error?: unknown}>
+    );
+    await cleanupDeadTokens(
+      tokenRefs,
+      resp.responses as Array<{success: boolean; error?: unknown}>
+    );
+  }
+);
 
 // ------------------------------------------------------------------
 // Make.com Webhook -> Firestore automation status
