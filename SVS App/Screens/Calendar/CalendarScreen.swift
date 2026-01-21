@@ -11,6 +11,7 @@ struct CalendarScreen: View {
     @EnvironmentObject var appState: AppState
     @State private var currentMonth: Date = Date()
     @State private var selectedDate: Date = Date()
+    @State private var monthPage: Int = 1 // 0 = prev, 1 = current, 2 = next
 
     var body: some View {
         VStack(spacing: 12) {
@@ -51,28 +52,36 @@ struct CalendarScreen: View {
                     .padding(.horizontal)
             }
 
-            CalendarGrid(currentMonth: currentMonth,
-                         selectedDate: $selectedDate)
-                .padding(.horizontal)
-                .animation(.easeInOut(duration: 0.25), value: currentMonth)
-                .gesture(
-                    DragGesture(minimumDistance: 18, coordinateSpace: .local)
-                        .onEnded { value in
-                            let dx = value.translation.width
-                            let dy = value.translation.height
+            TabView(selection: $monthPage) {
+                CalendarGrid(currentMonth: monthByAdding(-1, to: currentMonth),
+                             selectedDate: $selectedDate)
+                    .padding(.horizontal)
+                    .tag(0)
 
-                            // Only treat as month swipe if it's mostly horizontal
-                            guard abs(dx) > 60, abs(dx) > abs(dy) * 1.6 else { return }
+                CalendarGrid(currentMonth: currentMonth,
+                             selectedDate: $selectedDate)
+                    .padding(.horizontal)
+                    .tag(1)
 
-                            if dx < 0 {
-                                // Swipe left -> next month
-                                shiftMonth(by: 1)
-                            } else {
-                                // Swipe right -> previous month
-                                shiftMonth(by: -1)
-                            }
-                        }
-                )
+                CalendarGrid(currentMonth: monthByAdding(1, to: currentMonth),
+                             selectedDate: $selectedDate)
+                    .padding(.horizontal)
+                    .tag(2)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(maxHeight: 340) // keeps a stable height similar to the grid
+            .onChange(of: monthPage) { newValue in
+                if newValue == 0 {
+                    shiftMonth(by: -1)
+                    monthPage = 1
+                } else if newValue == 2 {
+                    shiftMonth(by: 1)
+                    monthPage = 1
+                }
+            }
+            .onAppear {
+                monthPage = 1
+            }
 
             List {
                 Section(header: Text("\(formatted(selectedDate))")) {
@@ -139,6 +148,12 @@ struct CalendarScreen: View {
             currentMonth = newMonth
             selectedDate = targetDate
         }
+    }
+    
+    private func monthByAdding(_ delta: Int, to base: Date) -> Date {
+        var cal = Calendar.current
+        cal.firstWeekday = 2
+        return cal.date(byAdding: .month, value: delta, to: base) ?? base
     }
 }
 
@@ -260,5 +275,4 @@ struct CalendarGrid: View {
 }
 
 
-    
     

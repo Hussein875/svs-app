@@ -65,20 +65,6 @@ struct MenuView: View {
                                     .fill(colorForName(selectedColorName))
                                     .frame(width: 16, height: 16)
                                     .overlay(Circle().stroke(Color.secondary.opacity(0.25), lineWidth: 1))
-                                Spacer()
-                            }
-
-                            if isSavingColor {
-                                HStack(spacing: 8) {
-                                    ProgressView()
-                                    Text("Speichere…")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            } else {
-                                Text("Die Akzentfarbe wird in deinem Profil gespeichert.")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
                             }
                         }
                     }
@@ -99,7 +85,7 @@ struct MenuView: View {
                     }
                     
                     Section {
-                        VStack(spacing: 10) {
+                        VStack(spacing: 6) {
                             if appState.currentUser != nil {
                                 Button {
                                     showSignOutConfirm = true
@@ -124,7 +110,7 @@ struct MenuView: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 2)
                     }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
