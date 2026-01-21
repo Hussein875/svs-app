@@ -24,6 +24,12 @@ struct MainView: View {
                     Label("Mein Bereich", systemImage: "person.crop.circle")
                 }
             
+            // Scanner
+            ScannerScreen()
+                .tabItem {
+                    Label("Scanner", systemImage: "doc.viewfinder")
+                }
+            
             // Admin-spezifische Tabs
             if appState.currentUser?.role == .admin {
                 AdminConsoleView()
@@ -44,6 +50,57 @@ struct MainView: View {
         }
     }
 
+}
+
+// MARK: - Scanner (Platzhalter)
+
+private struct ScannerScreen: View {
+    @EnvironmentObject var appState: AppState
+
+    private var userAccentColor: Color {
+        let key = (appState.currentUser?.colorName ?? "").lowercased()
+        switch key {
+        case "blau", "blue": return .blue
+        case "grün", "gruen", "green": return .green
+        case "rot", "red": return .red
+        case "orange": return .orange
+        case "lila", "purple": return .purple
+        case "pink": return .pink
+        case "gelb", "yellow": return .yellow
+        case "grau", "gray", "grey": return .gray
+        case "mint": return .mint
+        case "teal": return .teal
+        case "indigo": return .indigo
+        default: return .blue
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 14) {
+                Image(systemName: "doc.viewfinder")
+                    .font(.system(size: 44, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .padding(.top, 16)
+
+                Text("Scanner")
+                    .font(.title2.bold())
+
+                Text("Platzhalter: Hier entsteht ein Dokumenten-Scanner.\nZiel: Scannen und direkt in Google Drive ablegen.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+            .background(Color(.systemGroupedBackground))
+            .tint(userAccentColor)
+            .navigationTitle("Scanner")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
 }
 
 // MARK: - Arbeit (Home)
