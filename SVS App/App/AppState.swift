@@ -1170,8 +1170,35 @@ class AppState: ObservableObject {
     private func startUsersListenersIfNeeded() {
         // Avoid duplicate listeners
         if usersListener != nil { return }
-        
-        // Always listen to actual profiles in users/<uid>
+
+        // Non-admin users are only allowed to read their own profile document.
+        // Admins can read the full users collection.
+        if let me = currentUser, me.role != .admin {
+            let docRef = db.collection("users").document(me.id)
+            usersListener = docRef.addSnapshotListener(includeMetadataChanges: false) { [weak self] snap, error in
+                guard let self else { return }
+                if let error = error {
+                    DispatchQueue.main.async {
+                        self.uiErrorMessage = "Users konnten nicht geladen werden: \(error.localizedDescription)"
+                    }
+                    return
+                }
+
+                guard let snap, snap.exists, let data = snap.data(),
+                      let profile = UserProfile(from: data)
+                else { return }
+
+                self.firestoreListenerQueue.async { [weak self] in
+                    guard let self else { return }
+                    self.usersSnapshotCache = [profile.toUser(id: me.id)]
+                    self.invitesSnapshotCache = []
+                    self.mergeUserSnapshotsAndPublish()
+                }
+            }
+            return
+        }
+
+        // Admin: listen to all profiles in users/<uid>
         usersListener = db.collection("users").addSnapshotListener(includeMetadataChanges: false) { [weak self] (snapshot: QuerySnapshot?, error: Error?) in
             guard let self else { return }
             if let error = error {
@@ -1180,7 +1207,7 @@ class AppState: ObservableObject {
                 }
                 return
             }
-            
+
             // Process snapshots off the main thread to keep the UI responsive
             let docs = snapshot?.documents ?? []
             self.firestoreListenerQueue.async { [weak self] in
@@ -1192,7 +1219,7 @@ class AppState: ObservableObject {
                 self.mergeUserSnapshotsAndPublish()
             }
         }
-        
+
         // Admins also see pre-created invites (accounts that have not logged in yet)
         if currentUser?.role == .admin {
             invitesListener = db.collection("invites").addSnapshotListener(includeMetadataChanges: false) { [weak self] (snapshot: QuerySnapshot?, error: Error?) in
@@ -1203,7 +1230,7 @@ class AppState: ObservableObject {
                     }
                     return
                 }
-                
+
                 let docs = snapshot?.documents ?? []
                 self.firestoreListenerQueue.async { [weak self] in
                     guard let self else { return }
@@ -1218,50 +1245,57 @@ class AppState: ObservableObject {
     }
     
     // MARK: - Firestore LeaveRequests Listener
-    
-    private func startLeaveRequestsListenerIfNeeded() {
+
+    func startLeaveRequestsListenerIfNeeded() {
         guard leaveRequestsListener == nil else { return }
         guard let me = currentUser else { return }
+        guard let authUid = Auth.auth().currentUser?.uid else { return }
 
         var query: Query = db.collection("leaveRequests")
 
-        // Admin: see all.
-        // Employee/Expert: prefer filtering by Firebase UID. If older records don't have `userId` yet,
-        // fall back to filtering by `userEmail` until the data is fully migrated.
+        // Admin: alles. Nicht-Admin: nur eigene Requests (Rules-konform).
         if me.role != .admin {
-            // If the current user is an invite (no real UID yet), we must filter by email.
-            // Otherwise prefer UID filtering.
-            if me.id.hasPrefix("invite:") {
-                query = query.whereField("userEmail", isEqualTo: me.email.lowercased())
-            } else {
-                query = query.whereField("userId", isEqualTo: me.id)
-            }
+            query = query.whereField("userId", isEqualTo: authUid)
         }
 
-        // Sort for stable UI
-        query = query.order(by: "startDate", descending: false)
-
-        leaveRequestsListener = query.addSnapshotListener(includeMetadataChanges: false) { [weak self] snapshot, error in
+        leaveRequestsListener = query.addSnapshotListener(
+            includeMetadataChanges: true
+        ) { [weak self] snapshot, error in
             guard let self else { return }
-            if let error {
+
+            if let error = error {
+                print("[leaveRequests][listener][error]", error.localizedDescription)
                 DispatchQueue.main.async {
-                    self.uiErrorMessage = "Abwesenheiten konnten nicht geladen werden: \(error.localizedDescription)"
+                    self.uiErrorMessage = "leaveRequests: \(error.localizedDescription)"
                 }
                 return
             }
 
-            let docs = snapshot?.documents ?? []
+            guard let snapshot else { return }
+
+            let docs = snapshot.documents
+            print("[leaveRequests][listener] docs=\(docs.count) fromCache=\(snapshot.metadata.isFromCache)")
 
             self.firestoreListenerQueue.async { [weak self] in
                 guard let self else { return }
 
                 // Build lookup maps once per snapshot for performance.
-                let usersById: [String: User] = Dictionary(uniqueKeysWithValues: self.users.map { ($0.id, $0) })
-                let usersByEmail: [String: User] = Dictionary(uniqueKeysWithValues: self.users.map { ($0.email.lowercased(), $0) })
+                let usersById: [String: User] = Dictionary(
+                    uniqueKeysWithValues: self.users.map { ($0.id, $0) }
+                )
+                let usersByEmail: [String: User] = Dictionary(
+                    uniqueKeysWithValues: self.users.map { ($0.email.lowercased(), $0) }
+                )
 
-                let mapped: [LeaveRequest] = docs.compactMap { (doc: QueryDocumentSnapshot) -> LeaveRequest? in
-                    guard let dto = LeaveRequestDTO(id: doc.documentID, data: doc.data()) else { return nil }
+                let mapped: [LeaveRequest] = docs.compactMap { doc in
+                    guard let dto = LeaveRequestDTO(id: doc.documentID, data: doc.data()) else {
+                        return nil
+                    }
                     guard let id = UUID(uuidString: dto.id) else { return nil }
+
+                    print(
+                        "[leaveRequests][doc] id=\(dto.id) userId=\(dto.userId ?? "nil") statusRaw='\(dto.statusRaw)'"
+                    )
 
                     // Prefer resolving by UID; fall back to email for older records.
                     let email = dto.userEmail.lowercased()
@@ -1284,7 +1318,9 @@ class AppState: ObservableObject {
                     }()
 
                     let type = LeaveType(rawValue: dto.typeRaw) ?? .vacation
-                    let status = LeaveStatus(rawValue: dto.statusRaw) ?? .pending
+                    let status = LeaveStatus(
+                        rawValue: dto.statusRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ) ?? .pending
 
                     return LeaveRequest(
                         id: id,
@@ -1295,9 +1331,11 @@ class AppState: ObservableObject {
                         reason: dto.reason,
                         status: status,
                         createdAt: dto.createdAt.dateValue(),
-                        createdByUserId: dto.createdByUid ?? "invite:\(dto.createdByEmail.lowercased())",
+                        createdByUserId: dto.createdByUid
+                            ?? "invite:\(dto.createdByEmail.lowercased())",
                         updatedAt: dto.updatedAt?.dateValue(),
-                        updatedByUserId: dto.updatedByUid ?? dto.updatedByEmail.map { "invite:\($0.lowercased())" }
+                        updatedByUserId: dto.updatedByUid
+                            ?? dto.updatedByEmail.map { "invite:\($0.lowercased())" }
                     )
                 }
 

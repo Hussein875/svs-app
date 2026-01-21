@@ -13,12 +13,10 @@ struct MyRequestsScreen: View {
 
     private var myRequests: [LeaveRequest] {
         guard let me = appState.currentUser else { return [] }
-        let myEmail = me.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !myEmail.isEmpty else { return [] }
+        let myId = me.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !myId.isEmpty else { return [] }
 
-        return appState.leaveRequests.filter {
-            $0.user.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == myEmail
-        }
+        return appState.leaveRequests.filter { $0.user.id == myId }
     }
 
     private var todayStart: Date {
@@ -375,7 +373,15 @@ private struct MyLeaveRequestCard: View {
 
                         // Status nur bei Urlaub anzeigen
                         if request.type != .sick && request.type != .onCallSaturday {
-                            statusBadgeView(request.status)
+                            Text(request.status.rawValue)
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.primary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 4)
+                                .background(
+                                    Capsule()
+                                        .fill(colorForLeaveStatus(request.status).opacity(0.20))
+                                )
                         }
                     }
 
