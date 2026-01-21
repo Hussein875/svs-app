@@ -21,9 +21,22 @@
 		15FBE8092EE86591006652EC /* SVS App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SVS App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		155C7F832F20F29B00F30807 /* Exceptions for "SVS App" folder in "SVS App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"SVS-App-Info.plist",
+			);
+			target = 15FBE8082EE86591006652EC /* SVS App */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		15FBE80B2EE86591006652EC /* SVS App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				155C7F832F20F29B00F30807 /* Exceptions for "SVS App" folder in "SVS App" target */,
+			);
 			path = "SVS App";
 			sourceTree = "<group>";
 		};
@@ -285,6 +298,8 @@
 				DEVELOPMENT_TEAM = MG6BB56CA6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "SVS-App-Info.plist";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Die Kamera wird benötigt, um Dokumente zu scannen.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -319,6 +334,8 @@
 				DEVELOPMENT_TEAM = MG6BB56CA6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "SVS-App-Info.plist";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Die Kamera wird benötigt, um Dokumente zu scannen.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

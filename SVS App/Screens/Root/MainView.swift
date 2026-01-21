@@ -10,6 +10,7 @@ import UIKit
 import VisionKit
 import PDFKit
 import UniformTypeIdentifiers
+import AVFoundation
 
 struct MainView: View {
     @EnvironmentObject var appState: AppState
@@ -64,15 +65,8 @@ private struct ScannerScreen: View {
     @State private var isPresentingShare = false
     @State private var scannedPDFURL: URL? = nil
     @State private var fileName: String = "Scan"
-    @State private var targetFolder: String = "Aktuelle Aufträge" // Platzhalter für späteren Drive-Picker
     @State private var uiErrorMessage: String? = nil
 
-    private let availableFolders: [String] = [
-        "Aktuelle Aufträge",
-        "Erledigte Aufträge",
-        "Buchhaltung",
-        "Sonstiges"
-    ]
 
     private var userAccentColor: Color {
         let key = (appState.currentUser?.colorName ?? "").lowercased()
@@ -142,33 +136,10 @@ private struct ScannerScreen: View {
                             }
                         }
 
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Zielordner (Platzhalter)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-
-                            Picker("Zielordner", selection: $targetFolder) {
-                                ForEach(availableFolders, id: \.self) { folder in
-                                    Text(folder).tag(folder)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color(.secondarySystemBackground))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-                            )
-                        }
 
                         // Primary action
                         Button {
-                            isPresentingScanner = true
+                            startScan()
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "camera.fill")
@@ -256,9 +227,6 @@ private struct ScannerScreen: View {
                                             .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
                                     )
 
-                                Text("Zielordner: \(targetFolder)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
                             }
                             .padding(.top, 4)
                         } else {
@@ -332,6 +300,40 @@ private struct ScannerScreen: View {
             } message: {
                 Text(uiErrorMessage ?? "")
             }
+        }
+    }
+
+    // MARK: - Scanner bootstrap (permissions + device support)
+
+    private func startScan() {
+        // VisionKit scanner is not supported on Simulator and some devices.
+        guard VNDocumentCameraViewController.isSupported else {
+            uiErrorMessage = "Der Dokumentenscanner wird auf diesem Gerät nicht unterstützt (z. B. Simulator)."
+            return
+        }
+
+        // Check camera permission before presenting to avoid runtime failures.
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        switch status {
+        case .authorized:
+            isPresentingScanner = true
+
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        isPresentingScanner = true
+                    } else {
+                        uiErrorMessage = "Kamerazugriff wurde abgelehnt. Bitte in iOS Einstellungen unter Datenschutz → Kamera erlauben."
+                    }
+                }
+            }
+
+        case .denied, .restricted:
+            uiErrorMessage = "Kein Kamerazugriff. Bitte in iOS Einstellungen unter Datenschutz → Kamera erlauben."
+
+        @unknown default:
+            uiErrorMessage = "Kamerazugriff konnte nicht geprüft werden."
         }
     }
 
@@ -423,6 +425,7 @@ private struct DocumentScanner: UIViewControllerRepresentable {
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
             controller.dismiss(animated: true)
             onCancel()
+            print("[Scanner] VNDocumentCamera failed:", error.localizedDescription)
         }
 
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
