@@ -55,6 +55,24 @@ struct CalendarScreen: View {
                          selectedDate: $selectedDate)
                 .padding(.horizontal)
                 .animation(.easeInOut(duration: 0.25), value: currentMonth)
+                .gesture(
+                    DragGesture(minimumDistance: 18, coordinateSpace: .local)
+                        .onEnded { value in
+                            let dx = value.translation.width
+                            let dy = value.translation.height
+
+                            // Only treat as month swipe if it's mostly horizontal
+                            guard abs(dx) > 60, abs(dx) > abs(dy) * 1.6 else { return }
+
+                            if dx < 0 {
+                                // Swipe left -> next month
+                                shiftMonth(by: 1)
+                            } else {
+                                // Swipe right -> previous month
+                                shiftMonth(by: -1)
+                            }
+                        }
+                )
 
             List {
                 Section(header: Text("\(formatted(selectedDate))")) {
@@ -96,6 +114,31 @@ struct CalendarScreen: View {
 
     func dateRange(_ start: Date, _ end: Date) -> String {
         dateRangeString(start, end)
+    }
+    
+    private func shiftMonth(by delta: Int) {
+        var cal = Calendar.current
+        cal.firstWeekday = 2 // Montag
+
+        guard let newMonth = cal.date(byAdding: .month, value: delta, to: currentMonth) else { return }
+
+        // Keep the selected day-of-month if possible; clamp to last day of target month
+        let day = cal.component(.day, from: selectedDate)
+        guard let monthInterval = cal.dateInterval(of: .month, for: newMonth) else {
+            withAnimation(.easeInOut(duration: 0.25)) { currentMonth = newMonth }
+            return
+        }
+        let startOfNewMonth = cal.startOfDay(for: monthInterval.start)
+        let endOfNewMonth = cal.date(byAdding: .day, value: -1, to: monthInterval.end).map { cal.startOfDay(for: $0) } ?? startOfNewMonth
+        let lastDay = cal.component(.day, from: endOfNewMonth)
+
+        let clampedDay = min(day, lastDay)
+        let targetDate = cal.date(bySetting: .day, value: clampedDay, of: startOfNewMonth) ?? startOfNewMonth
+
+        withAnimation(.easeInOut(duration: 0.25)) {
+            currentMonth = newMonth
+            selectedDate = targetDate
+        }
     }
 }
 
@@ -219,4 +262,3 @@ struct CalendarGrid: View {
 
     
     
-
