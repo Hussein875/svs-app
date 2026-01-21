@@ -17,7 +17,7 @@ struct AdminConsoleView: View {
                 VStack(alignment: .leading, spacing: 14) {
 
                     HStack(alignment: .firstTextBaseline) {
-                        Text("Admin")
+                        Text("Admin-Konsole")
                             .font(.largeTitle.weight(.bold))
 
                         Spacer()
