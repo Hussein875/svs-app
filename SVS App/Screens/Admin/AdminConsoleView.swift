@@ -648,21 +648,9 @@ struct AdminUsersScreen: View {
 }
 
 // MARK: - Color Name Translation Helper
-private func germanColorName(_ key: String) -> String {
-    switch key {
-    case "blue": return "Blau"
-    case "green": return "Grün"
-    case "orange": return "Orange"
-    case "purple": return "Lila"
-    case "red": return "Rot"
-    case "pink": return "Pink"
-    case "teal": return "Türkis"
-    case "indigo": return "Indigo"
-    case "yellow": return "Gelb"
-    case "gray": return "Grau"
-    default: return key.capitalized
-    }
-}
+//private func germanColorName(_ key: String) -> String {
+//    Color.svsGermanColorName(from: key)
+//}
 
 struct EditUserView: View {
     @EnvironmentObject var appState: AppState
@@ -677,8 +665,8 @@ struct EditUserView: View {
     @State private var showUnsavedConfirm: Bool = false
     @State private var initialSnapshot: UserEditSnapshot? = nil
 
-    private let availableColors: [String] = ["blue", "green", "orange", "purple", "red", "pink", "teal", "indigo", "yellow", "gray"]
-
+    private let availableColors = UserColor.allCases
+    
     private struct UserEditSnapshot: Equatable {
         let name: String
         let role: UserRole
@@ -729,7 +717,8 @@ struct EditUserView: View {
             Section(header: Text("Farbe")) {
                 Picker("Farbe", selection: binding(for: \.colorName)) {
                     ForEach(availableColors, id: \.self) { color in
-                        Text(germanColorName(color)).tag(color)
+                        Text(color.germanName)
+                            .tag(color.rawValue)
                     }
                 }
             }
@@ -829,8 +818,8 @@ struct AddUserView: View {
     @State private var colorName: String = "gray"
     @State private var isCreating: Bool = false
 
-    private let availableColors: [String] = ["blue", "green", "orange", "purple", "red", "pink", "teal", "indigo", "yellow", "gray"]
-
+    private let availableColors = UserColor.allCases
+    
     var body: some View {
         Form {
             Section(header: Text("Allgemein")) {
@@ -855,7 +844,8 @@ struct AddUserView: View {
             Section(header: Text("Farbe")) {
                 Picker("Farbe", selection: $colorName) {
                     ForEach(availableColors, id: \.self) { color in
-                        Text(germanColorName(color)).tag(color)
+                        Text(color.germanName)
+                            .tag(color.rawValue)
                     }
                 }
             }

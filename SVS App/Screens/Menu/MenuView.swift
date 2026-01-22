@@ -8,7 +8,6 @@ import Foundation
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
-import UIKit
 
 struct MenuView: View {
     @EnvironmentObject var appState: AppState
@@ -17,7 +16,7 @@ struct MenuView: View {
     @State private var selectedColorName: String = "blue"
     @State private var isSavingColor: Bool = false
     
-    private let availableColors: [String] = ["blue", "green", "orange", "purple", "red", "pink", "teal", "indigo", "yellow", "gray"]
+    private let availableColors = UserColor.allCases
     
     var body: some View {
         NavigationStack {
@@ -32,7 +31,7 @@ struct MenuView: View {
                             }
 
                             LabeledContent("Rolle") {
-                                Text(user.role.rawValue)
+                                Text(germanRoleName(user.role))
                                     .foregroundColor(.secondary)
                             }
                         } else {
@@ -44,15 +43,20 @@ struct MenuView: View {
                     if appState.currentUser != nil {
                         Section(header: Text("Erscheinungsbild")) {
                             Picker("Akzentfarbe", selection: $selectedColorName) {
-                                ForEach(availableColors, id: \.self) { key in
+                                ForEach(availableColors, id: \.self) { c in
                                     HStack(spacing: 10) {
                                         Circle()
-                                            .fill(colorForName(key))
+                                            .fill(c.color)
                                             .frame(width: 14, height: 14)
-                                            .overlay(Circle().stroke(Color.secondary.opacity(0.25), lineWidth: 1))
-                                        Text(germanColorName(key))
+                                            .overlay(
+                                                Circle().stroke(
+                                                    Color.secondary.opacity(0.25),
+                                                    lineWidth: 1
+                                                )
+                                            )
+                                        Text(c.germanName)
                                     }
-                                    .tag(key)
+                                    .tag(c.rawValue)
                                 }
                             }
                             .disabled(isSavingColor)
@@ -62,7 +66,7 @@ struct MenuView: View {
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                 Circle()
-                                    .fill(colorForName(selectedColorName))
+                                    .fill(Color.svsAccentColor(from: selectedColorName))
                                     .frame(width: 16, height: 16)
                                     .overlay(Circle().stroke(Color.secondary.opacity(0.25), lineWidth: 1))
                             }
@@ -120,21 +124,12 @@ struct MenuView: View {
                 .background(Color(.systemGroupedBackground))
                 .onAppear {
                     if let user = appState.currentUser {
-                        // Prefer persisted palette key if available; fallback to closest match.
-                        if availableColors.contains(user.colorName) {
-                            selectedColorName = user.colorName
-                        } else {
-                            selectedColorName = closestColorName(for: user.color)
-                        }
+                        selectedColorName = UserColor.from(user.colorName).rawValue
                     }
                 }
                 .onChange(of: appState.currentUser?.id) {
                     if let user = appState.currentUser {
-                        if availableColors.contains(user.colorName) {
-                            selectedColorName = user.colorName
-                        } else {
-                            selectedColorName = closestColorName(for: user.color)
-                        }
+                        selectedColorName = UserColor.from(user.colorName).rawValue
                     }
                 }
                 .onChange(of: selectedColorName) {
@@ -149,12 +144,9 @@ struct MenuView: View {
 
                     isSavingColor = true
 
-                    let chosen = colorForName(selectedColorName)
-                    let hex = colorToHex(chosen)
                     let db = Firestore.firestore()
                     db.collection("users").document(user.id).setData([
                         "colorName": selectedColorName,
-                        "colorHex": hex,
                         "updatedAt": FieldValue.serverTimestamp()
                     ], merge: true) { err in
                         DispatchQueue.main.async {
@@ -197,58 +189,21 @@ struct MenuView: View {
     }
     
     private func germanColorName(_ key: String) -> String {
-        switch key {
-        case "blue": return "Blau"
-        case "green": return "Grün"
-        case "orange": return "Orange"
-        case "purple": return "Lila"
-        case "red": return "Rot"
-        case "pink": return "Pink"
-        case "teal": return "Türkis"
-        case "indigo": return "Indigo"
-        case "yellow": return "Gelb"
-        case "gray": return "Grau"
-        default: return key.capitalized
-        }
+        Color.svsGermanColorName(from: key)
     }
 
     private func colorForName(_ key: String) -> Color {
-        switch key {
-        case "blue": return .blue
-        case "green": return .green
-        case "orange": return .orange
-        case "purple": return .purple
-        case "red": return .red
-        case "pink": return .pink
-        case "teal": return .teal
-        case "indigo": return .indigo
-        case "yellow": return .yellow
-        case "gray": return .gray
-        default: return .gray
-        }
+        Color.svsAccentColor(from: key)
     }
 
-    private func closestColorName(for color: Color) -> String {
-        let target = colorToHex(color)
-        for key in availableColors {
-            if colorToHex(colorForName(key)) == target {
-                return key
-            }
+    private func germanRoleName(_ role: UserRole) -> String {
+        switch role {
+        case .admin:
+            return "Administrator"
+        case .employee:
+            return "Mitarbeiter"
+        case .expert:
+            return "Sachverständiger"
         }
-        // fallback: try to keep the current selection if still valid
-        return availableColors.contains(selectedColorName) ? selectedColorName : (availableColors.first ?? "gray")
-    }
-
-    private func colorToHex(_ color: Color) -> String {
-        let ui = UIColor(color)
-        var r: CGFloat = 0
-        var g: CGFloat = 0
-        var b: CGFloat = 0
-        var a: CGFloat = 0
-        ui.getRed(&r, green: &g, blue: &b, alpha: &a)
-        let ri = Int(round(r * 255))
-        let gi = Int(round(g * 255))
-        let bi = Int(round(b * 255))
-        return String(format: "#%02X%02X%02X", ri, gi, bi)
     }
 }

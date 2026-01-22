@@ -17,17 +17,6 @@ struct User: Identifiable, Hashable, Codable {
     var email: String
 
     var color: Color {
-        switch colorName {
-        case "blue": return .blue
-        case "green": return .green
-        case "orange": return .orange
-        case "purple": return .purple
-        case "red": return .red
-        case "pink": return .pink
-        case "teal": return .teal
-        case "indigo": return .indigo
-        case "yellow": return .yellow
-        default: return .gray
-        }
+        Color.svsAccentColor(from: colorName)
     }
 }

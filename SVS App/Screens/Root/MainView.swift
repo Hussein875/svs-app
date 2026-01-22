@@ -69,21 +69,7 @@ private struct ScannerScreen: View {
 
 
     private var userAccentColor: Color {
-        let key = (appState.currentUser?.colorName ?? "").lowercased()
-        switch key {
-        case "blau", "blue": return .blue
-        case "grün", "gruen", "green": return .green
-        case "rot", "red": return .red
-        case "orange": return .orange
-        case "lila", "purple": return .purple
-        case "pink": return .pink
-        case "gelb", "yellow": return .yellow
-        case "grau", "gray", "grey": return .gray
-        case "mint": return .mint
-        case "teal": return .teal
-        case "indigo": return .indigo
-        default: return .blue
-        }
+        Color.svsAccentColor(from: appState.currentUser?.colorName)
     }
 
     var body: some View {
@@ -266,6 +252,11 @@ private struct ScannerScreen: View {
             }
             .background(Color(.systemGroupedBackground))
             .tint(userAccentColor)
+            .scrollDismissesKeyboard(.interactively)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                hideKeyboard()
+            }
             .navigationTitle("Scanner")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $isPresentingScanner) {
@@ -485,22 +476,10 @@ private struct WorkHomeView: View {
     }
 
     private var userAccentColor: Color {
-        let key = (appState.currentUser?.colorName ?? "").lowercased()
-        switch key {
-        case "blau", "blue": return .blue
-        case "grün", "gruen", "green": return .green
-        case "rot", "red": return .red
-        case "orange": return .orange
-        case "lila", "purple": return .purple
-        case "pink": return .pink
-        case "gelb", "yellow": return .yellow
-        case "grau", "gray", "grey": return .gray
-        case "mint": return .mint
-        case "teal": return .teal
-        case "indigo": return .indigo
-        default: return .blue
-        }
+        Color.svsAccentColor(from: appState.currentUser?.colorName)
     }
+
+
 
     // Quick numbers
     private var myOpenTasksCount: Int {
@@ -751,4 +730,13 @@ private extension UIViewController {
 
         return nil
     }
+}
+
+private func hideKeyboard() {
+    UIApplication.shared.sendAction(
+        #selector(UIResponder.resignFirstResponder),
+        to: nil,
+        from: nil,
+        for: nil
+    )
 }
