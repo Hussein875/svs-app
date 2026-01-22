@@ -282,7 +282,6 @@ export const pushOnNewLeaveRequest =
 
       const data = (snap.data() ?? {}) as Record<string, unknown>;
 
-      const requesterEmail = String(data.userEmail ?? "").trim() || "Unbekannt";
       const typeRaw = String(data.typeRaw ?? "").trim() || "Antrag";
 
       console.log(
@@ -301,7 +300,7 @@ export const pushOnNewLeaveRequest =
         tokens,
         notification: {
           title: "Neuer Antrag",
-          body: `${requesterEmail} • ${typeRaw}`,
+          body: `${typeRaw}`,
         },
         data: {
           type: "leave_request_new",
