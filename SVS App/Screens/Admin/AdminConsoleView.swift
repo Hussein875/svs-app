@@ -1218,10 +1218,8 @@ struct NewOnCallSaturdayView: View {
                         start: selectedSaturday,
                         end: selectedSaturday,
                         type: .onCallSaturday,
-                        for: user,
-                        approveImmediately: true
+                        for: user
                     )
-
                     if ok {
                         inlineError = nil
                         dismiss()
@@ -1382,8 +1380,7 @@ struct EditOnCallSaturdayView: View {
                         start: selectedSaturday,
                         end: selectedSaturday,
                         type: .onCallSaturday,
-                        for: user,
-                        approveImmediately: true
+                        for: user
                     )
                     
                     if ok {
@@ -1395,8 +1392,7 @@ struct EditOnCallSaturdayView: View {
                             start: oldDay,
                             end: oldDay,
                             type: .onCallSaturday,
-                            for: oldUser,
-                            approveImmediately: true
+                            for: oldUser
                         )
                         inlineError = appState.uiErrorMessage
                     }

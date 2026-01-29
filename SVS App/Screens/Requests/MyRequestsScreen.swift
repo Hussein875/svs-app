@@ -455,7 +455,7 @@ struct NewLeaveRequestView: View {
     @State private var endDate = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
     @State private var selectedType: LeaveType = .vacation
     @State private var selectedUserId: String? = nil
-    @State private var approveImmediately: Bool = true
+
     @State private var inlineError: String? = nil
     @State private var didLoadInitialValues: Bool = false
 
@@ -625,9 +625,6 @@ struct NewLeaveRequestView: View {
                             .foregroundColor(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    if isAdmin && selectedType == .vacation {
-                        Toggle("Direkt genehmigen", isOn: $approveImmediately)
-                    }
                 }
 
                 // Admin: Mitarbeiter-Auswahl
@@ -718,10 +715,7 @@ struct NewLeaveRequestView: View {
                             start: startDate,
                             end: endDate,
                             type: selectedType,
-                            for: targetUser,
-                            approveImmediately: (selectedType == .vacation)
-                                ? (isAdmin && approveImmediately)
-                                : (selectedType == .onCallSaturday ? true : false)
+                            for: targetUser
                         )
                         if ok {
                             inlineError = nil
@@ -761,9 +755,6 @@ struct NewLeaveRequestView: View {
             .onChange(of: selectedType) {
                 inlineError = nil
                 appState.uiErrorMessage = nil
-                if selectedType == .sick {
-                    approveImmediately = false
-                }
                 if selectedType == .onCallSaturday {
                     // Pick the first free Saturday by default
                     if let first = upcomingFreeSaturdays.first {
@@ -776,7 +767,6 @@ struct NewLeaveRequestView: View {
                         startDate = day
                         endDate = day
                     }
-                    approveImmediately = false
                 }
             }
         }
@@ -790,10 +780,6 @@ struct NewLeaveRequestView: View {
 
             if selectedUserId == nil {
                 selectedUserId = preselectedUserId ?? appState.currentUser?.id
-            }
-            // Bei Krankheit macht "Direkt genehmigen" keinen Sinn
-            if selectedType == .sick {
-                approveImmediately = false
             }
             // Normalize initial dates
             startDate = Calendar.current.startOfDay(for: startDate)

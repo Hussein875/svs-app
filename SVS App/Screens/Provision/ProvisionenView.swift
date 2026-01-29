@@ -17,335 +17,385 @@ struct ProvisionenView: View {
     @State private var amountText: String = ""
     @FocusState private var amountFocused: Bool
     @State private var selectedCommission: CommissionRow? = nil
-
+    
     @State private var commissions: [CommissionRow] = []
     @State private var isLoadingCommissions: Bool = false
     @State private var commissionsError: String? = nil
     @State private var isAdmin: Bool = false
     @State private var commissionsListener: ListenerRegistration? = nil
     
-
+    
     @State private var pendingAdminAction: PendingAdminAction? = nil
     @State private var amountFieldInvalid: Bool = false
-
+    
     // MARK: - Link Generation
-
+    
     /// Basis-URL deines Online-Formulars. (Server muss Token validieren / einmalig machen.)
     private let provisionFormBaseURL = URL(string: "https://sv-souleiman.de/provision")!
-
+    
     private let createProvisionLinkEndpoint = URL(
         string: "https://createprovisionlink-df5lzkocnq-uc.a.run.app"
     )!
-
+    
     /// Wie lange der Link gültig sein soll (Tage)
     private let defaultTTLDays: Int = 30
-
+    
     @State private var isGenerating: Bool = false
     @State private var generatedURL: URL? = nil
     @State private var lastGeneratedAt: Date? = nil
-
+    
     // Inline Error (nur sichtbar, wenn es einen Fehler gibt)
     @State private var showInlineError: Bool = false
     @State private var inlineErrorMessage: String = ""
-
+    
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    
-                    if showInlineError {
-                        InlineErrorBanner(message: inlineErrorMessage)
-                            .padding(.horizontal, 18)
-                            .transition(.opacity)
-                    }
-                    
-                    SectionCard(title: "Einmal-Link", systemImage: "link") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Erzeuge einen Einmal-Link für das Online-Provisionsformular. Den Link kannst du dem Vermittler schicken. Das Formular wird online ausgefüllt und dort unterschrieben.")
-                                .font(.subheadline)
+            List {
+                if showInlineError {
+                    InlineErrorBanner(message: inlineErrorMessage)
+                        .transition(.opacity)
+                        .listRowInsets(EdgeInsets(top: 10, leading: 18, bottom: 10, trailing: 18))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+
+                SectionCard(title: "Einmal-Link", systemImage: "link") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Erzeuge einen Einmal-Link für das Online-Provisionsformular. Den Link kannst du dem Vermittler schicken. Das Formular wird online ausgefüllt und dort unterschrieben.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        if let lastGeneratedAt {
+                            Text("Zuletzt erstellt: \(lastGeneratedAt.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.footnote)
                                 .foregroundColor(.secondary)
-                            
-                            if let lastGeneratedAt {
-                                Text("Zuletzt erstellt: \(lastGeneratedAt.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.footnote)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Betrag")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            HStack(spacing: 10) {
+                                Image(systemName: "eurosign.circle")
                                     .foregroundColor(.secondary)
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Betrag")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                HStack(spacing: 10) {
-                                    Image(systemName: "eurosign.circle")
-                                        .foregroundColor(.secondary)
-                                    
-                                    TextField("z. B. 50,00", text: $amountText)
-                                        .keyboardType(.numbersAndPunctuation)
-                                        .focused($amountFocused)
-                                        .textInputAutocapitalization(.never)
-                                        .autocorrectionDisabled(true)
-                                        .textContentType(.none)
-                                        .submitLabel(.done)
-                                        .onSubmit {
-                                            amountFocused = false
-                                        }
-                                        .onChange(of: amountFocused) { _, focused in
-                                            if !focused {
-                                                amountText = normalizeAmountText(amountText)
-                                                amountFieldInvalid = false
-                                            }
-                                        }
-                                        .onChange(of: amountText) { _, _ in
+
+                                TextField("z. B. 50,00", text: $amountText)
+                                    .keyboardType(.numbersAndPunctuation)
+                                    .focused($amountFocused)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled(true)
+                                    .textContentType(.none)
+                                    .submitLabel(.done)
+                                    .onSubmit {
+                                        amountFocused = false
+                                    }
+                                    .onChange(of: amountFocused) { _, focused in
+                                        if !focused {
+                                            amountText = normalizeAmountText(amountText)
                                             amountFieldInvalid = false
                                         }
-                                    
-                                    Text("EUR")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(Color(.tertiarySystemBackground))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(amountFieldInvalid ? Color.red : Color.clear, lineWidth: 1)
-                                )
-
-                                Text("Hinweis: Der Betrag wird nicht im Webformular angezeigt, sondern nur im Hintergrund gespeichert.")
-                                    .font(.footnote)
-                                    .foregroundColor(.secondary)
-                            }
-                            
-                            Button {
-                                if !canGenerateLink {
-                                    amountFieldInvalid = true
-                                    showError("Bitte einen gültigen Betrag eingeben, bevor du den Link erstellst.")
-                                    return
-                                }
-                                amountFieldInvalid = false
-                                _Concurrency.Task {
-                                    await generateOneTimeLink()
-                                }
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "wand.and.stars")
-                                        .font(.system(size: 14, weight: .semibold))
-                                    Text(isGenerating ? "Erstelle Link …" : "Einmal-Link erstellen")
-                                        .font(.headline)
-                                    Spacer()
-                                    if isGenerating {
-                                        ProgressView()
                                     }
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Color.accentColor)
-                            .foregroundColor(.white)
-                            .disabled(isGenerating || !canGenerateLink)
-
-                            if let generatedURL {
-                                Divider().opacity(0.18)
-                                
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text("Link")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    
-                                    Text(generatedURL.absoluteString)
-                                        .font(.footnote)
-                                        .foregroundColor(.primary)
-                                        .textSelection(.enabled)
-                                        .lineLimit(3)
-                                    
-                                    HStack(spacing: 10) {
-                                        Button {
-                                            UIPasteboard.general.string = generatedURL.absoluteString
-                                            appState.showToast(.success, "Link kopiert")
-                                        } label: {
-                                            Label("Kopieren", systemImage: "doc.on.doc")
-                                        }
-                                        .buttonStyle(.bordered)
-
-                                        ShareLink(item: generatedURL) {
-                                            Label("Teilen", systemImage: "square.and.arrow.up")
-                                        }
-                                        .buttonStyle(.bordered)
-
-                                        Spacer()
+                                    .onChange(of: amountText) { _, _ in
+                                        amountFieldInvalid = false
                                     }
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 18)
-                    
-                    SectionCard(title: "Übersicht", systemImage: "list.bullet.rectangle") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            
-                            if let commissionsError {
-                                InlineErrorBanner(message: commissionsError)
-                            }
-                            
-                            if isLoadingCommissions {
-                                HStack(spacing: 10) {
-                                    ProgressView()
-                                    Text("Lade Provisionen …")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            if commissions.isEmpty && !isLoadingCommissions {
-                                Text("Noch keine Einträge.")
+
+                                Text("EUR")
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
                             }
-                            
-                            ForEach(commissions) { row in
-                                HStack(alignment: .top, spacing: 12) {
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(.tertiarySystemBackground))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(amountFieldInvalid ? Color.red : Color.clear, lineWidth: 1)
+                            )
 
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        HStack(alignment: .firstTextBaseline) {
-                                            Text(row.recommenderName)
-                                                .font(.headline)
-                                                .lineLimit(1)
-
-                                            Spacer()
-
-                                            if let a = row.amount {
-                                                Text(formatEUR(a))
-                                                    .font(.headline)
-                                            }
-                                        }
-
-                                        HStack(spacing: 10) {
-                                            Label(
-                                                row.payoutMethod.uppercased(),
-                                                systemImage: row.payoutMethod == "paypal"
-                                                    ? "p.circle"
-                                                    : "building.columns"
-                                            )
-                                            .font(.footnote)
-                                            .foregroundColor(.secondary)
-
-                                            Spacer()
-
-                                            if let d = row.createdAt {
-                                                Text(d.formatted(date: .abbreviated, time: .shortened))
-                                                    .font(.footnote)
-                                                    .foregroundColor(.secondary)
-                                            }
-                                        }
-                                    }
-
-                                    if isAdmin {
-                                        VStack(spacing: 10) {
-                                            Button {
-                                                pendingAdminAction = .markPaid(row)
-                                            } label: {
-                                                Image(systemName: "checkmark.circle.fill")
-                                                    .font(.system(size: 18, weight: .semibold))
-                                            }
-                                            .buttonStyle(.plain)
-                                            .foregroundColor(.green)
-
-                                            Button(role: .destructive) {
-                                                pendingAdminAction = .delete(row)
-                                            } label: {
-                                                Image(systemName: "trash.fill")
-                                                    .font(.system(size: 16, weight: .semibold))
-                                            }
-                                            .buttonStyle(.plain)
-                                            .foregroundColor(.red)
-                                        }
-                                    } else {
-                                        Image(systemName: "chevron.right")
-                                            .font(.footnote.weight(.semibold))
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                .padding(12)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 14)
-                                        .fill(Color(.tertiarySystemBackground))
-                                )
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    selectedCommission = row
-                                }
-                            }
-                            
-                            Text(isAdmin ? "Admin-Ansicht: alle Einträge." : "Nur deine Einträge (nach Ersteller des Einmal-Links).")
+                            Text("Hinweis: Der Betrag wird nicht im Webformular angezeigt, sondern nur im Hintergrund gespeichert.")
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
-                                .padding(.top, 4)
                         }
-                        
+
+                        Button {
+                            if !canGenerateLink {
+                                amountFieldInvalid = true
+                                showError("Bitte einen gültigen Betrag eingeben, bevor du den Link erstellst.")
+                                return
+                            }
+                            amountFieldInvalid = false
+                            _Concurrency.Task {
+                                await generateOneTimeLink()
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text(isGenerating ? "Erstelle Link …" : "Einmal-Link erstellen")
+                                    .font(.headline)
+                                Spacer()
+                                if isGenerating {
+                                    ProgressView()
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color.accentColor)
+                        .foregroundColor(.white)
+                        .disabled(isGenerating || !canGenerateLink)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dismissKeyboard()
+                    }
+
+                    if let generatedURL {
+                        Divider().opacity(0.18)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Link")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            Text(generatedURL.absoluteString)
+                                .font(.footnote)
+                                .foregroundColor(.primary)
+                                .textSelection(.enabled)
+                                .lineLimit(3)
+
+                            HStack(spacing: 10) {
+                                Button {
+                                    UIPasteboard.general.string = generatedURL.absoluteString
+                                    appState.showToast(.success, "Link kopiert")
+                                } label: {
+                                    Label("Kopieren", systemImage: "doc.on.doc")
+                                }
+                                .buttonStyle(.bordered)
+
+                                ShareLink(item: generatedURL) {
+                                    Label("Teilen", systemImage: "square.and.arrow.up")
+                                }
+                                .buttonStyle(.bordered)
+
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+                .listRowInsets(EdgeInsets(top: 8, leading: 18, bottom: 0, trailing: 18))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+
+                Section {
+                    if let commissionsError {
+                        InlineErrorBanner(message: commissionsError)
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
+
+                    if isLoadingCommissions {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Lade Provisionen …")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+
+                    if commissions.isEmpty && !isLoadingCommissions {
+                        Text("Noch keine Einträge.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
+
+                    ForEach(commissions) { row in
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(row.recommenderName)
+                                        .font(.headline)
+                                        .lineLimit(1)
+
+                                    Spacer()
+
+                                    if let a = row.amount {
+                                        Text(formatEUR(a))
+                                            .font(.headline)
+                                    }
+
+                                    if row.status == "paid" {
+                                        Text("AUSGEZAHLT")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundColor(.secondary)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: 8)
+                                                    .fill(Color(.secondarySystemBackground))
+                                            )
+                                    }
+                                }
+
+                                HStack(spacing: 10) {
+                                    Label(
+                                        row.payoutMethod.uppercased(),
+                                        systemImage: row.payoutMethod == "paypal"
+                                            ? "p.circle"
+                                            : "building.columns"
+                                    )
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+
+                                    Spacer()
+
+                                    if let d = row.createdAt {
+                                        Text(d.formatted(date: .abbreviated, time: .shortened))
+                                            .font(.footnote)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                        .opacity(row.status == "paid" ? 0.55 : 1)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            dismissKeyboard()
+                            if row.status != "paid" {
+                                selectedCommission = row
+                            }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            if isAdmin && row.status != "paid" {
+                                Button {
+                                    dismissKeyboard()
+                                    _Concurrency.Task {
+                                        await markCommissionAsPaid(row)
+                                    }
+                                } label: {
+                                    Label("Ausgezahlt", systemImage: "checkmark.circle")
+                                }
+                                .tint(.green)
+                            }
+                        }                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if isAdmin {
+                                Button(role: .destructive) {
+                                    dismissKeyboard()
+                                    pendingAdminAction = .delete(row)
+                                } label: {
+                                    Label("Löschen", systemImage: "trash")
+                                }
+                            }
+                        }
+                        .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+                } header: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "list.bullet.rectangle")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        Text("Übersicht")
+                            .font(.headline)
+                        Spacer()
                     }
                     .padding(.horizontal, 18)
                     .padding(.top, 0)
+                    .textCase(nil)
                 }
             }
-            .background(Color(.systemGroupedBackground))
-            .scrollDismissesKeyboard(.interactively)
-            .onAppear {
-                startCommissionsListenerIfNeeded()
-            }
-            .onDisappear {
-                commissionsListener?.remove()
-                commissionsListener = nil
-            }
-            .sheet(item: $selectedCommission) { row in
-                CommissionDetailSheet(row: row)
-                // When closing the sheet, also clear pendingAdminAction if set
+            .modifier(SectionSpacingFixer())
+        }
+        .listStyle(.plain)
+        .background(Color(.systemGroupedBackground))
+        .scrollDismissesKeyboard(.interactively)
+        .onAppear {
+            startCommissionsListenerIfNeeded()
+        }
+        .onDisappear {
+            commissionsListener?.remove()
+            commissionsListener = nil
+        }
+        .sheet(item: $selectedCommission) { row in
+            CommissionDetailSheet(row: row)
+            // When closing the sheet, also clear pendingAdminAction if set
                 .onDisappear {
                     selectedCommission = nil
                     pendingAdminAction = nil
                 }
-            }
-            .overlay(alignment: .bottom) {
-                if let action = pendingAdminAction {
-                    AdminConfirmBar(
-                        action: action,
-                        onCancel: {
-                            withAnimation(.easeInOut) {
-                                pendingAdminAction = nil
-                            }
-                        },
-                        onConfirm: {
-                            let current = pendingAdminAction
-                            withAnimation(.easeInOut) {
-                                pendingAdminAction = nil
-                            }
-                            guard let current else { return }
-                            _Concurrency.Task {
-                                switch current {
-                                case let .markPaid(r):
-                                    await markCommissionAsPaid(r)
-                                case let .delete(r):
-                                    await deleteCommission(r)
-                                }
+        }
+        .overlay(alignment: .bottom) {
+            if case .delete = pendingAdminAction {
+                let action = pendingAdminAction!   // safe, weil oben geprüft
+                AdminConfirmBar(
+                    action: action,
+                    onCancel: {
+                        withAnimation(.easeInOut) {
+                            pendingAdminAction = nil
+                        }
+                    },
+                    onConfirm: {
+                        let current = pendingAdminAction
+                        withAnimation(.easeInOut) {
+                            pendingAdminAction = nil
+                        }
+                        guard let current else { return }
+                        _Concurrency.Task {
+                            switch current {
+                            case let .delete(r):
+                                await deleteCommission(r)
+                            default:
+                                break
                             }
                         }
-                    )
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 16)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
+                    }
+                )
+                .padding(.horizontal, 18)
+                .padding(.bottom, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .animation(.easeInOut, value: pendingAdminAction != nil)
-            .navigationTitle("Provision")
-            .navigationBarTitleDisplayMode(.inline)
+        }
+        .animation(.easeInOut, value: pendingAdminAction != nil)
+        .navigationTitle("Provision")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    
+    private struct SectionSpacingFixer: ViewModifier {
+        func body(content: Content) -> some View {
+            if #available(iOS 17.0, *) {
+                content.listSectionSpacing(.custom(0))
+            } else {
+                content
+            }
         }
     }
     
     private var parsedAmount: Double? { parseAmountToDouble(amountText) }
+
+    private func dismissKeyboard() {
+        amountFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                        to: nil, from: nil, for: nil)
+    }
 
     private var canGenerateLink: Bool {
         if let a = parsedAmount { return a > 0 }
@@ -575,7 +625,7 @@ struct ProvisionenView: View {
 
                 _Concurrency.Task { @MainActor in
                     self.isLoadingCommissions = false
-                    self.commissions = mapped.filter { $0.status != "paid" }
+                    self.commissions = mapped
                 }
             }
 

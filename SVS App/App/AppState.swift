@@ -426,7 +426,7 @@ class AppState: ObservableObject {
             return false
         }
         // Standard: Mitarbeiter legt für sich selbst an (Urlaub = Offen, Krankheit = direkt)
-        return createLeaveRequest(start: start, end: end, type: type, for: user, approveImmediately: false)
+        return createLeaveRequest(start: start, end: end, type: type, for: user)
     }
     
     /// Admin kann Anträge für andere Benutzer anlegen.
@@ -436,8 +436,7 @@ class AppState: ObservableObject {
     func createLeaveRequest(start: Date,
                             end: Date,
                             type: LeaveType,
-                            for user: User,
-                            approveImmediately: Bool) -> Bool {
+                            for user: User) -> Bool {
         
         if type == .vacation {
             let requestedDays = workingDays(from: start, to: end)
@@ -472,7 +471,7 @@ class AppState: ObservableObject {
         if type == .sick {
             initialStatus = .approved
         } else {
-            initialStatus = approveImmediately ? .approved : .pending
+            initialStatus = .pending
         }
         
         let creatorId = currentUser?.id ?? user.id
