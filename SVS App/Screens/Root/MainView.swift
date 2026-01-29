@@ -11,6 +11,8 @@ import VisionKit
 import PDFKit
 import UniformTypeIdentifiers
 import AVFoundation
+import FirebaseAuth
+import FirebaseStorage
 
 struct MainView: View {
     @EnvironmentObject var appState: AppState
@@ -64,183 +66,264 @@ private struct ScannerScreen: View {
     @State private var isPresentingScanner = false
     @State private var isPresentingShare = false
     @State private var scannedPDFURL: URL? = nil
-    @State private var fileName: String = "Scan"
+    @State private var gutachtenNr: String = ""
     @State private var uiErrorMessage: String? = nil
+    @State private var isUploadingToDrive = false
+    @State private var driveUploadSuccessMessage: String? = nil
 
 
     private var userAccentColor: Color {
         Color.svsAccentColor(from: appState.currentUser?.colorName)
     }
 
+    private var currentYear2: String {
+        let y = Calendar.current.component(.year, from: Date())
+        return String(format: "%02d", y % 100)
+    }
+
+    private var formattedScanName: String {
+        let digits = gutachtenNr.filter { $0.isNumber }
+        let trimmed = String(digits.prefix(4))
+        let zeros = max(0, 4 - trimmed.count)
+        let nr = String(repeating: "0", count: zeros) + trimmed
+        return "\(nr)/\(currentYear2)"
+    }
+
+    private let uploadScanToDriveEndpoint =
+      URL(string: "https://us-central1-svs-app-2f63e.cloudfunctions.net/uploadScanToDrive")!
+
+    private var isErrorPresented: Binding<Bool> {
+        Binding(
+            get: { uiErrorMessage != nil },
+            set: { _ in uiErrorMessage = nil }
+        )
+    }
+
+    private var isDriveSuccessPresented: Binding<Bool> {
+        Binding(
+            get: { driveUploadSuccessMessage != nil },
+            set: { _ in driveUploadSuccessMessage = nil }
+        )
+    }
+
+    @ViewBuilder
+    private var headerSection: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "doc.viewfinder")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.tint)
+
+            Text("Scanner")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.secondary)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 8)
+
+        Text("Dokument scannen")
+            .font(.largeTitle.bold())
+
+        Text(
+            "Scanne Dokumente mit der Kamera, erstelle automatisch "
+              + "eine PDF und exportiere sie oder lege sie in Google Drive "
+              + "ab."
+        )
+        .font(.subheadline)
+        .foregroundColor(.secondary)
+    }
+
+    @ViewBuilder
+    private var numberFieldSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Gutachten-Nr.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            HStack(spacing: 8) {
+                TextField("0000", text: $gutachtenNr)
+                    .keyboardType(.numberPad)
+                    .submitLabel(.done)
+                    .onChange(of: gutachtenNr) { newValue in
+                        let digits = newValue.filter { $0.isNumber }
+                        gutachtenNr = String(digits.prefix(4))
+                    }
+
+                Text("/ \(currentYear2)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+            )
+
+            Text("Dateiname: \(formattedScanName)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var scanButton: some View {
+        Button {
+            startScan()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                Text("Scan starten")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Image(systemName: "arrow.right")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(userAccentColor.opacity(0.28), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func scannedActions(url: URL) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                isPresentingShare = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Exportieren")
+                }
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isUploadingToDrive)
+            .opacity(isUploadingToDrive ? 0.6 : 1.0)
+
+            Button {
+                _Concurrency.Task { await uploadCurrentScanToDrive() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.up.doc")
+                    Text("In Drive ablegen")
+                }
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(userAccentColor.opacity(0.22), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(isUploadingToDrive)
+            .opacity(isUploadingToDrive ? 0.6 : 1.0)
+        }
+
+        if isUploadingToDrive {
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Wird in Google Drive abgelegt …")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top, 6)
+        }
+
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Vorschau")
+                .font(.headline)
+
+            PDFPreview(url: url)
+                .frame(height: 360)
+                .clipShape(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+                )
+        }
+        .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundColor(.secondary)
+
+            Text("Noch kein Scan")
+                .font(.headline)
+
+            Text(
+                "Tippe auf „Scan starten“, um ein Dokument zu erfassen "
+                  + "und als PDF zu speichern."
+            )
+            .font(.subheadline)
+            .foregroundColor(.secondary)
+            .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+        )
+        .padding(.top, 4)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    headerSection
 
-                    // Header
-                    HStack(spacing: 10) {
-                        Image(systemName: "doc.viewfinder")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.tint)
-
-                        Text("Scanner")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(.secondary)
-
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.top, 8)
-
-                    Text("Dokument scannen")
-                        .font(.largeTitle.bold())
-
-                    Text("Scanne Dokumente mit der Kamera, erstelle automatisch eine PDF und exportiere sie. Drive-Upload binden wir als nächsten Schritt an.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-
-                    // Controls
                     VStack(spacing: 12) {
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Dateiname")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-
-                                TextField("Scan", text: $fileName)
-                                    .textInputAutocapitalization(.words)
-                                    .submitLabel(.done)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 10)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .fill(Color(.secondarySystemBackground))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-                                    )
-                            }
-                        }
-
-
-                        // Primary action
-                        Button {
-                            startScan()
-                        } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "camera.fill")
-                                    .font(.system(size: 16, weight: .semibold))
-                                Text("Scan starten")
-                                    .font(.subheadline.weight(.semibold))
-                                Spacer()
-                                Image(systemName: "arrow.right")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .fill(Color(.secondarySystemBackground))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .stroke(userAccentColor.opacity(0.28), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
+                        numberFieldSection
+                        scanButton
 
                         if let url = scannedPDFURL {
-                            // Actions for the scanned PDF
-                            HStack(spacing: 12) {
-                                Button {
-                                    isPresentingShare = true
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "square.and.arrow.up")
-                                        Text("Exportieren")
-                                    }
-                                    .font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 10)
-                                    .frame(maxWidth: .infinity)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .fill(Color(.secondarySystemBackground))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-
-                                Button {
-                                    // Placeholder for Drive upload
-                                    isPresentingShare = true
-                                } label: {
-                                    HStack(spacing: 8) {
-                                        Image(systemName: "arrow.up.doc")
-                                        Text("In Drive ablegen")
-                                    }
-                                    .font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 10)
-                                    .frame(maxWidth: .infinity)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .fill(Color(.secondarySystemBackground))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .stroke(userAccentColor.opacity(0.22), lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-
-                            // Preview
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("Vorschau")
-                                    .font(.headline)
-
-                                PDFPreview(url: url)
-                                    .frame(height: 360)
-                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
-                                    )
-
-                            }
-                            .padding(.top, 4)
+                            scannedActions(url: url)
                         } else {
-                            // Empty state
-                            VStack(spacing: 10) {
-                                Image(systemName: "doc.text.magnifyingglass")
-                                    .font(.system(size: 34, weight: .semibold))
-                                    .foregroundColor(.secondary)
-
-                                Text("Noch kein Scan")
-                                    .font(.headline)
-
-                                Text("Tippe auf „Scan starten“, um ein Dokument zu erfassen und als PDF zu speichern.")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                    .multilineTextAlignment(.center)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .fill(Color(.secondarySystemBackground))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
-                            )
-                            .padding(.top, 4)
+                            emptyState
                         }
                     }
                     .padding(.top, 4)
@@ -254,20 +337,20 @@ private struct ScannerScreen: View {
             .tint(userAccentColor)
             .scrollDismissesKeyboard(.interactively)
             .contentShape(Rectangle())
-            .onTapGesture {
-                hideKeyboard()
-            }
+            .onTapGesture { hideKeyboard() }
             .navigationTitle("Scanner")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $isPresentingScanner) {
                 DocumentScanner { images in
                     do {
-                        let safeBase = sanitizedFileName(fileName.isEmpty ? "Scan" : fileName)
+                        let safeBase = sanitizedFileName(formattedScanName)
                         let finalName = "\(safeBase)_\(timestampString()).pdf"
                         let url = try makePDF(from: images, fileName: finalName)
                         scannedPDFURL = url
                     } catch {
-                        uiErrorMessage = "PDF konnte nicht erstellt werden: \(error.localizedDescription)"
+                        uiErrorMessage =
+                          "PDF konnte nicht erstellt werden: "
+                          + error.localizedDescription
                     }
                 } onCancel: {
                     // no-op
@@ -286,10 +369,15 @@ private struct ScannerScreen: View {
                     .padding()
                 }
             }
-            .alert("Scanner", isPresented: Binding(get: { uiErrorMessage != nil }, set: { _ in uiErrorMessage = nil })) {
+            .alert("Scanner", isPresented: isErrorPresented) {
                 Button("OK", role: .cancel) { }
             } message: {
                 Text(uiErrorMessage ?? "")
+            }
+            .alert("Google Drive", isPresented: isDriveSuccessPresented) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(driveUploadSuccessMessage ?? "")
             }
         }
     }
@@ -381,6 +469,103 @@ private struct ScannerScreen: View {
         let y = container.minY + (container.height - h) / 2
         return CGRect(x: x, y: y, width: w, height: h)
     }
+
+    // MARK: - Drive upload
+
+    private func uploadCurrentScanToDrive() async {
+        guard !isUploadingToDrive else { return }
+        guard let localURL = scannedPDFURL else {
+            uiErrorMessage = "Keine PDF vorhanden."
+            return
+        }
+
+        guard let user = Auth.auth().currentUser else {
+            uiErrorMessage = "Nicht angemeldet."
+            return
+        }
+
+        isUploadingToDrive = true
+        defer { isUploadingToDrive = false }
+
+        do {
+            let safeBase = sanitizedFileName(formattedScanName)
+            let finalName = "\(safeBase)_\(timestampString()).pdf"
+
+            let storagePath = "scans/\(user.uid)/\(finalName)"
+            try await uploadFileToFirebaseStorage(
+                localURL: localURL,
+                storagePath: storagePath
+            )
+
+            let idToken = try await user.getIDToken()
+            let driveFileId = try await callUploadScanToDrive(
+                idToken: idToken,
+                storagePath: storagePath,
+                fileName: finalName
+            )
+
+            driveUploadSuccessMessage =
+              "Datei wurde in Google Drive abgelegt. (ID: \(driveFileId))"
+        } catch {
+            uiErrorMessage = "Drive-Upload fehlgeschlagen: \(error.localizedDescription)"
+        }
+    }
+
+    private func uploadFileToFirebaseStorage(
+        localURL: URL,
+        storagePath: String
+    ) async throws {
+        let ref = Storage.storage().reference().child(storagePath)
+        let metadata = StorageMetadata()
+        metadata.contentType = "application/pdf"
+
+        _ = try await ref.putFileAsync(from: localURL, metadata: metadata)
+    }
+
+    private func callUploadScanToDrive(
+        idToken: String,
+        storagePath: String,
+        fileName: String
+    ) async throws -> String {
+        var request = URLRequest(url: uploadScanToDriveEndpoint)
+        request.httpMethod = "POST"
+        request.setValue(
+            "Bearer \(idToken)",
+            forHTTPHeaderField: "Authorization"
+        )
+        request.setValue(
+            "application/json",
+            forHTTPHeaderField: "Content-Type"
+        )
+
+        let body: [String: Any] = [
+            "storagePath": storagePath,
+            "fileName": fileName,
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? -1
+
+        struct Payload: Decodable {
+            let ok: Bool
+            let driveFileId: String?
+            let error: String?
+        }
+
+        let decoded = try JSONDecoder().decode(Payload.self, from: data)
+        if decoded.ok, let id = decoded.driveFileId, !id.isEmpty {
+            return id
+        }
+
+        let msg = decoded.error ?? "HTTP \(status)"
+        throw NSError(
+            domain: "Drive",
+            code: status,
+            userInfo: [NSLocalizedDescriptionKey: msg]
+        )
+    }
 }
 
 // MARK: - Document Scanner (VisionKit)
@@ -436,6 +621,12 @@ private struct DocumentScanner: UIViewControllerRepresentable {
 private struct PDFPreview: UIViewRepresentable {
     let url: URL
 
+    final class Coordinator {
+        var lastURL: URL?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIView(context: Context) -> PDFView {
         let v = PDFView()
         v.autoScales = true
@@ -443,11 +634,24 @@ private struct PDFPreview: UIViewRepresentable {
         v.displayDirection = .vertical
         v.usePageViewController(true, withViewOptions: nil)
         v.backgroundColor = UIColor.secondarySystemBackground
+
+        // Set initial document safely on main.
+        DispatchQueue.main.async {
+            v.document = PDFDocument(url: url)
+        }
+
+        context.coordinator.lastURL = url
         return v
     }
 
     func updateUIView(_ uiView: PDFView, context: Context) {
-        uiView.document = PDFDocument(url: url)
+        // Avoid repeated PDFDocument creation; PDFKit is sensitive to rapid updates.
+        guard context.coordinator.lastURL != url else { return }
+        context.coordinator.lastURL = url
+
+        DispatchQueue.main.async {
+            uiView.document = PDFDocument(url: url)
+        }
     }
 }
 
