@@ -272,6 +272,25 @@ async function getUserTokenRefs(userId: string): Promise<TokenRef[]> {
   return out;
 }
 
+/**
+ * Best-effort lookup of a user's name for push messages.
+ *
+ * @param {string} userId - Firebase Auth UID of the target user.
+ */
+async function getUserNameOrFallback(userId: string): Promise<string> {
+  if (!userId) return "Jemand";
+  try {
+    const snap = await admin.firestore()
+      .collection("users")
+      .doc(userId)
+      .get();
+    const name = String(snap.data()?.name ?? "").trim();
+    return name || "Jemand";
+  } catch {
+    return "Jemand";
+  }
+}
+
 // Neuer Antrag -> Admins
 export const pushOnNewLeaveRequest =
   onDocumentCreated(
@@ -328,7 +347,7 @@ export const pushOnNewLeaveRequest =
     }
   );
 
-// Antrag genehmigt -> Antragsteller
+// Antrag genehmigt oder abgelehnt -> Antragsteller
 export const pushOnLeaveRequestApproved = onDocumentUpdated(
   "leaveRequests/{requestId}",
   async (event) => {
@@ -342,15 +361,18 @@ export const pushOnLeaveRequestApproved = onDocumentUpdated(
     const beforeStatus = String(beforeData.statusRaw ?? "").trim();
     const afterStatus = String(afterData.statusRaw ?? "").trim();
 
-    // Nur wenn sich statusRaw ändert und auf "Genehmigt" wechselt
+    // Nur wenn sich statusRaw ändert
     if (beforeStatus === afterStatus) return;
-    if (afterStatus !== "Genehmigt") return;
+
+    const isApproved = afterStatus === "Genehmigt";
+    const isRejected = afterStatus === "Abgelehnt";
+    if (!isApproved && !isRejected) return;
 
     const userId = String(afterData.userId ?? "").trim();
     if (!userId) return;
 
     console.log(
-      "[push][approved] requestId=",
+      "[push][decision] requestId=",
       String(event.params.requestId ?? ""),
       "before=",
       beforeStatus,
@@ -361,24 +383,29 @@ export const pushOnLeaveRequestApproved = onDocumentUpdated(
     const tokenRefs = await getUserTokenRefs(userId);
     const tokens = tokenRefs.map((t) => t.token);
     if (tokens.length === 0) {
-      console.log("[push][approved] no user tokens for", userId);
+      console.log("[push][decision] no user tokens for", userId);
       return;
     }
 
     const resp = await admin.messaging().sendEachForMulticast({
       tokens,
       notification: {
-        title: "Antrag genehmigt",
-        body: "Dein Antrag wurde genehmigt.",
+        title: isApproved ? "Antrag genehmigt" : "Antrag abgelehnt",
+        body: isApproved ? "Dein Antrag wurde genehmigt." :
+          "Dein Antrag wurde abgelehnt.",
       },
       data: {
-        type: "leave_request_approved",
+        type: isApproved ? "leave_request_approved" : "leave_request_rejected",
         requestId: String(event.params.requestId ?? ""),
+        decision: isApproved ? "approved" : "rejected",
       },
     });
 
+    const tag = isApproved ? "approved" : "rejected";
+
     console.log(
-      "[push][approved] sent",
+      "[push][decision] sent",
+      tag,
       resp.successCount,
       "ok,",
       resp.failureCount,
@@ -386,7 +413,156 @@ export const pushOnLeaveRequestApproved = onDocumentUpdated(
     );
 
     logMulticastFailures(
-      "approved",
+      tag,
+      tokens,
+      resp.responses as Array<{success: boolean; error?: unknown}>
+    );
+    await cleanupDeadTokens(
+      tokenRefs,
+      resp.responses as Array<{success: boolean; error?: unknown}>
+    );
+  }
+);
+
+// ------------------------------------------------------------------
+// Tasks -> Push an zuständigen Nutzer
+// - Neue Aufgabe: tasks/{taskId} onCreate
+// - Neu zugeteilt: tasks/{taskId} onUpdate (assignedUserId changed)
+// ------------------------------------------------------------------
+
+export const pushOnTaskAssigned = onDocumentCreated(
+  "tasks/{taskId}",
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const data = (snap.data() ?? {}) as Record<string, unknown>;
+
+    const assignedUserId = String(data.assignedUserId ?? "").trim();
+    const creatorUserId = String(data.creatorUserId ?? "").trim();
+    const titleRaw = String(data.title ?? "").trim();
+    const title = titleRaw || "Neue Aufgabe";
+
+    if (!assignedUserId) return;
+    if (assignedUserId === creatorUserId) return;
+
+    console.log(
+      "[push][task_assigned] taskId=",
+      String(event.params.taskId ?? ""),
+      "to=",
+      assignedUserId,
+      "from=",
+      creatorUserId
+    );
+
+    const fromName = await getUserNameOrFallback(creatorUserId);
+
+    const tokenRefs = await getUserTokenRefs(assignedUserId);
+    const tokens = tokenRefs.map((t) => t.token);
+    if (tokens.length === 0) {
+      console.log("[push][task_assigned] no user tokens for", assignedUserId);
+      return;
+    }
+
+    const resp = await admin.messaging().sendEachForMulticast({
+      tokens,
+      notification: {
+        title: "Neue Aufgabe",
+        body: fromName + " hat dir eine Aufgabe zugeteilt: " + title,
+      },
+      data: {
+        type: "task_assigned",
+        taskId: String(event.params.taskId ?? ""),
+        toUserId: assignedUserId,
+        fromUserId: creatorUserId,
+      },
+    });
+
+    console.log(
+      "[push][task_assigned] sent",
+      resp.successCount,
+      "ok,",
+      resp.failureCount,
+      "failed"
+    );
+
+    logMulticastFailures(
+      "task_assigned",
+      tokens,
+      resp.responses as Array<{success: boolean; error?: unknown}>
+    );
+    await cleanupDeadTokens(
+      tokenRefs,
+      resp.responses as Array<{success: boolean; error?: unknown}>
+    );
+  }
+);
+
+export const pushOnTaskReassigned = onDocumentUpdated(
+  "tasks/{taskId}",
+  async (event) => {
+    const before = event.data?.before;
+    const after = event.data?.after;
+    if (!before || !after) return;
+
+    const beforeData = (before.data() ?? {}) as Record<string, unknown>;
+    const afterData = (after.data() ?? {}) as Record<string, unknown>;
+
+    const beforeAssignee = String(beforeData.assignedUserId ?? "").trim();
+    const afterAssignee = String(afterData.assignedUserId ?? "").trim();
+
+    if (beforeAssignee === afterAssignee) return;
+    if (!afterAssignee) return;
+
+    const creatorUserId = String(afterData.creatorUserId ?? "").trim();
+    if (afterAssignee === creatorUserId) return;
+
+    const titleRaw = String(afterData.title ?? "").trim();
+    const title = titleRaw || "Neue Aufgabe";
+
+    console.log(
+      "[push][task_reassigned] taskId=",
+      String(event.params.taskId ?? ""),
+      "to=",
+      afterAssignee,
+      "from=",
+      creatorUserId
+    );
+
+    const fromName = await getUserNameOrFallback(creatorUserId);
+
+    const tokenRefs = await getUserTokenRefs(afterAssignee);
+    const tokens = tokenRefs.map((t) => t.token);
+    if (tokens.length === 0) {
+      console.log("[push][task_reassigned] no user tokens for", afterAssignee);
+      return;
+    }
+
+    const resp = await admin.messaging().sendEachForMulticast({
+      tokens,
+      notification: {
+        title: "Aufgabe zugeteilt",
+        body: fromName + " hat dir eine Aufgabe zugeteilt: " + title,
+      },
+      data: {
+        type: "task_assigned",
+        taskId: String(event.params.taskId ?? ""),
+        toUserId: afterAssignee,
+        fromUserId: creatorUserId,
+        reassigned: "1",
+      },
+    });
+
+    console.log(
+      "[push][task_reassigned] sent",
+      resp.successCount,
+      "ok,",
+      resp.failureCount,
+      "failed"
+    );
+
+    logMulticastFailures(
+      "task_reassigned",
       tokens,
       resp.responses as Array<{success: boolean; error?: unknown}>
     );
