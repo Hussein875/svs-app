@@ -1295,7 +1295,7 @@ export const submitProvisionForm = onRequest(async (req, res) => {
 });
 
 // ------------------------------------------------------------------
-// Provision: Einmal-Link erzeugen (Admin-only)
+// Provision: Einmal-Link erzeugen (signed-in)
 // POST /createProvisionLink
 // Authorization: Bearer <Firebase ID Token>
 // Body: { "ttlDays": 30 }
@@ -1308,10 +1308,10 @@ interface CreateProvisionLinkBody {
 }
 
 /**
- * Creates a one-time provision form link for administrators.
+ * Creates a one-time provision form link for signed-in users.
  *
- * This endpoint validates the caller via Firebase ID token, checks
- * for admin privileges, generates a UUID token with a configurable TTL,
+ * This endpoint validates the caller via Firebase ID token,
+ * generates a UUID token with a configurable TTL,
  * stores it in Firestore, and returns the full provision form URL.
  *
  * Method: POST
@@ -1341,18 +1341,7 @@ export const createProvisionLink = onRequest(async (req, res) => {
     const decoded = await admin.auth().verifyIdToken(idToken);
     const callerUid = decoded.uid;
 
-    // --- Admin-Check via Firestore users/<uid>.roleRaw
-    const callerSnap = await admin
-      .firestore()
-      .collection("users")
-      .doc(callerUid)
-      .get();
-
-    const callerRole = callerSnap.data()?.roleRaw as string | undefined;
-    if (callerRole !== "admin") {
-      res.status(403).json({ok: false, error: "Admin only"});
-      return;
-    }
+    // Any signed-in user may create a provision link.
 
     // --- TTL
     const body = (req.body ?? {}) as Partial<CreateProvisionLinkBody>;
@@ -1419,6 +1408,64 @@ export const commissionCreatedSendPdf = onDocumentCreated(
     if (!snap) return;
 
     const data = (snap.data() ?? {}) as Record<string, unknown>;
+
+    // Push an Admins: Neue Provisionsanfrage (idempotent)
+    if (!data.adminPushSentAt) {
+      try {
+        const tokenRefs = await getAdminTokenRefs();
+        const tokens = tokenRefs.map((t) => t.token);
+
+        if (tokens.length === 0) {
+          console.log("[push][commission_new] no admin tokens");
+        } else {
+          const name = String(data.recommenderName ?? "").trim();
+          const amountTxt = formatEurAmount(data.amount);
+
+          const bodyParts = [
+            name || "Neue Anfrage",
+            amountTxt !== "—" ? amountTxt : "",
+          ].filter(Boolean);
+
+          const resp = await admin.messaging().sendEachForMulticast({
+            tokens,
+            notification: {
+              title: "Provision auszuzahlen",
+              body: bodyParts.join(" · "),
+            },
+            data: {
+              type: "commission_new",
+              commissionId,
+            },
+          });
+
+          console.log(
+            "[push][commission_new] sent",
+            resp.successCount,
+            "ok,",
+            resp.failureCount,
+            "failed"
+          );
+
+          logMulticastFailures(
+            "commission_new",
+            tokens,
+            resp.responses as Array<{success: boolean; error?: unknown}>
+          );
+
+          await cleanupDeadTokens(
+            tokenRefs,
+            resp.responses as Array<{success: boolean; error?: unknown}>
+          );
+        }
+
+        await snap.ref.set(
+          {adminPushSentAt: admin.firestore.FieldValue.serverTimestamp()},
+          {merge: true}
+        );
+      } catch (e) {
+        console.warn("[push][commission_new] FAILED", e);
+      }
+    }
 
     // Avoid double send
     if (data.mailSentAt) return;
