@@ -4,8 +4,23 @@
 //
 //  Created by Hussein Souleiman on 23.12.25.
 //
+
 import Foundation
 import SwiftUI
+import FirebaseFirestore
+
+#if canImport(UIKit)
+extension View {
+    func svsDismissKeyboardOnTap() -> some View {
+        self.simultaneousGesture(
+            TapGesture().onEnded {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                                to: nil, from: nil, for: nil)
+            }
+        )
+    }
+}
+#endif
 
 struct TasksView: View {
     @EnvironmentObject var appState: AppState
@@ -22,179 +37,112 @@ struct TasksView: View {
     @State private var showNewTaskNav = false
     @State private var editingTask: Task? = nil
 
-    enum AdminTaskScope: String, CaseIterable {
-        case mine = "Meine"
-        case team = "Team"
+    private enum TaskScope: String, CaseIterable {
+        case assignedToMe = "Für mich"
+        case assignedByMe = "Von mir"
     }
 
-    @State private var adminScope: AdminTaskScope = .mine
+    private enum TaskStatusFilter: String, CaseIterable {
+        case open = "Offen"
+        case done = "Erledigt"
+    }
+
+    @State private var scope: TaskScope = .assignedToMe
+    @State private var statusFilter: TaskStatusFilter = .open
+
 
     private var currentUser: User? { appState.currentUser }
 
-    private var adminScopeTint: Color {
-        switch adminScope {
-        case .mine: return .blue
-        case .team: return .indigo
+    // Sichtbarkeit: jeder sieht (a) Aufgaben, die ihm zugeteilt sind und (b) Aufgaben, die er anderen zugeteilt hat.
+    private var assignedToMe: [Task] {
+        guard let user = currentUser else { return [] }
+        return appState.tasks
+            .filter { $0.assignedUserId == user.id }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private var assignedByMeToOthers: [Task] {
+        guard let user = currentUser else { return [] }
+        return appState.tasks
+            .filter { $0.creatorUserId == user.id && $0.assignedUserId != user.id }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    private var visibleTasks: [Task] {
+        let base: [Task] = (scope == .assignedToMe) ? assignedToMe : assignedByMeToOthers
+        switch statusFilter {
+        case .open: return base.filter { $0.status == .open }
+        case .done: return base.filter { $0.status == .done }
         }
     }
 
-    // Aufgaben-Sichten für Admin / Mitarbeiter
-    private var myOpenTasks: [Task] {
-        guard let user = currentUser else { return [] }
-        return appState.tasks
-            .filter { $0.assignedUserId == user.id && $0.status == .open }
-            .sorted { $0.createdAt > $1.createdAt }
-    }
-
-    private var myDoneTasks: [Task] {
-        guard let user = currentUser else { return [] }
-        return appState.tasks
-            .filter { $0.assignedUserId == user.id && $0.status == .done }
-            .sorted { $0.createdAt > $1.createdAt }
-    }
-
-    private var otherOpenTasks: [Task] {
-        guard let user = currentUser, user.role == .admin else { return [] }
-        return appState.tasks
-            .filter { $0.assignedUserId != user.id && $0.status == .open }
-            .sorted { $0.createdAt > $1.createdAt }
-    }
-
-    private var otherDoneTasks: [Task] {
-        guard let user = currentUser, user.role == .admin else { return [] }
-        return appState.tasks
-            .filter { $0.assignedUserId != user.id && $0.status == .done }
-            .sorted { $0.createdAt > $1.createdAt }
+    private var segmentTitle: String {
+        switch scope {
+        case .assignedToMe: return "Für mich"
+        case .assignedByMe: return "Von mir"
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Group {
-                // Leer, wenn wirklich gar keine Aufgaben existieren
-                if myOpenTasks.isEmpty && otherOpenTasks.isEmpty && myDoneTasks.isEmpty && otherDoneTasks.isEmpty {
-                    VStack(spacing: 16) {
-                        Text("Noch keine Aufgaben")
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                        Text("Erstellen Sie eine neue Aufgabe mit dem Plus-Button oben rechts.")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(spacing: 10) {
+                Picker("Scope", selection: $scope) {
+                    ForEach(TaskScope.allCases, id: \.self) { s in
+                        Text(s.rawValue).tag(s)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(.systemGroupedBackground))
-                } else {
-                    List {
-                        // Admin: Sticky Segment-Header unter dem Navigation-Header
-                        if let user = currentUser, user.role == .admin {
-                            Section {
-                                EmptyView()
-                            } header: {
-                                Picker("Ansicht", selection: $adminScope) {
-                                    ForEach(AdminTaskScope.allCases, id: \.self) { scope in
-                                        Text(scope.rawValue).tag(scope)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                                .tint(adminScopeTint)
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 2)
-                                .background(Color(.systemGroupedBackground))
-                            }
-                            .textCase(nil)
-                            .headerProminence(.increased)
-                        }
-
-                        if let user = currentUser, user.role == .admin {
-                            switch adminScope {
-                            case .mine:
-                                if !myOpenTasks.isEmpty {
-                                    Section(header: Text("Meine Aufgaben – Offen (\(myOpenTasks.count))").textCase(nil)) {
-                                        ForEach(myOpenTasks) { task in
-                                            TaskRow(
-                                                task: task,
-                                                isAdmin: true,
-                                                assignedUserName: appState.userName(for: task.assignedUserId),
-                                                onEdit: { editingTask = task },
-                                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                                onDelete: { appState.deleteTask(task) }
-                                            )
-                                            .listRowSeparator(.hidden)
-                                        }
-                                    }
-                                }
-                            case .team:
-                                if !otherOpenTasks.isEmpty {
-                                    Section(header: Text("Team – Offene Aufgaben").textCase(nil)) {
-                                        ForEach(otherOpenTasks) { task in
-                                            TaskRow(
-                                                task: task,
-                                                isAdmin: true,
-                                                assignedUserName: appState.userName(for: task.assignedUserId),
-                                                onEdit: { editingTask = task },
-                                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                                onDelete: { appState.deleteTask(task) }
-                                            )
-                                            .listRowSeparator(.hidden)
-                                        }
-                                    }
-                                }
-                            }
-
-                            if !myDoneTasks.isEmpty || !otherDoneTasks.isEmpty {
-                                Section {
-                                    NavigationLink {
-                                        CompletedTasksView()
-                                            .environmentObject(appState)
-                                    } label: {
-                                        HStack {
-                                            Image(systemName: "checkmark.circle")
-                                            Text("Erledigte Aufgaben anzeigen")
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            if !myOpenTasks.isEmpty {
-                                Section(header: Text("Offen").textCase(nil)) {
-                                    ForEach(myOpenTasks) { task in
-                                        TaskRow(
-                                            task: task,
-                                            isAdmin: false,
-                                            assignedUserName: appState.userName(for: task.assignedUserId),
-                                            onEdit: { editingTask = task },
-                                            onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                            onDelete: { appState.deleteTask(task) }
-                                        )
-                                        .listRowSeparator(.hidden)
-                                    }
-                                }
-                            }
-
-                            if !myDoneTasks.isEmpty {
-                                Section {
-                                    NavigationLink {
-                                        CompletedTasksView()
-                                            .environmentObject(appState)
-                                    } label: {
-                                        HStack {
-                                            Image(systemName: "checkmark.circle")
-                                            Text("Erledigte Aufgaben anzeigen")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .padding(.top, 2)
-                    .listRowSeparator(.hidden)
-                    .listStyle(.insetGrouped)
-                    .scrollContentBackground(.hidden)
-                    .background(Color(.systemGroupedBackground))
                 }
+                .pickerStyle(.segmented)
+
+                Picker("Status", selection: $statusFilter) {
+                    ForEach(TaskStatusFilter.allCases, id: \.self) { s in
+                        Text(s.rawValue).tag(s)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 8)
+
+            if visibleTasks.isEmpty {
+                VStack(spacing: 14) {
+                    Text("Keine Aufgaben")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+
+                    Text(statusFilter == .open
+                         ? "Erstelle eine neue Aufgabe mit dem Plus-Button oben rechts."
+                         : "Es gibt aktuell keine erledigten Aufgaben in diesem Bereich.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemGroupedBackground))
+            } else {
+                List {
+                    Section(header: Text("\(segmentTitle) – \(statusFilter.rawValue) (\(visibleTasks.count))").textCase(nil)) {
+                        ForEach(visibleTasks) { task in
+                            TaskRow(
+                                task: task,
+                                assignedUserName: appState.userName(for: task.assignedUserId),
+                                creatorName: appState.userName(for: task.creatorUserId),
+                                onEdit: { editingTask = task },
+                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
+                                onDelete: { appState.deleteTask(task) }
+                            )
+                            .environmentObject(appState)
+                            .listRowSeparator(.hidden)
+                        }
+                    }
+                }
+                .listRowSeparator(.hidden)
+                .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(Color(.systemGroupedBackground))
             }
         }
+        .svsDismissKeyboardOnTap()
         .background(Color(.systemGroupedBackground))
         .navigationDestination(isPresented: $showNewTaskNav) {
             NewTaskView(mode: .new, task: nil)
@@ -207,130 +155,32 @@ struct TasksView: View {
         .navigationTitle("Aufgaben")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            // Nur im Sheet/Modal anzeigen – beim Push nutzen wir den System-Back-Button.
             if isPresentedModally {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Schließen") {
-                        dismiss()
-                    }
+                    Button("Schließen") { dismiss() }
                 }
             }
 
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 10) {
-                    Button {
-                        showNewTaskNav = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityLabel("Neue Aufgabe")
+                Button {
+                    showNewTaskNav = true
+                } label: {
+                    Image(systemName: "plus")
                 }
+                .accessibilityLabel("Neue Aufgabe")
             }
         }
     }
 }
 
-// MARK: - Completed Tasks View
-
-struct CompletedTasksView: View {
-    @EnvironmentObject var appState: AppState
-    @State private var editingTask: Task? = nil
-
-    private var currentUser: User? { appState.currentUser }
-
-    private var myDoneTasks: [Task] {
-        guard let user = currentUser else { return [] }
-        return appState.tasks
-            .filter { $0.assignedUserId == user.id && $0.status == .done }
-            .sorted { $0.createdAt > $1.createdAt }
-    }
-
-    private var otherDoneTasks: [Task] {
-        guard let user = currentUser, user.role == .admin else { return [] }
-        return appState.tasks
-            .filter { $0.assignedUserId != user.id && $0.status == .done }
-            .sorted { $0.createdAt > $1.createdAt }
-    }
-
-    var body: some View {
-        List {
-            if let user = currentUser, user.role == .admin {
-                if !myDoneTasks.isEmpty {
-                    Section(header: Text("Meine erledigten Aufgaben").textCase(nil)) {
-                        ForEach(myDoneTasks) { task in
-                            TaskRow(
-                                task: task,
-                                isAdmin: true,
-                                assignedUserName: appState.userName(for: task.assignedUserId),
-                                onEdit: { editingTask = task },
-                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                onDelete: { appState.deleteTask(task) }
-                            )
-                            .listRowSeparator(.hidden)
-                        }
-                    }
-                }
-
-                if !otherDoneTasks.isEmpty {
-                    Section(header: Text("Erledigte Aufgaben anderer").textCase(nil)) {
-                        ForEach(otherDoneTasks) { task in
-                            TaskRow(
-                                task: task,
-                                isAdmin: true,
-                                assignedUserName: appState.userName(for: task.assignedUserId),
-                                onEdit: { editingTask = task },
-                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                onDelete: { appState.deleteTask(task) }
-                            )
-                            .listRowSeparator(.hidden)
-                        }
-                    }
-                }
-
-                if myDoneTasks.isEmpty && otherDoneTasks.isEmpty {
-                    Text("Keine erledigten Aufgaben vorhanden")
-                        .foregroundColor(.secondary)
-                }
-            } else {
-                if !myDoneTasks.isEmpty {
-                    Section(header: Text("Erledigte Aufgaben").textCase(nil)) {
-                        ForEach(myDoneTasks) { task in
-                            TaskRow(
-                                task: task,
-                                isAdmin: false,
-                                assignedUserName: appState.userName(for: task.assignedUserId),
-                                onEdit: { editingTask = task },
-                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                onDelete: { appState.deleteTask(task) }
-                            )
-                            .listRowSeparator(.hidden)
-                        }
-                    }
-                } else {
-                    Text("Keine erledigten Aufgaben vorhanden")
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-                    .listRowSeparator(.hidden)
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(Color(.systemGroupedBackground))
-        .sheet(item: $editingTask) { task in
-            NewTaskView(mode: .edit, task: task)
-                .environmentObject(appState)
-        }
-        .navigationTitle("Erledigte Aufgaben")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
 
 // MARK: - Task Row
 
 struct TaskRow: View {
+    @EnvironmentObject var appState: AppState
     let task: Task
-    let isAdmin: Bool
     let assignedUserName: String
+    let creatorName: String
     let onEdit: () -> Void
     let onToggleStatus: () -> Void
     let onDelete: () -> Void
@@ -363,8 +213,9 @@ struct TaskRow: View {
                     .foregroundColor(.primary)
                     .strikethrough(task.status == .done, color: .secondary)
 
-                if !task.details.isEmpty {
-                    Text(task.details)
+                let detailsText = task.details ?? ""
+                if !detailsText.isEmpty {
+                    Text(detailsText)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .lineLimit(2)
@@ -384,11 +235,22 @@ struct TaskRow: View {
                         .background(Capsule().fill(Color(.secondarySystemBackground)))
                     }
 
-                    if isAdmin {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.crop.circle")
+                            .font(.caption2)
+                        Text("Von: \(creatorName)")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color(.secondarySystemBackground)))
+
+                    if let current = appState.currentUser, task.assignedUserId != current.id {
                         HStack(spacing: 6) {
                             Image(systemName: "person")
                                 .font(.caption2)
-                            Text(assignedUserName)
+                            Text("An: \(assignedUserName)")
                                 .font(.caption2.weight(.semibold))
                         }
                         .foregroundColor(.secondary)
@@ -462,10 +324,25 @@ struct NewTaskView: View {
     @State private var details: String = ""
     @State private var dueDate: Date = Date()
     @State private var hasDueDate: Bool = false
-    @State private var assignedUser: User?
+    @State private var assignedUserId: String = ""
     @State private var status: TaskStatus = .open
+    
+    private enum Field: Hashable {
+        case title
+        case details
+    }
+
+    @FocusState private var focusedField: Field?
 
     private var isEditing: Bool { task != nil }
+
+    private var assignableUsers: [User] {
+        var list = appState.users
+        if let current = appState.currentUser, !list.contains(where: { $0.id == current.id }) {
+            list.insert(current, at: 0)
+        }
+        return list
+    }
 
     var body: some View {
         Form {
@@ -473,10 +350,12 @@ struct NewTaskView: View {
                 TextField("Titel", text: $title)
                     .textInputAutocapitalization(.sentences)
                     .submitLabel(.next)
-
+                    .focused($focusedField, equals: .title)
+                    .onSubmit { focusedField = .details }
                 TextField("Details (optional)", text: $details, axis: .vertical)
                     .lineLimit(2...6)
                     .textInputAutocapitalization(.sentences)
+                    .focused($focusedField, equals: .details)
             } header: {
                 Label("Aufgabe", systemImage: "text.badge.checkmark")
             }
@@ -498,26 +377,19 @@ struct NewTaskView: View {
 
             if let current = appState.currentUser {
                 Section {
-                    if current.role == .admin {
-                        Picker("Mitarbeiter", selection: Binding(
-                            get: { assignedUser?.id ?? current.id },
-                            set: { id in
-                                assignedUser = appState.users.first(where: { $0.id == id }) ?? current
-                            })
-                        ) {
-                            ForEach(appState.users) { user in
-                                Text(user.name).tag(user.id)
-                            }
+                    Picker("Zuständig", selection: $assignedUserId) {
+                        ForEach(assignableUsers) { user in
+                            Text(user.name).tag(user.id)
                         }
-                    } else {
-                        HStack {
-                            Text("Zuständig")
-                            Spacer()
-                            Text(current.name)
-                                .foregroundColor(.secondary)
-                        }
+                    }
 
-                        Text("Aufgaben, die Sie erstellen, werden automatisch Ihnen zugewiesen.")
+                    if assignedUserId != current.id,
+                       let name = assignableUsers.first(where: { $0.id == assignedUserId })?.name {
+                        Text("Die Aufgabe wird \(name) zugeteilt.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("Die Aufgabe wird Ihnen selbst zugeteilt.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -547,6 +419,12 @@ struct NewTaskView: View {
             }
         }
         .onAppear { configureInitialState() }
+        .onChange(of: assignableUsers.count) { _ in
+            guard let current = appState.currentUser else { return }
+            if assignedUserId.isEmpty || !assignableUsers.contains(where: { $0.id == assignedUserId }) {
+                assignedUserId = current.id
+            }
+        }
     }
 
     private func configureInitialState() {
@@ -554,14 +432,14 @@ struct NewTaskView: View {
 
         if let task = task {
             title = task.title
-            details = task.details
+            details = task.details ?? ""
             if let due = task.dueDate {
                 dueDate = due
                 hasDueDate = true
             } else {
                 hasDueDate = false
             }
-            assignedUser = appState.users.first(where: { $0.id == task.assignedUserId }) ?? current
+            assignedUserId = task.assignedUserId
             status = task.status
         } else {
             // Neue Aufgabe
@@ -569,14 +447,14 @@ struct NewTaskView: View {
             details = ""
             hasDueDate = false
             dueDate = Date()
-            assignedUser = current
+            assignedUserId = current.id
             status = .open
         }
     }
 
     private func save() {
         guard let current = appState.currentUser else { return }
-        let assigned = assignedUser ?? current
+        let assigned = assignableUsers.first(where: { $0.id == assignedUserId }) ?? current
         let due: Date? = hasDueDate ? dueDate : nil
 
         switch mode {
@@ -586,6 +464,18 @@ struct NewTaskView: View {
                                 dueDate: due,
                                 assignedUser: assigned,
                                 creator: current)
+            // Push-Notification (Best Effort): Cloud Function kann auf pushQueue reagieren.
+            if assigned.id != current.id {
+                let db = Firestore.firestore()
+                db.collection("pushQueue").addDocument(data: [
+                    "type": "task_assigned",
+                    "toUserId": assigned.id,
+                    "fromUserId": current.id,
+                    "title": "Neue Aufgabe",
+                    "body": "\(current.name) hat dir eine Aufgabe zugeteilt: \(title)",
+                    "createdAt": FieldValue.serverTimestamp()
+                ])
+            }
         case .edit:
             if var existing = task {
                 existing.title = title
