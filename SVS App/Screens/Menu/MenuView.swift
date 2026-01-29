@@ -8,6 +8,7 @@ import Foundation
 import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
+import FirebaseMessaging
 
 struct MenuView: View {
     @EnvironmentObject var appState: AppState
@@ -164,18 +165,32 @@ struct MenuView: View {
                         guard !isSigningOut else { return }
                         isSigningOut = true
 
-                        // 1) Firebase Auth abmelden
-                        do {
-                            try appState.auth.signOut()
-                        } catch {
-                            appState.uiErrorMessage = "Abmeldung fehlgeschlagen: \(error.localizedDescription)"
-                            isSigningOut = false
-                            return
-                        }
+                        _Concurrency.Task { @MainActor in
+                            let userId = appState.currentUser?.id
 
-                        // 2) Lokale Session/State bereinigen
-                        appState.signOut()
-                        isSigningOut = false
+                            // 0) Token/Device-Registrierung entfernen (best effort)
+                            if let userId {
+                                do {
+                                    try await removeCurrentDevicePushToken(for: userId)
+                                } catch {
+                                    // Nicht blockieren: Logout soll trotzdem funktionieren
+                                    appState.uiErrorMessage = "Hinweis: Push-Token konnte nicht entfernt werden: \(error.localizedDescription)"
+                                }
+                            }
+
+                            // 1) Firebase Auth abmelden
+                            do {
+                                try appState.auth.signOut()
+                            } catch {
+                                appState.uiErrorMessage = "Abmeldung fehlgeschlagen: \(error.localizedDescription)"
+                                isSigningOut = false
+                                return
+                            }
+
+                            // 2) Lokale Session/State bereinigen
+                            appState.signOut()
+                            isSigningOut = false
+                        }
                     }
                     Button("Abbrechen", role: .cancel) { }
                 } message: {
@@ -188,6 +203,50 @@ struct MenuView: View {
         }
     }
     
+    private func removeCurrentDevicePushToken(for userId: String) async throws {
+        guard let token = Messaging.messaging().fcmToken, !token.isEmpty else {
+            return
+        }
+
+        let db = Firestore.firestore()
+        let userRef = db.collection("users").document(userId)
+
+        // Remove from an array field (common schema)
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            userRef.setData([
+                "fcmTokens": FieldValue.arrayRemove([token]),
+                "updatedAt": FieldValue.serverTimestamp()
+            ], merge: true) { err in
+                if let err {
+                    cont.resume(throwing: err)
+                } else {
+                    cont.resume(returning: ())
+                }
+            }
+        }
+
+        // Also try deleting a device doc (alternative schema). Ignore if it doesn't exist.
+        do {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                userRef.collection("devices").document(token).delete { _ in
+                    // Best effort: ignore errors here
+                    cont.resume(returning: ())
+                }
+            }
+        }
+
+        // Finally, delete the local token so this device stops receiving until next sign-in.
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            Messaging.messaging().deleteToken { err in
+                if let err {
+                    cont.resume(throwing: err)
+                } else {
+                    cont.resume(returning: ())
+                }
+            }
+        }
+    }
+
     private func germanColorName(_ key: String) -> String {
         Color.svsGermanColorName(from: key)
     }
