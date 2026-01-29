@@ -92,13 +92,6 @@ struct TasksView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-
-                Picker("Status", selection: $statusFilter) {
-                    ForEach(TaskStatusFilter.allCases, id: \.self) { s in
-                        Text(s.rawValue).tag(s)
-                    }
-                }
-                .pickerStyle(.segmented)
             }
             .padding(.horizontal, 18)
             .padding(.top, 8)
@@ -158,6 +151,19 @@ struct TasksView: View {
             if isPresentedModally {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Schließen") { dismiss() }
+                }
+            }
+
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Picker("Status", selection: $statusFilter) {
+                        ForEach(TaskStatusFilter.allCases, id: \.self) { s in
+                            Text(s.rawValue).tag(s)
+                        }
+                    }
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .accessibilityLabel("Filter")
                 }
             }
 
