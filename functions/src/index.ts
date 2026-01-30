@@ -13,6 +13,8 @@ import {
 } from "firebase-functions/v2/firestore";
 import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
+import {google} from "googleapis";
+import {Readable} from "stream";
 
 admin.initializeApp();
 
@@ -696,6 +698,176 @@ export const automationStatusWebhook = onRequest(async (req, res) => {
     res.status(500).json({ok: false, error: msg});
   }
 });
+
+// ------------------------------------------------------------------
+// Scanner -> Upload Scan (PDF) to Google Drive
+// POST /uploadScanToDrive
+// Auth: Bearer <Firebase ID Token>
+// Body: { storagePath: string, fileName: string }
+// Returns: { ok: true, driveFileId }
+// ------------------------------------------------------------------
+
+type UploadScanToDriveBody = {
+  storagePath: string;
+  fileName: string;
+};
+
+const SCANS_DRIVE_FOLDER_ID = "19n1REUlYfwdzrj3NntMqgzoQ05jg2T9f";
+
+export const uploadScanToDrive = onRequest(
+  {
+    region: "us-central1",
+    serviceAccount: "svs-app-864ed@appspot.gserviceaccount.com",
+  },
+  async (req, res) => {
+    try {
+      // CORS (mobile app typically doesn't need it, but harmless)
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST,OPTIONS");
+      res.set(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+      );
+
+      if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+      }
+
+      if (req.method !== "POST") {
+        res.status(405).json({ok: false, error: "Method not allowed"});
+        return;
+      }
+
+      // --- Auth: Firebase ID Token (Bearer)
+      const authHeader = String(req.header("authorization") ?? "");
+      if (!authHeader.startsWith("Bearer ")) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      const idToken = authHeader.slice("Bearer ".length).trim();
+      if (!idToken) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      let callerUid = "";
+      try {
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        callerUid = decoded.uid;
+      } catch {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      const body = (req.body ?? {}) as Partial<UploadScanToDriveBody>;
+      const storagePath = String(body.storagePath ?? "").trim();
+      const fileName = String(body.fileName ?? "").trim();
+
+      if (!storagePath) {
+        res.status(400).json({ok: false, error: "storagePath required"});
+        return;
+      }
+      if (!fileName) {
+        res.status(400).json({ok: false, error: "fileName required"});
+        return;
+      }
+
+      // Basic safety: only allow uploads from the caller's own scans path.
+      // Expected: scans/<uid>/...
+      if (!storagePath.startsWith(`scans/${callerUid}/`)) {
+        res.status(403).json({ok: false, error: "Forbidden"});
+        return;
+      }
+
+      // --- Download from Firebase Storage
+      const bucket = admin.storage().bucket();
+      const file = bucket.file(storagePath);
+
+      const [exists] = await file.exists();
+      if (!exists) {
+        res.status(404).json({ok: false, error: "file not found"});
+        return;
+      }
+
+      const [buf] = await file.download();
+
+      // --- Upload to Google Drive
+      // Uses Application Default Credentials
+      // (the Cloud Functions service account).
+      // Make sure Drive API is enabled and the target
+      // folder is shared with the SA (drive.file scope is too limited here).
+      const auth = new google.auth.GoogleAuth({
+        scopes: ["https://www.googleapis.com/auth/drive"],
+      });
+
+      // Log which identity (service account) is being used.
+      try {
+        const creds = await auth.getCredentials();
+        const clientEmail =
+          (creds as {client_email?: unknown}).client_email ?? "";
+        const email = String(clientEmail);
+        if (email) {
+          console.log("[uploadScanToDrive] ADC identity:", email);
+        }
+      } catch (e) {
+        console.warn(
+          "[uploadScanToDrive] Could not read ADC credentials",
+          e
+        );
+      }
+
+      const drive = google.drive({version: "v3", auth});
+
+      // Preflight: ensure the target folder is accessible
+      // to this service account.
+      try {
+        await drive.files.get({
+          fileId: SCANS_DRIVE_FOLDER_ID,
+          fields: "id,name",
+          supportsAllDrives: true,
+        });
+      } catch (e: unknown) {
+        const msg =
+          "Drive-Ordner nicht gefunden/kein Zugriff. " +
+          "Bitte den Ordner mit dem in den Logs angezeigten Service Account " +
+          "als Bearbeiter teilen. FolderId=" +
+          SCANS_DRIVE_FOLDER_ID;
+        console.error("[uploadScanToDrive] folder access FAILED", e);
+        res.status(403).json({ok: false, error: msg});
+        return;
+      }
+
+      const media = {
+        mimeType: "application/pdf",
+        body: Readable.from(buf),
+      };
+
+      const createResp = await drive.files.create({
+        supportsAllDrives: true,
+        requestBody: {
+          name: fileName,
+          parents: [SCANS_DRIVE_FOLDER_ID],
+        },
+        media,
+        fields: "id",
+      });
+
+      const driveFileId = String(createResp.data.id ?? "").trim();
+      if (!driveFileId) {
+        res.status(500).json({ok: false, error: "Drive upload failed"});
+        return;
+      }
+
+      res.status(200).json({ok: true, driveFileId});
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[uploadScanToDrive] FAILED", e);
+      res.status(500).json({ok: false, error: msg});
+    }
+  }
+);
 
 // ------------------------------------------------------------------
 // Provision: Token prüfen (für Firebase Hosting Webformular)
