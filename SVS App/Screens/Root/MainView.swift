@@ -89,6 +89,31 @@ private struct ScannerScreen: View {
         return "\(nr)/\(currentYear2)"
     }
 
+    // Same as formattedScanName, but WITHOUT leading zeros (e.g. 0191/26 -> 191/26)
+    private var formattedScanNameNoLeadingZeros: String {
+        let digits = gutachtenNr.filter { $0.isNumber }
+        let trimmed = String(digits.prefix(4))
+        // Int(...) removes leading zeros automatically.
+        let number = Int(trimmed) ?? 0
+        return "\(number)/\(currentYear2)"
+    }
+
+    // Extracts GA number from a generated file name like:
+    // 0191_26_20260130_105709.pdf -> 191/26
+    private func gaNumber(fromFileName fileName: String) -> String? {
+        // Remove extension and split by underscore
+        let base = (fileName as NSString).deletingPathExtension
+        let parts = base.split(separator: "_")
+        guard parts.count >= 2 else { return nil }
+
+        let first = String(parts[0])
+        let second = String(parts[1])
+
+        // Remove leading zeros from the first part
+        let number = Int(first) ?? 0
+        return "\(number)/\(second)"
+    }
+
     private let uploadScanToDriveEndpoint =
       URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/uploadScanToDrive")!
 
