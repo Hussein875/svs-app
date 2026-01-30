@@ -90,7 +90,7 @@ private struct ScannerScreen: View {
     }
 
     private let uploadScanToDriveEndpoint =
-      URL(string: "https://us-central1-svs-app-2f63e.cloudfunctions.net/uploadScanToDrive")!
+      URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/uploadScanToDrive")!
 
     private var isErrorPresented: Binding<Bool> {
         Binding(
@@ -547,6 +547,7 @@ private struct ScannerScreen: View {
         let (data, response) = try await URLSession.shared.data(for: request)
         let http = response as? HTTPURLResponse
         let status = http?.statusCode ?? -1
+        let rawText = String(data: data, encoding: .utf8) ?? ""
 
         struct Payload: Decodable {
             let ok: Bool
@@ -554,17 +555,34 @@ private struct ScannerScreen: View {
             let error: String?
         }
 
-        let decoded = try JSONDecoder().decode(Payload.self, from: data)
-        if decoded.ok, let id = decoded.driveFileId, !id.isEmpty {
-            return id
+        if status < 200 || status >= 300 {
+            print("[Drive] uploadScanToDrive HTTP", status)
+            if !rawText.isEmpty { print("[Drive] body:", rawText) }
         }
 
-        let msg = decoded.error ?? "HTTP \(status)"
-        throw NSError(
-            domain: "Drive",
-            code: status,
-            userInfo: [NSLocalizedDescriptionKey: msg]
-        )
+        do {
+            let decoded = try JSONDecoder().decode(Payload.self, from: data)
+            if decoded.ok, let id = decoded.driveFileId, !id.isEmpty {
+                return id
+            }
+
+            let msg = decoded.error ?? "HTTP \(status)"
+            throw NSError(
+                domain: "Drive",
+                code: status,
+                userInfo: [NSLocalizedDescriptionKey: msg]
+            )
+        } catch {
+            // Non-JSON or unexpected payload; expose raw response for debugging.
+            let prefix = rawText.prefix(500)
+            let msg =
+              "Unerwartete Server-Antwort (HTTP \(status)): \(prefix)"
+            throw NSError(
+                domain: "Drive",
+                code: status,
+                userInfo: [NSLocalizedDescriptionKey: msg]
+            )
+        }
     }
 }
 
