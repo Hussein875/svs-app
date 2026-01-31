@@ -104,7 +104,7 @@ struct CalendarScreen: View {
 
                     let requests = appState.requests(for: selectedDate).filter { $0.status == .approved }
                     if requests.isEmpty {
-                        Text("Keine Anträge")
+                        Text("Keine Einträge")
                             .foregroundColor(.secondary)
                     } else {
                         ForEach(requests) { r in

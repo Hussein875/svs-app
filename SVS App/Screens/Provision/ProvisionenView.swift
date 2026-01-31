@@ -278,9 +278,7 @@ struct ProvisionenView: View {
                         .contentShape(Rectangle())
                         .onTapGesture {
                             dismissKeyboard()
-                            if row.status != "paid" {
-                                selectedCommission = row
-                            }
+                            selectedCommission = row
                         }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
                             if isAdmin && row.status != "paid" {

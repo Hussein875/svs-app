@@ -135,6 +135,25 @@ struct TasksView: View {
                 .background(Color(.systemGroupedBackground))
             }
         }
+        .gesture(
+            DragGesture(minimumDistance: 20, coordinateSpace: .local)
+                .onEnded { value in
+                    // Horizontal swipe detection
+                    if abs(value.translation.width) > abs(value.translation.height) {
+                        if value.translation.width < 0 {
+                            // Swipe left
+                            if scope == .assignedToMe {
+                                scope = .assignedByMe
+                            }
+                        } else {
+                            // Swipe right
+                            if scope == .assignedByMe {
+                                scope = .assignedToMe
+                            }
+                        }
+                    }
+                }
+        )
         .svsDismissKeyboardOnTap()
         .background(Color(.systemGroupedBackground))
         .navigationDestination(isPresented: $showNewTaskNav) {

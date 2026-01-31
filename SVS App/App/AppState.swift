@@ -86,6 +86,7 @@ class AppState: ObservableObject {
     private var leaveRequestsListener: ListenerRegistration?
     private var approvedLeaveRequestsListener: ListenerRegistration?
     private var tasksListener: ListenerRegistration?
+    private var commissionsListener: ListenerRegistration?
     
     // Run snapshot processing off the main thread
     private let firestoreListenerQueue = DispatchQueue(label: "svs.firestore.listeners", qos: .userInitiated)
@@ -654,6 +655,226 @@ class AppState: ObservableObject {
         tasks.removeAll { $0.id == task.id }
     }
     
+    // MARK: - Firestore Commissions DTO
+
+    private struct CommissionDTO {
+        var id: String
+        var recipientName: String
+        var recipientAddress: String
+        var amount: Double
+        var payoutMethodRaw: String
+        var payoutTarget: String
+        var statusRaw: String
+        var createdAt: Timestamp
+        var createdByUid: String
+        var paidAt: Timestamp?
+        var paidByUid: String?
+
+        init?(id: String, data: [String: Any]) {
+            // Support both the legacy schema (recipientName/recipientAddress/...) and
+            // the newer "provision" schema (recommenderName, recommenderStreet, payoutIban, etc.).
+
+            // --- id
+            // Prefer token if it is a UUID string (used by the new provision flow);
+            // otherwise fall back to the document id.
+            let token = data["token"] as? String
+            self.id = token?.isEmpty == false ? token! : id
+
+            // --- createdAt / createdByUid (required)
+            guard
+                let createdAt = data["createdAt"] as? Timestamp,
+                let createdByUid = data["createdByUid"] as? String
+            else { return nil }
+            self.createdAt = createdAt
+            self.createdByUid = createdByUid
+
+            // --- status
+            let statusRaw = (data["statusRaw"] as? String) ?? (data["status"] as? String) ?? "submitted"
+            self.statusRaw = statusRaw
+
+            // --- payout method
+            let payoutMethodRaw = (data["payoutMethodRaw"] as? String) ?? (data["payoutMethod"] as? String) ?? "paypal"
+            self.payoutMethodRaw = payoutMethodRaw
+
+            // --- amount
+            if let amount = data["amount"] as? Double {
+                self.amount = amount
+            } else if let amount = data["amount"] as? Int {
+                self.amount = Double(amount)
+            } else if let amount = data["amount"] as? NSNumber {
+                self.amount = amount.doubleValue
+            } else {
+                self.amount = 0
+            }
+
+            // --- recipient name (legacy: recipientName; new: recommenderName or customerName)
+            let recipientName =
+                (data["recipientName"] as? String)
+                ?? (data["recommenderName"] as? String)
+                ?? (data["customerName"] as? String)
+                ?? "Unbekannt"
+            self.recipientName = recipientName
+
+            // --- recipient address
+            if let legacyAddress = data["recipientAddress"] as? String, !legacyAddress.isEmpty {
+                self.recipientAddress = legacyAddress
+            } else {
+                let street = (data["recommenderStreet"] as? String) ?? ""
+                let zip = (data["recommenderZip"] as? String) ?? ""
+                let city = (data["recommenderCity"] as? String) ?? ""
+                let line1 = [street].filter { !$0.isEmpty }.joined(separator: " ")
+                let line2 = [zip, city].filter { !$0.isEmpty }.joined(separator: " ")
+                let address = [line1, line2].filter { !$0.isEmpty }.joined(separator: "\n")
+                self.recipientAddress = address.isEmpty ? "-" : address
+            }
+
+            // --- payout target
+            // Legacy: payoutTarget; New: payoutIban / payoutPaypal depending on payoutMethod.
+            if let legacyTarget = data["payoutTarget"] as? String, !legacyTarget.isEmpty {
+                self.payoutTarget = legacyTarget
+            } else {
+                if payoutMethodRaw.lowercased() == "iban" {
+                    self.payoutTarget = (data["payoutIban"] as? String) ?? ""
+                } else {
+                    self.payoutTarget = (data["payoutPaypal"] as? String) ?? ""
+                }
+            }
+
+            // --- paidAt / paidByUid (optional)
+            self.paidAt = data["paidAt"] as? Timestamp
+            self.paidByUid = data["paidByUid"] as? String
+        }
+
+        init(from entry: CommissionEntry, actorUid: String) {
+            self.id = entry.id.uuidString
+            self.recipientName = entry.recipientName
+            self.recipientAddress = entry.recipientAddress
+            self.amount = (entry.amountEUR as NSDecimalNumber).doubleValue
+            self.payoutMethodRaw = entry.payoutMethod.rawValue
+            self.payoutTarget = entry.payoutTarget
+            self.statusRaw = entry.status.rawValue
+            self.createdAt = Timestamp(date: entry.createdAt)
+            self.createdByUid = entry.createdByUserId.isEmpty ? actorUid : entry.createdByUserId
+            self.paidAt = entry.paidAt.map { Timestamp(date: $0) }
+            self.paidByUid = entry.paidByUserId
+        }
+
+        func toDictionary() -> [String: Any] {
+            var d: [String: Any] = [
+                "recipientName": recipientName,
+                "recipientAddress": recipientAddress,
+                "amount": amount,
+                "payoutMethodRaw": payoutMethodRaw,
+                "payoutTarget": payoutTarget,
+                "statusRaw": statusRaw,
+                "createdAt": createdAt,
+                "createdByUid": createdByUid
+            ]
+            if let paidAt { d["paidAt"] = paidAt }
+            if let paidByUid { d["paidByUid"] = paidByUid }
+            return d
+        }
+    }
+
+    // MARK: - Firestore Commissions Listener
+
+    private func startCommissionsListenerIfNeeded() {
+        guard commissionsListener == nil else { return }
+        guard let me = currentUser else { return }
+
+        var query: Query = db.collection("commissions")
+
+        // Admin: alles; Nicht-Admin: nur eigene erstellte Provisionen
+        if me.role != .admin {
+            query = query.whereField("createdByUid", isEqualTo: me.id)
+        }
+
+        query = query.order(by: "createdAt", descending: true)
+
+        commissionsListener = query.addSnapshotListener(includeMetadataChanges: false) {
+            [weak self] snapshot, error in
+            guard let self else { return }
+
+            if let error {
+                DispatchQueue.main.async {
+                    self.uiErrorMessage =
+                    "Provisionen konnten nicht geladen werden: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            let docs = snapshot?.documents ?? []
+
+            self.firestoreListenerQueue.async { [weak self] in
+                guard let self else { return }
+
+                let mapped: [CommissionEntry] = docs.compactMap { doc in
+                    guard let dto = CommissionDTO(id: doc.documentID, data: doc.data()) else {
+                        return nil
+                    }
+                    let uuid = UUID(uuidString: dto.id) ?? UUID(uuidString: doc.documentID)
+                    guard let uuid else { return nil }
+
+                    let status = CommissionStatus(rawValue: dto.statusRaw) ?? .submitted
+                    let method = PayoutMethod(rawValue: dto.payoutMethodRaw) ?? .paypal
+
+                    return CommissionEntry(
+                        id: uuid,
+                        recipientName: dto.recipientName,
+                        recipientAddress: dto.recipientAddress,
+                        amountEUR: Decimal(dto.amount),
+                        payoutMethod: method,
+                        payoutTarget: dto.payoutTarget,
+                        status: status,
+                        createdAt: dto.createdAt.dateValue(),
+                        createdByUserId: dto.createdByUid,
+                        paidAt: dto.paidAt?.dateValue(),
+                        paidByUserId: dto.paidByUid
+                    )
+                }
+
+                DispatchQueue.main.async { [weak self] in
+                    self?.commissions = mapped
+                }
+            }
+        }
+    }
+
+    private func upsertCommissionToFirestore(_ entry: CommissionEntry) {
+        guard let actorUid = Auth.auth().currentUser?.uid else { return }
+        let dto = CommissionDTO(from: entry, actorUid: actorUid)
+
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.db.collection("commissions").document(dto.id)
+                    .setData(dto.toDictionary(), merge: true)
+            } catch {
+                let msg = "Provision konnte nicht gespeichert werden: \(error.localizedDescription)"
+                await MainActor.run {
+                    self.uiErrorMessage = msg
+                    self.showToast(.error, msg)
+                }
+            }
+        }
+    }
+
+    private func deleteCommissionFromFirestore(_ entry: CommissionEntry) {
+        let docId = entry.id.uuidString
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.db.collection("commissions").document(docId).delete()
+            } catch {
+                let msg = "Provision konnte nicht gelöscht werden: \(error.localizedDescription)"
+                await MainActor.run {
+                    self.uiErrorMessage = msg
+                    self.showToast(.error, msg)
+                }
+            }
+        }
+    }
+    
     func userName(for userId: String) -> String {
         users.first(where: { $0.id == userId })?.name ?? "Unbekannt"
     }
@@ -737,6 +958,7 @@ class AppState: ObservableObject {
         )
         
         commissions.append(entry)
+        upsertCommissionToFirestore(entry)
         
         // Task beim Admin erzeugen
         let amountString = currencyString(amountEUR)
@@ -771,6 +993,13 @@ class AppState: ObservableObject {
         commissions[idx].status = .paid
         commissions[idx].paidAt = Date()
         commissions[idx].paidByUserId = admin.id
+        upsertCommissionToFirestore(commissions[idx])
+    }
+    
+    func deleteCommission(_ entry: CommissionEntry) {
+        guard let admin = currentUser, admin.role == .admin else { return }
+        deleteCommissionFromFirestore(entry)
+        commissions.removeAll { $0.id == entry.id }
     }
     
     // MARK: - Firestore Tasks DTO
@@ -1146,12 +1375,14 @@ class AppState: ObservableObject {
         leaveRequestsListener?.remove(); leaveRequestsListener = nil
         approvedLeaveRequestsListener?.remove(); approvedLeaveRequestsListener = nil
         tasksListener?.remove(); tasksListener = nil
+        commissionsListener?.remove(); commissionsListener = nil
         usersSnapshotCache = []
         invitesSnapshotCache = []
         leaveRequests = []
         leaveRequestsOwnSnapshotCache = []
         leaveRequestsApprovedSnapshotCache = []
         tasks = []
+        commissions = []
         didStartRealtimeListeners = false
         isProfileReady = false
     }
@@ -1167,6 +1398,7 @@ class AppState: ObservableObject {
         startUsersListenersIfNeeded()
         startLeaveRequestsListenerIfNeeded()
         startTasksListenerIfNeeded()
+        startCommissionsListenerIfNeeded()
     }
     
     private func startUsersListenersIfNeeded() {

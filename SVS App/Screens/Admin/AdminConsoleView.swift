@@ -10,7 +10,7 @@ import FirebaseFirestore
 
 struct AdminConsoleView: View {
     @EnvironmentObject var appState: AppState
-
+    
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -25,8 +25,8 @@ struct AdminConsoleView: View {
                     .padding(.horizontal, 18)
                     .padding(.top, 8)
 
-                    // KPI Cards (3, including Bereitschaft)
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    // KPI Cards (3)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                         AdminStatCard(
                             title: "Offene Anträge",
                             value: "\(openVacationRequestsCount)",
@@ -38,6 +38,13 @@ struct AdminConsoleView: View {
                             title: "Heute abwesend",
                             value: "\(todayAbsentCount)",
                             systemImage: "calendar.badge.clock",
+                            accent: appState.currentUser?.color ?? .secondary
+                        )
+
+                        AdminStatCard(
+                            title: "Offene Provisionen",
+                            value: "\(openCommissionsCount)",
+                            systemImage: "eurosign.circle",
                             accent: appState.currentUser?.color ?? .secondary
                         )
                     }
@@ -80,7 +87,19 @@ struct AdminConsoleView: View {
                                             subtitle: "Samstage zuweisen",
                                             systemImage: "person.badge.clock", accent: appState.currentUser?.color ?? .secondary)
                             }
-                            
+
+                            NavigationLink {
+                                AdminCommissionsScreen()
+                                    .environmentObject(appState)
+                            } label: {
+                                AdminNavRow(
+                                    title: "Provisionen",
+                                    subtitle: "Offen, auszahlen und löschen",
+                                    systemImage: "eurosign",
+                                    accent: appState.currentUser?.color ?? .secondary
+                                )
+                            }
+
                             NavigationLink {
                                 AdminAutomationsScreen(automationId: "auto_gutachten_ablage")
                                     .environmentObject(appState)
@@ -89,7 +108,7 @@ struct AdminConsoleView: View {
                                             subtitle: "Make-Status und letzte Läufe",
                                             systemImage: "bolt.badge.clock", accent: appState.currentUser?.color ?? .secondary)
                             }
-                            
+
                         }
                         .padding(.horizontal, 18)
                     }
@@ -99,6 +118,12 @@ struct AdminConsoleView: View {
                 .padding(.top, 2)
             }
             .background(Color(.systemGroupedBackground))
+            .onAppear {
+                #if DEBUG
+                print("[AdminConsole] commissions:", appState.commissions.count)
+                print("[AdminConsole] commission statuses:", appState.commissions.map { $0.status })
+                #endif
+            }
         }
     }
     
@@ -182,6 +207,11 @@ struct AdminConsoleView: View {
             .filter { $0.type == .onCallSaturday && $0.status == .approved }
             .filter { cal.startOfDay(for: $0.startDate) >= today }
             .count
+    }
+
+    private var openCommissionsCount: Int {
+        // Treat anything that is not paid as open.
+        appState.commissions.filter { $0.status != .paid }.count
     }
 }
 
@@ -2043,5 +2073,17 @@ struct AdminAutomationsScreen: View {
     private func lastRunText(_ d: Date?) -> String {
         guard let d else { return "Letzter Lauf: –" }
         return "Letzter Lauf: \(d.formatted(date: .abbreviated, time: .shortened))"
+    }
+}
+
+
+struct AdminCommissionsScreen: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        ProvisionenView()
+            .environmentObject(appState)
+            .navigationTitle("Provisionen")
+            .navigationBarTitleDisplayMode(.inline)
     }
 }

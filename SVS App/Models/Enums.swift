@@ -37,8 +37,9 @@ enum PayoutMethod: String, Codable, CaseIterable {
 }
 
 enum CommissionStatus: String, Codable {
-    case open = "Offen"
-    case paid = "Ausgezahlt"
+    case open
+    case paid
+    case submitted
 }
 
 struct CommissionEntry: Identifiable, Codable, Equatable {
