@@ -131,6 +131,7 @@ export const adminCreateUserInvite = onCall(async (request) => {
 type TokenRef = {
   token: string;
   ref: admin.firestore.DocumentReference;
+  ownerUserId: string;
 };
 
 /**
@@ -238,7 +239,7 @@ async function getAdminTokenRefs(): Promise<TokenRef[]> {
       if (!token) continue;
       if (seen.has(token)) continue;
       seen.add(token);
-      out.push({token, ref: d.ref});
+      out.push({token, ref: d.ref, ownerUserId: u.id});
     }
   }
 
@@ -268,7 +269,7 @@ async function getUserTokenRefs(userId: string): Promise<TokenRef[]> {
     if (!token) continue;
     if (seen.has(token)) continue;
     seen.add(token);
-    out.push({token, ref: d.ref});
+    out.push({token, ref: d.ref, ownerUserId: userId});
   }
 
   return out;
@@ -293,6 +294,23 @@ async function getUserNameOrFallback(userId: string): Promise<string> {
   }
 }
 
+/**
+ * Filters out all token refs that belong to a specific user.
+ * Useful to prevent self-notifications (e.g. creator is also an admin).
+ *
+ * @param {TokenRef[]} tokenRefs Token refs to filter.
+ * @param {string} userId Firebase Auth UID whose tokens should be excluded.
+ * @return {TokenRef[]} Token refs excluding those owned by the given user.
+ */
+function filterOutUserTokenRefs(
+  tokenRefs: TokenRef[],
+  userId: string
+): TokenRef[] {
+  const uid = String(userId ?? "").trim();
+  if (!uid) return tokenRefs;
+  return tokenRefs.filter((tr) => tr.ownerUserId !== uid);
+}
+
 // Neuer Antrag -> Admins
 export const pushOnNewLeaveRequest =
   onDocumentCreated(
@@ -305,12 +323,26 @@ export const pushOnNewLeaveRequest =
 
       const typeRaw = String(data.typeRaw ?? "").trim() || "Antrag";
 
+      // Prevent self-notifications: if the creator is also an admin,
+      // do not send the "new request" push to their own devices.
+      const creatorUserId = String(
+        data.createdByUid ??
+        data.createdByUserId ??
+        data.creatorUserId ??
+        data.userId ??
+        ""
+      ).trim();
+
       console.log(
         "[push][new] requestId=",
         String(event.params.requestId ?? "")
       );
 
-      const tokenRefs = await getAdminTokenRefs();
+      const allAdminTokenRefs = await getAdminTokenRefs();
+      const tokenRefs = filterOutUserTokenRefs(
+        allAdminTokenRefs,
+        creatorUserId
+      );
       const tokens = tokenRefs.map((t) => t.token);
       if (tokens.length === 0) {
         console.log("[push][new] no admin tokens");
@@ -1584,7 +1616,12 @@ export const commissionCreatedSendPdf = onDocumentCreated(
     // Push an Admins: Neue Provisionsanfrage (idempotent)
     if (!data.adminPushSentAt) {
       try {
-        const tokenRefs = await getAdminTokenRefs();
+        const allAdminTokenRefs = await getAdminTokenRefs();
+        const creatorUid = String(data.createdByUid ?? "").trim();
+        const tokenRefs = filterOutUserTokenRefs(
+          allAdminTokenRefs,
+          creatorUid
+        );
         const tokens = tokenRefs.map((t) => t.token);
 
         if (tokens.length === 0) {
