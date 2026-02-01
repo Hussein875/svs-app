@@ -63,7 +63,7 @@ struct AdminConsoleView: View {
                             } label: {
                                 AdminNavRow(
                                     title: "Anträge verwalten",
-                                    subtitle: "Genehmigen, ablehnen und filtern",
+                                    subtitle: "Urlaub und Krankheit",
                                     systemImage: "doc.text.magnifyingglass",
                                     accent: appState.currentUser?.color ?? .secondary
                                 )
@@ -204,7 +204,9 @@ struct AdminConsoleView: View {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
         return appState.leaveRequests
-            .filter { $0.type == .onCallSaturday && $0.status == .approved }
+            .filter {
+                $0.type == .onCallSaturday && $0.status != .rejected
+            }
             .filter { cal.startOfDay(for: $0.startDate) >= today }
             .count
     }
@@ -332,7 +334,7 @@ struct AdminRequestsScreen: View {
                     .environmentObject(appState)
             }
         }
-        .navigationTitle("Anträge")
+        .navigationTitle("Abwesenheiten")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -598,7 +600,7 @@ struct AdminUsersScreen: View {
             return appState.leaveRequests
                 .filter { $0.user.id == user.id }
                 .filter { $0.type == .onCallSaturday }
-                .filter { $0.status == .approved }
+                .filter { $0.status != .rejected }
                 .filter { cal.component(.year, from: $0.startDate) == year }
                 .count
         }
@@ -960,31 +962,49 @@ struct AdminOnCallSaturdaysScreen: View {
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: Date())
     @State private var editingRequest: LeaveRequest?
     @State private var showEdit: Bool = false
+    @State private var prefilledNewSaturday: Date? = nil
 
-    private var upcomingOnCalls: [LeaveRequest] {
+    // 1) takenSaturdays
+    private var takenSaturdays: Set<Date> {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-        return appState.leaveRequests
-            .filter { $0.type == .onCallSaturday && $0.status == .approved }
-            .filter { cal.startOfDay(for: $0.startDate) >= today }
-            .sorted { $0.startDate < $1.startDate }
+        let taken = appState.leaveRequests
+            .filter { $0.type == .onCallSaturday && $0.status != .rejected }
+            .map { cal.startOfDay(for: $0.startDate) }
+        // Only consider dates from today onward
+        return Set(taken.filter { $0 >= today })
     }
 
+    // 2) nextFreeSaturdays
+    private var nextFreeSaturdays: [Date] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var result: [Date] = []
+        var d = today
+        while result.count < 8 {
+            if cal.component(.weekday, from: d) == 7 { // Saturday
+                let day = cal.startOfDay(for: d)
+                if !takenSaturdays.contains(day) {
+                    result.append(day)
+                }
+            }
+            d = cal.date(byAdding: .day, value: 1, to: d) ?? d
+        }
+        return result
+    }
+
+    // Keep the existing onCallCountsByUser and totalOnCallCount
     private var onCallCountsByUser: [(user: User, count: Int)] {
         let cal = Calendar.current
         let currentYear = cal.component(.year, from: Date())
-
-        // Count ONLY approved on-call Saturdays in the current year
         let counts: [String: Int] = appState.leaveRequests
-            .filter { $0.type == .onCallSaturday && $0.status == .approved }
+            .filter { $0.type == .onCallSaturday && $0.status != .rejected }
             .filter { cal.component(.year, from: $0.startDate) == currentYear }
             .reduce(into: [:]) { partial, req in
                 partial[req.user.id, default: 0] += 1
             }
-
         let eligible = appState.users
             .filter { $0.role == .admin || $0.role == .expert }
-
         return eligible
             .map { ($0, counts[$0.id] ?? 0) }
             .sorted { lhs, rhs in
@@ -995,6 +1015,38 @@ struct AdminOnCallSaturdaysScreen: View {
 
     private var totalOnCallCount: Int {
         onCallCountsByUser.reduce(0) { $0 + $1.count }
+    }
+
+    private var upcomingOnCalls: [LeaveRequest] {
+        let cal = Calendar.current
+        let currentYear = cal.component(.year, from: Date())
+
+        return appState.leaveRequests
+            .filter { $0.type == .onCallSaturday && $0.status != .rejected }
+            .filter { cal.component(.year, from: $0.startDate) == currentYear }
+            .sorted { $0.startDate < $1.startDate }
+    }
+
+    private var onCallsByMonth: [(monthStart: Date, items: [LeaveRequest])] {
+        let cal = Calendar.current
+
+        let grouped = Dictionary(grouping: upcomingOnCalls) { req in
+            let comps = cal.dateComponents([.year, .month], from: req.startDate)
+            return cal.date(from: comps) ?? cal.startOfDay(for: req.startDate)
+        }
+
+        let sortedKeys = grouped.keys.sorted(by: <)
+        return sortedKeys.map { key in
+            let items = (grouped[key] ?? []).sorted { $0.startDate < $1.startDate }
+            return (monthStart: key, items: items)
+        }
+    }
+
+    private func monthTitle(_ date: Date) -> String {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "de_DE")
+        df.dateFormat = "LLLL yyyy"
+        return df.string(from: date).capitalized
     }
 
     var body: some View {
@@ -1051,46 +1103,68 @@ struct AdminOnCallSaturdaysScreen: View {
             .padding(.top, 4)
 
             List {
-                if upcomingOnCalls.isEmpty {
+                if nextFreeSaturdays.isEmpty && onCallsByMonth.isEmpty {
                     Section {
                         Text("Noch keine Samstags-Bereitschaften eingetragen")
                             .foregroundColor(.secondary)
                     }
                 } else {
-                    Section(header: Text("Nächste Samstage")) {
-                        ForEach(upcomingOnCalls) { req in
-                            HStack(spacing: 12) {
-                                Image(systemName: "person.badge.clock")
-                                    .foregroundColor(.secondary)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(req.user.name)
+                    if !nextFreeSaturdays.isEmpty {
+                        Section(header: Text("Freie Samstage (nächste 8)")) {
+                            ForEach(nextFreeSaturdays, id: \.self) { d in
+                                HStack(spacing: 12) {
+                                    Image(systemName: "calendar.badge.plus")
+                                        .foregroundColor(.secondary)
+                                    Text(d.formatted(date: .abbreviated, time: .omitted))
                                         .font(.subheadline.weight(.semibold))
-                                        .foregroundColor(req.user.color)
-                                    Text(req.startDate.formatted(date: .abbreviated, time: .omitted))
-                                        .font(.caption)
+                                    Spacer()
+                                    Text("Frei")
+                                        .font(.caption.weight(.semibold))
                                         .foregroundColor(.secondary)
                                 }
-
-                                Spacer()
-                            }
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                editingRequest = req
-                                showEdit = true
-                            }
-                            .swipeActions {
-                                Button {
-                                    editingRequest = req
-                                    showEdit = true
-                                } label: {
-                                    Label("Bearbeiten", systemImage: "pencil")
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    prefilledNewSaturday = d
+                                    showNew = true
                                 }
-
-                                Button(role: .destructive) {
-                                    appState.deleteLeaveRequest(req)
-                                } label: {
-                                    Label("Löschen", systemImage: "trash")
+                            }
+                        }
+                    }
+                    if !onCallsByMonth.isEmpty {
+                        ForEach(onCallsByMonth, id: \.monthStart) { group in
+                            Section(header: Text(monthTitle(group.monthStart))) {
+                                ForEach(group.items) { req in
+                                    HStack(spacing: 12) {
+                                        Image(systemName: "person.badge.clock")
+                                            .foregroundColor(.secondary)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(req.user.name)
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundColor(req.user.color)
+                                            Text(req.startDate.formatted(date: .abbreviated, time: .omitted))
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                    }
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        editingRequest = req
+                                        showEdit = true
+                                    }
+                                    .swipeActions {
+                                        Button {
+                                            editingRequest = req
+                                            showEdit = true
+                                        } label: {
+                                            Label("Bearbeiten", systemImage: "pencil")
+                                        }
+                                        Button(role: .destructive) {
+                                            appState.deleteLeaveRequest(req)
+                                        } label: {
+                                            Label("Löschen", systemImage: "trash")
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1103,7 +1177,7 @@ struct AdminOnCallSaturdaysScreen: View {
         }
         .background(Color(.systemGroupedBackground))
         .navigationDestination(isPresented: $showNew) {
-            NewOnCallSaturdayView()
+            NewOnCallSaturdayView(prefilledDate: prefilledNewSaturday)
                 .environmentObject(appState)
         }
         .navigationDestination(isPresented: $showEdit) {
@@ -1111,7 +1185,6 @@ struct AdminOnCallSaturdaysScreen: View {
                 EditOnCallSaturdayView(existingRequest: req)
                     .environmentObject(appState)
             } else {
-                // Fallback (should not happen)
                 EmptyView()
             }
         }
@@ -1120,171 +1193,13 @@ struct AdminOnCallSaturdaysScreen: View {
                 editingRequest = nil
             }
         }
+        .onChange(of: showNew) {
+            if !showNew {
+                prefilledNewSaturday = nil
+            }
+        }
         .navigationTitle("Bereitschaft")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showNew = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel("Bereitschaft hinzufügen")
-            }
-        }
-    }
-}
-
-struct NewOnCallSaturdayView: View {
-    @EnvironmentObject var appState: AppState
-    @Environment(\.dismiss) var dismiss
-
-    @State private var selectedExpertId: String?
-    @State private var selectedSaturday: Date = Calendar.current.startOfDay(for: Date())
-    @State private var inlineError: String?
-    @State private var didLoadInitialValues: Bool = false
-
-    private var eligibleUsers: [User] {
-        appState.users
-            .filter { $0.role == .expert || $0.role == .admin }
-            .sorted { $0.name.lowercased() < $1.name.lowercased() }
-    }
-
-    private var takenSaturdays: Set<Date> {
-        let cal = Calendar.current
-        return Set(
-            appState.leaveRequests
-                .filter { $0.type == .onCallSaturday && $0.status == .approved }
-                .map { cal.startOfDay(for: $0.startDate) }
-        )
-    }
-
-    private var upcomingSaturdays: [Date] {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        // Generate next 16 available Saturdays
-        var result: [Date] = []
-        var d = today
-        while result.count < 16 {
-            let weekday = cal.component(.weekday, from: d)
-            if weekday == 7 { // Saturday
-                let day = cal.startOfDay(for: d)
-                if !takenSaturdays.contains(day) {
-                    result.append(day)
-                }
-            }
-            d = cal.date(byAdding: .day, value: 1, to: d) ?? d
-        }
-        return result
-    }
-
-    private var saturdayPickerOptions: [Date] {
-        let cal = Calendar.current
-        let normalizedSelection = cal.startOfDay(for: selectedSaturday)
-        var options = upcomingSaturdays
-        // Ensure current selection is always a valid tag (prevents Picker runtime warning)
-        if !options.contains(normalizedSelection) {
-            options.append(normalizedSelection)
-        }
-        return Array(Set(options)).sorted(by: <)
-    }
-
-    var body: some View {
-        Form {
-            Section {
-                HStack(spacing: 10) {
-                    Image(systemName: "person.badge.clock")
-                        .foregroundColor(.secondary)
-                    Text("Samstags-Bereitschaft")
-                        .font(.subheadline.weight(.semibold))
-                }
-                Text("Hier weist du für einen Samstag genau eine Person als Bereitschaft zu. Der Eintrag erscheint im Kalender.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            if let msg = inlineError {
-                Section {
-                    Label(msg, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundColor(.red)
-                        .font(.footnote)
-                }
-            }
-
-            Section(header: Text("Samstag"), footer: Text("Es sind nur kommende Samstage auswählbar. Pro Samstag ist nur ein Eintrag möglich.")) {
-                Picker("Datum", selection: Binding(
-                    get: { Calendar.current.startOfDay(for: selectedSaturday) },
-                    set: { selectedSaturday = Calendar.current.startOfDay(for: $0) }
-                )) {
-                    ForEach(saturdayPickerOptions.map { Calendar.current.startOfDay(for: $0) }, id: \.self) { d in
-                        Text(d.formatted(date: .abbreviated, time: .omitted)).tag(d)
-                    }
-                }
-                .pickerStyle(.navigationLink)
-            }
-
-            Section(header: Text("Mitarbeiter")) {
-                Picker("Mitarbeiter", selection: Binding(get: {
-                    selectedExpertId
-                }, set: { newVal in
-                    selectedExpertId = newVal
-                })) {
-                    Text("Bitte auswählen").tag(String?.none)
-                    ForEach(eligibleUsers) { u in
-                        Text(u.name).tag(Optional(u.id))
-                    }
-                }
-                .pickerStyle(.navigationLink)
-            }
-
-            Section {
-                Button {
-                    guard let id = selectedExpertId, let user = eligibleUsers.first(where: { $0.id == id }) else {
-                        inlineError = "Bitte einen Admin oder Sachverständigen auswählen."
-                        return
-                    }
-
-                    let ok = appState.createLeaveRequest(
-                        start: selectedSaturday,
-                        end: selectedSaturday,
-                        type: .onCallSaturday,
-                        for: user
-                    )
-                    if ok {
-                        inlineError = nil
-                        dismiss()
-                    } else {
-                        inlineError = appState.uiErrorMessage
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                        Text("Speichern")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 6)
-                }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.capsule)
-                .disabled(selectedExpertId == nil)
-            }
-        }
-        .navigationTitle("Bereitschaft anlegen")
-        .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            // With `.pickerStyle(.navigationLink)` SwiftUI may re-trigger `onAppear`
-            // when coming back from the picker screen. Without this guard, the selection resets.
-            guard !didLoadInitialValues else { return }
-            didLoadInitialValues = true
-
-            // Ensure the initial selection is a valid option/tag
-            if let first = upcomingSaturdays.first {
-                selectedSaturday = Calendar.current.startOfDay(for: first)
-            } else {
-                selectedSaturday = Calendar.current.startOfDay(for: selectedSaturday)
-            }
-        }
     }
 }
 
@@ -1310,7 +1225,9 @@ struct EditOnCallSaturdayView: View {
         let currentDay = cal.startOfDay(for: existingRequest.startDate)
         return Set(
             appState.leaveRequests
-                .filter { $0.type == .onCallSaturday && $0.status == .approved }
+                .filter {
+                    $0.type == .onCallSaturday && $0.status != .rejected
+                }
                 .map { cal.startOfDay(for: $0.startDate) }
         ).subtracting([currentDay])
     }
@@ -1454,7 +1371,162 @@ struct EditOnCallSaturdayView: View {
     }
 }
 
-// MARK: - Admin Automations Screen (Make Status)
+// MARK: - NewOnCallSaturdayView
+
+struct NewOnCallSaturdayView: View {
+    @EnvironmentObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    
+    let prefilledDate: Date?
+
+    @State private var selectedUserId: String?
+    @State private var selectedSaturday: Date = Calendar.current.startOfDay(for: Date())
+    @State private var inlineError: String?
+    @State private var didLoadInitialValues: Bool = false
+
+    init(prefilledDate: Date? = nil) {
+        self.prefilledDate = prefilledDate
+    }
+
+    private var eligibleUsers: [User] {
+        appState.users
+            .filter { $0.role == .expert || $0.role == .admin }
+            .sorted { $0.name.lowercased() < $1.name.lowercased() }
+    }
+
+    private var takenSaturdays: Set<Date> {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        return Set(
+            appState.leaveRequests
+                .filter { $0.type == .onCallSaturday && $0.status != .rejected }
+                .map { cal.startOfDay(for: $0.startDate) }
+                .filter { $0 >= today }
+        )
+    }
+
+    private var upcomingFreeSaturdays: [Date] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var result: [Date] = []
+        var d = today
+        while result.count < 8 {
+            if cal.component(.weekday, from: d) == 7 {
+                let day = cal.startOfDay(for: d)
+                if !takenSaturdays.contains(day) {
+                    result.append(day)
+                }
+            }
+            d = cal.date(byAdding: .day, value: 1, to: d) ?? d
+        }
+        return result
+    }
+
+    private var saturdayPickerOptions: [Date] {
+        let cal = Calendar.current
+        let normalized = cal.startOfDay(for: selectedSaturday)
+        var options = upcomingFreeSaturdays
+        // keep selection present if it was prefilled
+        if !options.contains(normalized) {
+            options.append(normalized)
+        }
+        // but never allow already-taken dates to appear
+        options = options.filter { !takenSaturdays.contains($0) }
+        return Array(Set(options)).sorted(by: <)
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                HStack(spacing: 10) {
+                    Image(systemName: "person.badge.clock")
+                        .foregroundColor(.secondary)
+                    Text("Samstags-Bereitschaft hinzufügen")
+                        .font(.subheadline.weight(.semibold))
+                }
+                Text("Wähle einen freien Samstag und einen Admin oder Sachverständigen.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            if let msg = inlineError {
+                Section {
+                    Label(msg, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundColor(.red)
+                        .font(.footnote)
+                }
+            }
+
+            Section(header: Text("Samstag"), footer: Text("Nur freie Samstage auswählbar.")) {
+                Picker("Datum", selection: Binding(
+                    get: { Calendar.current.startOfDay(for: selectedSaturday) },
+                    set: { selectedSaturday = Calendar.current.startOfDay(for: $0) }
+                )) {
+                    ForEach(saturdayPickerOptions, id: \.self) { d in
+                        Text(d.formatted(date: .abbreviated, time: .omitted)).tag(d)
+                    }
+                }
+                .pickerStyle(.navigationLink)
+            }
+
+            Section(header: Text("Mitarbeiter")) {
+                Picker("Mitarbeiter", selection: Binding(get: {
+                    selectedUserId
+                }, set: { newVal in
+                    selectedUserId = newVal
+                })) {
+                    Text("Bitte auswählen").tag(String?.none)
+                    ForEach(eligibleUsers) { u in
+                        Text(u.name).tag(Optional(u.id))
+                    }
+                }
+                .pickerStyle(.navigationLink)
+            }
+
+            Section(header: Text("Aktionen")) {
+                Button {
+                    guard let id = selectedUserId, let user = eligibleUsers.first(where: { $0.id == id }) else {
+                        inlineError = "Bitte einen Admin oder Sachverständigen auswählen."
+                        return
+                    }
+                    let ok = appState.createLeaveRequest(
+                        start: selectedSaturday,
+                        end: selectedSaturday,
+                        type: .onCallSaturday,
+                        for: user
+                    )
+
+                    if ok {
+                        inlineError = nil
+                        dismiss()   // ✅ Fenster schließt sich sauber
+                    } else {
+                        inlineError = appState.uiErrorMessage
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Speichern")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .disabled(selectedUserId == nil)
+            }
+        }
+        .navigationTitle("Bereitschaft")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            guard !didLoadInitialValues else { return }
+            didLoadInitialValues = true
+            if let d = prefilledDate {
+                selectedSaturday = Calendar.current.startOfDay(for: d)
+            }
+        }
+    }
+}
 
 private struct AutomationEvent: Identifiable {
     let id: String

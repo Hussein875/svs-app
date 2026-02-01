@@ -72,7 +72,7 @@ struct EditLeaveRequestView: View {
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Antrag bearbeiten")
+            .navigationTitle("Abwesenheit bearbeiten")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .onChange(of: request.startDate) { _, _ in

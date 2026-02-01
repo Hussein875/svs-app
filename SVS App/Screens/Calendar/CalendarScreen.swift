@@ -102,7 +102,14 @@ struct CalendarScreen: View {
                             .foregroundColor(.red)
                     }
 
-                    let requests = appState.requests(for: selectedDate).filter { $0.status == .approved }
+                    let requests = appState.requests(for: selectedDate).filter { r in
+                        // Abwesenheiten: nur genehmigte anzeigen
+                        // Samstagsbereitschaft: auch "submitted" anzeigen (alles außer abgelehnt)
+                        if r.type == .onCallSaturday {
+                            return r.status != .rejected
+                        }
+                        return r.status == .approved
+                    }
                     if requests.isEmpty {
                         Text("Keine Einträge")
                             .foregroundColor(.secondary)
@@ -116,9 +123,7 @@ struct CalendarScreen: View {
                                 Text(displayUser.name)
                                     .font(.headline)
                                     .foregroundColor(displayUser.color)
-                                Text("\(dateRange(r.startDate, r.endDate))")
-                                    .font(.subheadline)
-                                Text(r.type.rawValue)
+                                Text(r.type == .onCallSaturday ? "Bereitschaft" : r.type.rawValue)
                                     .font(.caption)
                             }
                         }
@@ -315,10 +320,15 @@ struct CalendarGrid: View {
                     let isCurrentMonth = Calendar.current.isDate(date, equalTo: currentMonth, toGranularity: .month)
 
                     let approvedRequests = isCurrentMonth
-                        ? appState.requests(for: date).filter { $0.status == .approved }
+                        ? appState.requests(for: date).filter { r in
+                            if r.type == .onCallSaturday {
+                                return r.status != .rejected
+                            }
+                            return r.status == .approved
+                        }
                         : []
 
-                    let approvedColors: [Color] = approvedRequests.map { req in
+                    let markerColors: [Color] = approvedRequests.map { req in
                         if let u = appState.users.first(where: { $0.id == req.user.id }) {
                             return u.color
                         }
@@ -330,7 +340,7 @@ struct CalendarGrid: View {
                         date: date,
                         isCurrentMonth: isCurrentMonth,
                         isSelected: isCurrentMonth && Calendar.current.isDate(date, inSameDayAs: selectedDate),
-                        approvedColors: approvedColors,
+                        approvedColors: markerColors,
                         isHoliday: isHoliday
                     )
                     .contentShape(Rectangle())
