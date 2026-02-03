@@ -25,19 +25,12 @@ struct AdminConsoleView: View {
                     .padding(.horizontal, 18)
                     .padding(.top, 8)
 
-                    // KPI Cards (3)
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    // KPI Cards (2)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                         AdminStatCard(
                             title: "Offene Anträge",
                             value: "\(openVacationRequestsCount)",
                             systemImage: "doc.text",
-                            accent: appState.currentUser?.color ?? .secondary
-                        )
-
-                        AdminStatCard(
-                            title: "Heute abwesend",
-                            value: "\(todayAbsentCount)",
-                            systemImage: "calendar.badge.clock",
                             accent: appState.currentUser?.color ?? .secondary
                         )
 
@@ -134,16 +127,24 @@ struct AdminConsoleView: View {
         let accent: Color
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Image(systemName: systemImage).foregroundColor(accent)
-                    Spacer()
-                }
-                Text(value).font(.title2.weight(.bold))
-                Text(title).font(.caption).foregroundColor(accent.opacity(0.8))
+            VStack(alignment: .center, spacing: 8) {
+                Image(systemName: systemImage)
+                    .foregroundColor(accent)
+
+                Text(value)
+                    .font(.title2.weight(.bold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(accent.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
             }
             .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 88, maxHeight: 88, alignment: .center)
             .background(RoundedRectangle(cornerRadius: 16).fill(Color(.secondarySystemBackground)))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent.opacity(0.22), lineWidth: 1))
         }
