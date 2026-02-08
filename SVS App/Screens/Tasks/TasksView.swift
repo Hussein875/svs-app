@@ -8,6 +8,7 @@
 import Foundation
 import SwiftUI
 import FirebaseFirestore
+import FirebaseAuth
 
 #if canImport(UIKit)
 extension View {
@@ -52,19 +53,52 @@ struct TasksView: View {
 
 
     private var currentUser: User? { appState.currentUser }
+    
+    private func normalizedIdentity(_ value: String?) -> String {
+        (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var currentIdentitySet: Set<String> {
+        var ids = Set<String>()
+
+        let authUid = normalizedIdentity(appState.auth.user?.uid)
+        if !authUid.isEmpty { ids.insert(authUid) }
+
+        let profileId = normalizedIdentity(currentUser?.id)
+        if !profileId.isEmpty { ids.insert(profileId) }
+
+        return ids
+    }
+
+    private var legacyIdentitySet: Set<String> {
+        guard let emailRaw = currentUser?.email else { return [] }
+        let email = normalizedIdentity(emailRaw).lowercased()
+        if email.isEmpty { return [] }
+        return [email, "invite:\(email)"]
+    }
 
     // Sichtbarkeit: jeder sieht (a) Aufgaben, die ihm zugeteilt sind und (b) Aufgaben, die er anderen zugeteilt hat.
     private var assignedToMe: [Task] {
-        guard let user = currentUser else { return [] }
+        guard !currentIdentitySet.isEmpty else { return [] }
         return appState.tasks
-            .filter { $0.assignedUserId == user.id }
+            .filter { task in
+                currentIdentitySet.contains(normalizedIdentity(task.assignedUserId))
+            }
             .sorted { $0.createdAt > $1.createdAt }
     }
 
     private var assignedByMeToOthers: [Task] {
-        guard let user = currentUser else { return [] }
+        guard !currentIdentitySet.isEmpty else { return [] }
         return appState.tasks
-            .filter { $0.creatorUserId == user.id && $0.assignedUserId != user.id }
+            .filter { task in
+                let creator = normalizedIdentity(task.creatorUserId)
+                let assigned = normalizedIdentity(task.assignedUserId)
+                let isCreatedByMe =
+                    currentIdentitySet.contains(creator) ||
+                    legacyIdentitySet.contains(creator.lowercased())
+                let isAssignedToMe = currentIdentitySet.contains(assigned)
+                return isCreatedByMe && !isAssignedToMe
+            }
             .sorted { $0.createdAt > $1.createdAt }
     }
 
@@ -97,20 +131,26 @@ struct TasksView: View {
             .padding(.top, 8)
 
             if visibleTasks.isEmpty {
-                VStack(spacing: 14) {
-                    Text("Keine Aufgaben")
-                        .font(.title3)
-                        .fontWeight(.semibold)
+                ScrollView {
+                    VStack(spacing: 14) {
+                        Text("Keine Aufgaben")
+                            .font(.title3)
+                            .fontWeight(.semibold)
 
-                    Text(statusFilter == .open
-                         ? "Erstelle eine neue Aufgabe mit dem Plus-Button oben rechts."
-                         : "Es gibt aktuell keine erledigten Aufgaben in diesem Bereich.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
+                        Text(statusFilter == .open
+                             ? "Erstelle eine neue Aufgabe mit dem Plus-Button oben rechts."
+                             : "Es gibt aktuell keine erledigten Aufgaben in diesem Bereich.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 80)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .refreshable {
+                    await appState.refreshTasksFromServer()
+                }
                 .background(Color(.systemGroupedBackground))
             } else {
                 List {
@@ -133,6 +173,9 @@ struct TasksView: View {
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
                 .background(Color(.systemGroupedBackground))
+                .refreshable {
+                    await appState.refreshTasksFromServer()
+                }
             }
         }
         .gesture(
@@ -238,7 +281,7 @@ struct TaskRow: View {
                     .foregroundColor(.primary)
                     .strikethrough(task.status == .done, color: .secondary)
 
-                let detailsText = task.details ?? ""
+                let detailsText = task.details
                 if !detailsText.isEmpty {
                     Text(detailsText)
                         .font(.subheadline)
@@ -246,45 +289,20 @@ struct TaskRow: View {
                         .lineLimit(2)
                 }
 
-                HStack(spacing: 8) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 130), spacing: 8, alignment: .top)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
                     if let due = task.dueDate {
-                        HStack(spacing: 6) {
-                            Image(systemName: "calendar")
-                                .font(.caption2)
-                            Text("Fällig: \(formattedShort(due))")
-                                .font(.caption2.weight(.semibold))
-                        }
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Color(.secondarySystemBackground)))
+                        metaBadge(icon: "calendar", text: "Fällig: \(formattedShort(due))")
                     }
 
-                    HStack(spacing: 6) {
-                        Image(systemName: "person.crop.circle")
-                            .font(.caption2)
-                        Text("Von: \(creatorName)")
-                            .font(.caption2.weight(.semibold))
-                    }
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color(.secondarySystemBackground)))
+                    metaBadge(icon: "person.crop.circle", text: "Von: \(creatorName)")
 
                     if let current = appState.currentUser, task.assignedUserId != current.id {
-                        HStack(spacing: 6) {
-                            Image(systemName: "person")
-                                .font(.caption2)
-                            Text("An: \(assignedUserName)")
-                                .font(.caption2.weight(.semibold))
-                        }
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Color(.secondarySystemBackground)))
+                        metaBadge(icon: "person", text: "An: \(assignedUserName)")
                     }
-
-                    Spacer(minLength: 0)
                 }
                 .padding(.top, 2)
             }
@@ -328,6 +346,29 @@ struct TaskRow: View {
         let df = DateFormatter()
         df.dateStyle = .short
         return df.string(from: date)
+    }
+
+    private func metaBadge(icon: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: icon)
+                .font(.caption2)
+                .frame(width: 12, alignment: .leading)
+                .padding(.top, 2)
+
+            Text(text)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.9)
+                .multilineTextAlignment(.leading)
+        }
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(.tertiarySystemBackground))
+        )
     }
 }
 
@@ -443,6 +484,16 @@ struct NewTaskView: View {
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || appState.currentUser == nil)
             }
         }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                focusedField = nil
+                #if canImport(UIKit)
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                                to: nil, from: nil, for: nil)
+                #endif
+            }
+        )
+        .scrollDismissesKeyboard(.interactively)
         .onAppear { configureInitialState() }
         .onChange(of: assignableUsers.count) { _ in
             guard let current = appState.currentUser else { return }
@@ -457,7 +508,7 @@ struct NewTaskView: View {
 
         if let task = task {
             title = task.title
-            details = task.details ?? ""
+            details = task.details
             if let due = task.dueDate {
                 dueDate = due
                 hasDueDate = true

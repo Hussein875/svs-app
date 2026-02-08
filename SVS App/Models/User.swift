@@ -15,6 +15,7 @@ struct User: Identifiable, Hashable, Codable {
     var colorName: String
     var annualLeaveDays: Int
     var email: String
+    var birthday: Date? = nil
 
     var color: Color {
         Color.svsAccentColor(from: colorName)

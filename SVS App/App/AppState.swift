@@ -17,17 +17,20 @@ struct UserProfile: Codable {
     var colorName: String
     var annualLeaveDays: Int
     var email: String
+    var birthday: Date?
 
     init(name: String,
          roleRaw: String,
          colorName: String,
          annualLeaveDays: Int,
-         email: String) {
+         email: String,
+         birthday: Date? = nil) {
         self.name = name
         self.roleRaw = roleRaw
         self.colorName = colorName
         self.annualLeaveDays = annualLeaveDays
         self.email = email
+        self.birthday = birthday
     }
 
     init(from user: User) {
@@ -36,6 +39,7 @@ struct UserProfile: Codable {
         self.colorName = user.colorName
         self.annualLeaveDays = user.annualLeaveDays
         self.email = user.email
+        self.birthday = user.birthday
     }
 
     init?(from data: [String: Any]) {
@@ -52,16 +56,30 @@ struct UserProfile: Codable {
         self.colorName = colorName
         self.annualLeaveDays = annualLeaveDays
         self.email = email
+        if let ts = data["birthday"] as? Timestamp {
+            self.birthday = ts.dateValue()
+        } else if let d = data["birthday"] as? Date {
+            self.birthday = d
+        } else if let s = data["birthday"] as? String {
+            let iso = ISO8601DateFormatter()
+            self.birthday = iso.date(from: s)
+        } else {
+            self.birthday = nil
+        }
     }
 
     func toDictionary() -> [String: Any] {
-        [
+        var dict: [String: Any] = [
             "name": name,
             "roleRaw": roleRaw,
             "colorName": colorName,
             "annualLeaveDays": annualLeaveDays,
             "email": email
         ]
+        if let birthday {
+            dict["birthday"] = Timestamp(date: birthday)
+        }
+        return dict
     }
 
     func toUser(id: String) -> User {
@@ -71,7 +89,8 @@ struct UserProfile: Codable {
             role: UserRole(rawValue: roleRaw) ?? .employee,
             colorName: colorName,
             annualLeaveDays: annualLeaveDays,
-            email: email
+            email: email,
+            birthday: birthday
         )
     }
 }
@@ -86,6 +105,7 @@ class AppState: ObservableObject {
     private var leaveRequestsListener: ListenerRegistration?
     private var approvedLeaveRequestsListener: ListenerRegistration?
     private var tasksListener: ListenerRegistration?
+    private var tasksCreatedByMeListener: ListenerRegistration?
     private var commissionsListener: ListenerRegistration?
     
     // Run snapshot processing off the main thread
@@ -96,6 +116,10 @@ class AppState: ObservableObject {
     private var invitesSnapshotCache: [User] = []
     private var leaveRequestsOwnSnapshotCache: [LeaveRequest] = []
     private var leaveRequestsApprovedSnapshotCache: [LeaveRequest] = []
+    private var tasksAssignedSnapshotCache: [Task] = []
+    private var tasksCreatedByMeSnapshotCache: [Task] = []
+    private var pendingTaskWritesById: [UUID: Task] = [:]
+    private var pendingTaskDeletionIds: Set<UUID> = []
     
     @Published var auth = AuthManager()
     
@@ -201,17 +225,25 @@ class AppState: ObservableObject {
                                     email: String,
                                     role: UserRole,
                                     colorName: String,
-                                    annualLeaveDays: Int) async {
+                                    annualLeaveDays: Int,
+                                    birthday: Date? = nil) async {
         let functions = Functions.functions(region: "us-central1")
+        let iso = ISO8601DateFormatter()
+        let birthdayISO = birthday.map { iso.string(from: $0) }
         
         do {
-            let result = try await functions.httpsCallable("adminCreateUserInvite").call([
+            var payload: [String: Any] = [
                 "name": name,
                 "email": email,
                 "roleRaw": role.rawValue,
                 "colorName": colorName,
                 "annualLeaveDays": annualLeaveDays
-            ])
+            ]
+            if let birthdayISO {
+                payload["birthdayISO"] = birthdayISO
+            }
+
+            let result = try await functions.httpsCallable("adminCreateUserInvite").call(payload)
             
             if let data = result.data as? [String: Any], (data["ok"] as? Bool) == true {
                 // Jetzt kann der Admin direkt Passwort-Reset senden (Firebase verschickt E-Mail)
@@ -228,7 +260,8 @@ class AppState: ObservableObject {
                                 email: String,
                                 role: UserRole,
                                 colorName: String,
-                                annualLeaveDays: Int) async {
+                                annualLeaveDays: Int,
+                                birthday: Date? = nil) async {
         let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let cleanName  = name.trimmingCharacters(in: .whitespacesAndNewlines)
         
@@ -246,12 +279,17 @@ class AppState: ObservableObject {
             roleRaw: role.rawValue,
             colorName: colorName,
             annualLeaveDays: annualLeaveDays,
-            email: cleanEmail
+            email: cleanEmail,
+            birthday: birthday
         )
+        var profileData = profile.toDictionary()
+        if birthday == nil {
+            profileData["birthday"] = FieldValue.delete()
+        }
         
         do {
             // Admin legt zunächst ein Invite an (Quelle: E-Mail). Beim ersten Login wird es nach users/<uid> übernommen.
-            try await db.collection("invites").document(cleanEmail).setData(profile.toDictionary(), merge: true)
+            try await db.collection("invites").document(cleanEmail).setData(profileData, merge: true)
             self.uiErrorMessage = nil
         } catch {
             self.uiErrorMessage = "Profil konnte nicht gespeichert werden: \(error.localizedDescription)"
@@ -278,14 +316,20 @@ class AppState: ObservableObject {
         await loadOrCreateProfile(for: fbUser)
     }
     
-    func addUser(name: String, role: UserRole, colorName: String, annualLeaveDays: Int, email: String) {
+    func addUser(name: String,
+                 role: UserRole,
+                 colorName: String,
+                 annualLeaveDays: Int,
+                 email: String,
+                 birthday: Date? = nil) {
         let newUser = User(
             id: "invite:\(email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())",
             name: name,
             role: role,
             colorName: colorName,
             annualLeaveDays: annualLeaveDays,
-            email: email.trimmingCharacters(in: .whitespacesAndNewlines)
+            email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+            birthday: birthday
         )
         users.append(newUser)
     }
@@ -312,28 +356,50 @@ class AppState: ObservableObject {
         }
         
         // 2) Cloud sync (Admin only)
-        guard currentUser?.role == .admin else { return }
+        guard currentUser?.role == .admin else {
+            uiErrorMessage = "Nur Admins dürfen Benutzer bearbeiten."
+            return
+        }
         
         let cleanEmail = user.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !cleanEmail.isEmpty else { return }
+        let isInviteOnly = user.id.hasPrefix("invite:")
         
         let profile = UserProfile(from: user)
+        var profileData = profile.toDictionary()
+        if user.birthday == nil {
+            profileData["birthday"] = FieldValue.delete()
+        }
         
         _Concurrency.Task { [weak self] in
             guard let self else { return }
             do {
-                // Keep invite record in sync (for users who haven't logged in yet)
-                try await self.db.collection("invites").document(cleanEmail)
-                    .setData(profile.toDictionary(), merge: true)
+                // Primary update path: write the concrete users/<uid> doc directly.
+                // This is the source of truth for existing accounts.
+                if !isInviteOnly {
+                    try await self.db.collection("users").document(user.id)
+                        .setData(profileData, merge: true)
+                }
                 
-                // Update existing profile(s) in users collection (source of truth after first login)
+                // Legacy safety net: also update matching docs by email.
                 let qs = try await self.db.collection("users")
                     .whereField("email", isEqualTo: cleanEmail)
                     .getDocuments()
                 
                 for doc in qs.documents {
                     try await self.db.collection("users").document(doc.documentID)
-                        .setData(profile.toDictionary(), merge: true)
+                        .setData(profileData, merge: true)
+                }
+
+                // Keep invite record in sync for not-yet-activated users.
+                // Best effort: invite write should not block editing existing users.
+                do {
+                    try await self.db.collection("invites").document(cleanEmail)
+                        .setData(profileData, merge: true)
+                } catch {
+                    #if DEBUG
+                    print("[updateUser] invite sync skipped:", error.localizedDescription)
+                    #endif
                 }
                 
                 await MainActor.run { self.uiErrorMessage = nil }
@@ -346,35 +412,53 @@ class AppState: ObservableObject {
     }
     
     func deleteUser(_ user: User) {
-        // 1) Local UI state
-        users.removeAll { $0.id == user.id }
-        
-        // Also remove embedded user copies in leave requests (optional: keep historical; here we remove requests)
-        // If you want to keep history, comment this out.
-        leaveRequests.removeAll { $0.user.id == user.id }
-        
-        // 2) Cloud delete (Admin only)
-        guard currentUser?.role == .admin else { return }
-        
+        // Cloud delete (Admin only)
+        guard currentUser?.role == .admin else {
+            uiErrorMessage = "Nur Admins dürfen Benutzer löschen."
+            return
+        }
+
         let cleanEmail = user.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !cleanEmail.isEmpty else { return }
-        
+
         _Concurrency.Task { [weak self] in
             guard let self else { return }
             do {
-                // Remove invite record
-                try await self.db.collection("invites").document(cleanEmail).delete()
-                
-                // Remove profile(s) from users collection
-                let qs = try await self.db.collection("users")
-                    .whereField("email", isEqualTo: cleanEmail)
-                    .getDocuments()
-                
-                for doc in qs.documents {
-                    try await self.db.collection("users").document(doc.documentID).delete()
+                let isInviteOnly = user.id.hasPrefix("invite:")
+
+                // Delete Firebase Auth account for real users to prevent re-login.
+                if !isInviteOnly {
+                    let functions = Functions.functions(region: "us-central1")
+                    _ = try await functions.httpsCallable("adminDeleteUser").call([
+                        "uid": user.id
+                    ])
+                }
+
+                // Remove invite record (if known)
+                if !cleanEmail.isEmpty {
+                    try await self.db.collection("invites").document(cleanEmail).delete()
+                }
+
+                // Remove profile doc by uid when this is a real account.
+                if !isInviteOnly {
+                    try await self.db.collection("users").document(user.id).delete()
+                }
+
+                // Remove possible duplicates by email (legacy safety net).
+                if !cleanEmail.isEmpty {
+                    let qs = try await self.db.collection("users")
+                        .whereField("email", isEqualTo: cleanEmail)
+                        .getDocuments()
+
+                    for doc in qs.documents {
+                        try await self.db.collection("users").document(doc.documentID).delete()
+                    }
                 }
                 
-                await MainActor.run { self.uiErrorMessage = nil }
+                await MainActor.run {
+                    self.users.removeAll { $0.id == user.id }
+                    self.leaveRequests.removeAll { $0.user.id == user.id }
+                    self.uiErrorMessage = nil
+                }
             } catch {
                 await MainActor.run {
                     self.uiErrorMessage = "Profil konnte nicht gelöscht werden: \(error.localizedDescription)"
@@ -466,10 +550,11 @@ class AppState: ObservableObject {
         }
         
         // Status:
-        // - Krankheit: immer direkt eingetragen
-        // - Urlaub: entweder offen oder direkt genehmigt (Admin-Option)
+        // - Krankheit: immer direkt eingetragen (genehmigt)
+        // - Bereitschaft: sofort wirksam (genehmigt), damit sie im Kalender für alle sichtbar ist
+        // - Urlaub: offen
         let initialStatus: LeaveStatus
-        if type == .sick {
+        if type == .sick || type == .onCallSaturday {
             initialStatus = .approved
         } else {
             initialStatus = .pending
@@ -539,18 +624,72 @@ class AppState: ObservableObject {
         return request.type == .vacation && request.status == .pending
     }
 
+    private func normalizedIdentity(_ value: String?) -> String {
+        (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func canonicalCurrentUid(fallback user: User?) -> String? {
+        let authUid = normalizedIdentity(Auth.auth().currentUser?.uid)
+        if !authUid.isEmpty { return authUid }
+
+        let userId = normalizedIdentity(user?.id)
+        if !userId.isEmpty { return userId }
+        return nil
+    }
+
+    private func currentIdentitySet(for user: User?) -> Set<String> {
+        var ids = Set<String>()
+
+        let authUid = normalizedIdentity(Auth.auth().currentUser?.uid)
+        if !authUid.isEmpty { ids.insert(authUid) }
+
+        let userId = normalizedIdentity(user?.id)
+        if !userId.isEmpty { ids.insert(userId) }
+
+        return ids
+    }
+
+    private func legacyIdentitySet(for user: User?) -> Set<String> {
+        var ids = Set<String>()
+        let email = normalizedIdentity(user?.email).lowercased()
+        if email.isEmpty { return ids }
+        ids.insert(email)
+        ids.insert("invite:\(email)")
+        return ids
+    }
+
+    private func taskCreatorMatchesCurrentUser(_ task: Task, by user: User?) -> Bool {
+        let creator = normalizedIdentity(task.creatorUserId)
+        if creator.isEmpty { return false }
+
+        if currentIdentitySet(for: user).contains(creator) {
+            return true
+        }
+
+        return legacyIdentitySet(for: user).contains(creator.lowercased())
+    }
+
+    private func taskAssigneeMatchesCurrentUser(_ task: Task, by user: User?) -> Bool {
+        let assigned = normalizedIdentity(task.assignedUserId)
+        if assigned.isEmpty { return false }
+        return currentIdentitySet(for: user).contains(assigned)
+    }
+
     /// Task-Rechte:
     /// - Admin: darf immer bearbeiten/löschen
-    /// - Nicht-Admins: dürfen bearbeiten/löschen, wenn Task ihnen zugewiesen ist
+    /// - Nicht-Admins: dürfen bearbeiten, wenn sie Ersteller ODER Zuständiger sind
     func canEditTask(_ task: Task, by user: User?) -> Bool {
         guard let user else { return false }
         if user.role == .admin { return true }
-        return task.assignedUserId == user.id
+        return taskAssigneeMatchesCurrentUser(task, by: user) ||
+               taskCreatorMatchesCurrentUser(task, by: user)
     }
 
     func canDeleteTask(_ task: Task, by user: User?) -> Bool {
-        // Aktuell identisch zu canEditTask – separiert für spätere Regeln
-        canEditTask(task, by: user)
+        // Keep client behavior aligned with Firestore rules.
+        guard let user else { return false }
+        if user.role == .admin { return true }
+        return taskCreatorMatchesCurrentUser(task, by: user)
     }
     
     @discardableResult
@@ -599,20 +738,25 @@ class AppState: ObservableObject {
                     dueDate: Date?,
                     assignedUser: User,
                     creator: User) {
+        let creatorUid = canonicalCurrentUid(fallback: creator) ?? creator.id
+        let assignedUid = normalizedIdentity(assignedUser.id)
+
         let newTask = Task(
             id: UUID(),
             title: title,
             details: details,
             dueDate: dueDate,
             status: .open,
-            assignedUserId: assignedUser.id,
-            creatorUserId: creator.id,
+            assignedUserId: assignedUid.isEmpty ? assignedUser.id : assignedUid,
+            creatorUserId: normalizedIdentity(creatorUid),
             createdAt: Date(),
             updatedAt: nil
         )
 
         // Optimistic UI
-        tasks.insert(newTask, at: 0)
+        pendingTaskDeletionIds.remove(newTask.id)
+        pendingTaskWritesById[newTask.id] = newTask
+        mergeTaskSnapshotsAndPublish()
         upsertTaskToFirestore(newTask)
     }
 
@@ -625,11 +769,9 @@ class AppState: ObservableObject {
         var patched = task
         patched.updatedAt = Date()
 
-        if let index = tasks.firstIndex(where: { $0.id == task.id }) {
-            tasks[index] = patched
-        } else {
-            tasks.insert(patched, at: 0)
-        }
+        pendingTaskDeletionIds.remove(patched.id)
+        pendingTaskWritesById[patched.id] = patched
+        mergeTaskSnapshotsAndPublish()
 
         upsertTaskToFirestore(patched)
     }
@@ -651,8 +793,47 @@ class AppState: ObservableObject {
             return
         }
 
+        pendingTaskWritesById.removeValue(forKey: task.id)
+        pendingTaskDeletionIds.insert(task.id)
+        mergeTaskSnapshotsAndPublish()
         deleteTaskFromFirestore(task)
-        tasks.removeAll { $0.id == task.id }
+    }
+
+    @MainActor
+    func refreshTasksFromServer() async {
+        guard let me = currentUser else { return }
+        guard let meUid = canonicalCurrentUid(fallback: me), !meUid.isEmpty else { return }
+
+        do {
+            if me.role == .admin {
+                let snap = try await db.collection("tasks")
+                    .order(by: "createdAt", descending: true)
+                    .getDocuments(source: .server)
+
+                tasksAssignedSnapshotCache = mapTasksFromDocs(snap.documents)
+                tasksCreatedByMeSnapshotCache = []
+                mergeTaskSnapshotsAndPublish()
+            } else {
+                async let assignedSnap = db.collection("tasks")
+                    .whereField("assignedUserId", isEqualTo: meUid)
+                    .getDocuments(source: .server)
+
+                async let createdSnap = db.collection("tasks")
+                    .whereField("creatorUserId", isEqualTo: meUid)
+                    .getDocuments(source: .server)
+
+                let (assigned, created) = try await (assignedSnap, createdSnap)
+                tasksAssignedSnapshotCache = mapTasksFromDocs(assigned.documents)
+                tasksCreatedByMeSnapshotCache = mapTasksFromDocs(created.documents)
+                mergeTaskSnapshotsAndPublish()
+            }
+
+            uiErrorMessage = nil
+        } catch {
+            let msg = "Tasks konnten nicht aktualisiert werden: \(error.localizedDescription)"
+            uiErrorMessage = msg
+            showToast(.error, msg)
+        }
     }
     
     // MARK: - Firestore Commissions DTO
@@ -1029,8 +1210,8 @@ class AppState: ObservableObject {
             self.title = title
             self.details = details
             self.statusRaw = statusRaw
-            self.assignedUserId = assignedUserId
-            self.creatorUserId = creatorUserId
+            self.assignedUserId = assignedUserId.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.creatorUserId = creatorUserId.trimmingCharacters(in: .whitespacesAndNewlines)
             self.createdAt = createdAt
             self.dueDate = data["dueDate"] as? Timestamp
             self.updatedAt = data["updatedAt"] as? Timestamp
@@ -1041,8 +1222,8 @@ class AppState: ObservableObject {
             self.title = task.title
             self.details = task.details
             self.statusRaw = task.status.rawValue
-            self.assignedUserId = task.assignedUserId
-            self.creatorUserId = task.creatorUserId
+            self.assignedUserId = task.assignedUserId.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.creatorUserId = task.creatorUserId.trimmingCharacters(in: .whitespacesAndNewlines)
             self.createdAt = Timestamp(date: task.createdAt)
             self.dueDate = task.dueDate.map { Timestamp(date: $0) }
             self.updatedAt = task.updatedAt.map { Timestamp(date: $0) }
@@ -1065,24 +1246,94 @@ class AppState: ObservableObject {
 
     // MARK: - Firestore Tasks Listener
 
-    private func startTasksListenerIfNeeded() {
-        guard tasksListener == nil else { return }
-        guard let me = currentUser else { return }
+    private func mapTasksFromDocs(_ docs: [QueryDocumentSnapshot]) -> [Task] {
+        docs.compactMap { doc in
+            guard let dto = TaskDTO(id: doc.documentID, data: doc.data()) else { return nil }
+            guard let uuid = UUID(uuidString: dto.id) else { return nil }
 
-        var query: Query = db.collection("tasks")
+            let status = TaskStatus(rawValue: dto.statusRaw) ?? .open
 
-        // Admin: sieht alles, andere: nur zugewiesene Tasks
-        if me.role != .admin {
-            query = query.whereField("assignedUserId", isEqualTo: me.id)
+            return Task(
+                id: uuid,
+                title: dto.title,
+                details: dto.details,
+                dueDate: dto.dueDate?.dateValue(),
+                status: status,
+                assignedUserId: normalizedIdentity(dto.assignedUserId),
+                creatorUserId: normalizedIdentity(dto.creatorUserId),
+                createdAt: dto.createdAt.dateValue(),
+                updatedAt: dto.updatedAt?.dateValue()
+            )
+        }
+    }
+
+    private func mergeTaskSnapshotsAndPublish() {
+        var byId: [UUID: Task] = [:]
+        for task in tasksAssignedSnapshotCache { byId[task.id] = task }
+        for task in tasksCreatedByMeSnapshotCache { byId[task.id] = task }
+
+        // Snapshot has this task now -> no longer pending.
+        for id in byId.keys {
+            pendingTaskWritesById.removeValue(forKey: id)
+            pendingTaskDeletionIds.remove(id)
         }
 
-        query = query.order(by: "createdAt", descending: true)
+        // Keep local deletes hidden until server/listener catches up.
+        for id in pendingTaskDeletionIds {
+            byId.removeValue(forKey: id)
+        }
 
-        tasksListener = query.addSnapshotListener(includeMetadataChanges: false) { [weak self] snapshot, error in
+        // Keep local creates/updates visible immediately.
+        for (id, task) in pendingTaskWritesById where !pendingTaskDeletionIds.contains(id) {
+            byId[id] = task
+        }
+
+        let merged = Array(byId.values).sorted { $0.createdAt > $1.createdAt }
+        DispatchQueue.main.async { [weak self] in
+            self?.tasks = merged
+        }
+    }
+
+    private func startTasksListenerIfNeeded() {
+        guard tasksListener == nil else { return }
+        guard tasksCreatedByMeListener == nil else { return }
+        guard let me = currentUser else { return }
+        guard let meUid = canonicalCurrentUid(fallback: me), !meUid.isEmpty else { return }
+
+        // Admin: sieht alles in einem Listener.
+        if me.role == .admin {
+            let query = db.collection("tasks").order(by: "createdAt", descending: true)
+            tasksListener = query.addSnapshotListener(includeMetadataChanges: false) {
+                [weak self] snapshot, error in
+                guard let self else { return }
+                if let error {
+                    DispatchQueue.main.async {
+                        self.uiErrorMessage = "Tasks konnten nicht geladen werden: \(error.localizedDescription)"
+                    }
+                    return
+                }
+
+                let docs = snapshot?.documents ?? []
+                self.firestoreListenerQueue.async { [weak self] in
+                    guard let self else { return }
+                    self.tasksAssignedSnapshotCache = self.mapTasksFromDocs(docs)
+                    self.tasksCreatedByMeSnapshotCache = []
+                    self.mergeTaskSnapshotsAndPublish()
+                }
+            }
+            return
+        }
+
+        // Non-admin: merge two sources
+        let assignedQuery = db.collection("tasks")
+            .whereField("assignedUserId", isEqualTo: meUid)
+
+        tasksListener = assignedQuery.addSnapshotListener(includeMetadataChanges: false) {
+            [weak self] snapshot, error in
             guard let self else { return }
             if let error {
                 DispatchQueue.main.async {
-                    self.uiErrorMessage = "Tasks konnten nicht geladen werden: \(error.localizedDescription)"
+                    self.uiErrorMessage = "Tasks (für mich) konnten nicht geladen werden: \(error.localizedDescription)"
                 }
                 return
             }
@@ -1091,29 +1342,30 @@ class AppState: ObservableObject {
 
             self.firestoreListenerQueue.async { [weak self] in
                 guard let self else { return }
+                self.tasksAssignedSnapshotCache = self.mapTasksFromDocs(docs)
+                self.mergeTaskSnapshotsAndPublish()
+            }
+        }
 
-                let mapped: [Task] = docs.compactMap { doc in
-                    guard let dto = TaskDTO(id: doc.documentID, data: doc.data()) else { return nil }
-                    guard let uuid = UUID(uuidString: dto.id) else { return nil }
+        let createdByMeQuery = db.collection("tasks")
+            .whereField("creatorUserId", isEqualTo: meUid)
 
-                    let status = TaskStatus(rawValue: dto.statusRaw) ?? .open
-
-                    return Task(
-                        id: uuid,
-                        title: dto.title,
-                        details: dto.details,
-                        dueDate: dto.dueDate?.dateValue(),
-                        status: status,
-                        assignedUserId: dto.assignedUserId,
-                        creatorUserId: dto.creatorUserId,
-                        createdAt: dto.createdAt.dateValue(),
-                        updatedAt: dto.updatedAt?.dateValue()
-                    )
+        tasksCreatedByMeListener = createdByMeQuery.addSnapshotListener(includeMetadataChanges: false) {
+            [weak self] snapshot, error in
+            guard let self else { return }
+            if let error {
+                DispatchQueue.main.async {
+                    self.uiErrorMessage = "Tasks (von mir) konnten nicht geladen werden: \(error.localizedDescription)"
                 }
+                return
+            }
 
-                DispatchQueue.main.async { [weak self] in
-                    self?.tasks = mapped
-                }
+            let docs = snapshot?.documents ?? []
+
+            self.firestoreListenerQueue.async { [weak self] in
+                guard let self else { return }
+                self.tasksCreatedByMeSnapshotCache = self.mapTasksFromDocs(docs)
+                self.mergeTaskSnapshotsAndPublish()
             }
         }
     }
@@ -1129,6 +1381,8 @@ class AppState: ObservableObject {
             } catch {
                 let msg = "Task konnte nicht gespeichert werden: \(error.localizedDescription)"
                 await MainActor.run {
+                    self.pendingTaskWritesById.removeValue(forKey: task.id)
+                    self.mergeTaskSnapshotsAndPublish()
                     self.uiErrorMessage = msg
                     self.showToast(.error, msg)
                 }
@@ -1143,10 +1397,10 @@ class AppState: ObservableObject {
             do {
                 try await self.db.collection("tasks").document(docId).delete()
             } catch {
-                let msg = "Task konnte nicht gelöscht werden: \(error.localizedDescription)"
+                // Kein Nutzer-Fehlerbanner hier: In manchen Fällen ist der Delete
+                // serverseitig bereits durch, obwohl lokal ein Fehler zurückkommt.
                 await MainActor.run {
-                    self.uiErrorMessage = msg
-                    self.showToast(.error, msg)
+                    self.uiErrorMessage = nil
                 }
             }
         }
@@ -1303,28 +1557,47 @@ class AppState: ObservableObject {
 
             // 3) No profile yet -> create fallback
             let isBootstrapAdmin = (email == "hussein@sv-souleiman.de")
-            let fallback = UserProfile(
-                name: fbUser.displayName ?? email,
-                roleRaw: isBootstrapAdmin ? UserRole.admin.rawValue : UserRole.employee.rawValue,
-                colorName: "blue",
-                annualLeaveDays: 30,
-                email: email
-            )
-            try await docRef.setData(fallback.toDictionary(), merge: true)
+            if isBootstrapAdmin {
+                let fallback = UserProfile(
+                    name: fbUser.displayName ?? email,
+                    roleRaw: UserRole.admin.rawValue,
+                    colorName: "blue",
+                    annualLeaveDays: 30,
+                    email: email
+                )
+                try await docRef.setData(fallback.toDictionary(), merge: true)
 
-            let mapped = fallback.toUser(id: uid)
-            await MainActor.run {
-                self.currentUser = mapped
-                self.isProfileReady = true
-                self.didStartRealtimeListeners = false
-                self.uiErrorMessage = isBootstrapAdmin ? nil : "Mitarbeiter-Profil wurde neu angelegt. Bitte im Admin-Bereich prüfen."
+                let mapped = fallback.toUser(id: uid)
+                await MainActor.run {
+                    self.currentUser = mapped
+                    self.isProfileReady = true
+                    self.didStartRealtimeListeners = false
+                    self.uiErrorMessage = nil
 
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-                    guard let self else { return }
-                    guard self.currentUser?.id == uid, self.auth.user != nil else { return }
-                    self.startRealtimeListenersIfNeeded()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                        guard let self else { return }
+                        guard self.currentUser?.id == uid, self.auth.user != nil else { return }
+                        self.startRealtimeListenersIfNeeded()
+                    }
                 }
+                return
             }
+
+            // Security: do not auto-create regular employee profiles without an invite.
+            do {
+                try Auth.auth().signOut()
+            } catch {
+                // Keep going; we still block access in local state below.
+            }
+
+            await MainActor.run {
+                self.stopUsersListeners()
+                self.currentUser = nil
+                self.isProfileReady = false
+                self.didStartRealtimeListeners = false
+                self.uiErrorMessage = "Kein freigeschaltetes Profil gefunden. Bitte den Admin kontaktieren."
+            }
+            return
         } catch {
             await MainActor.run {
                 self.isProfileReady = false
@@ -1356,7 +1629,8 @@ class AppState: ObservableObject {
                     a.name != b.name ||
                     a.role != b.role ||
                     a.colorName != b.colorName ||
-                    a.annualLeaveDays != b.annualLeaveDays {
+                    a.annualLeaveDays != b.annualLeaveDays ||
+                    a.birthday != b.birthday {
                     same = false
                     break
                 }
@@ -1375,12 +1649,17 @@ class AppState: ObservableObject {
         leaveRequestsListener?.remove(); leaveRequestsListener = nil
         approvedLeaveRequestsListener?.remove(); approvedLeaveRequestsListener = nil
         tasksListener?.remove(); tasksListener = nil
+        tasksCreatedByMeListener?.remove(); tasksCreatedByMeListener = nil
         commissionsListener?.remove(); commissionsListener = nil
         usersSnapshotCache = []
         invitesSnapshotCache = []
         leaveRequests = []
         leaveRequestsOwnSnapshotCache = []
         leaveRequestsApprovedSnapshotCache = []
+        tasksAssignedSnapshotCache = []
+        tasksCreatedByMeSnapshotCache = []
+        pendingTaskWritesById = [:]
+        pendingTaskDeletionIds = []
         tasks = []
         commissions = []
         didStartRealtimeListeners = false
@@ -1662,7 +1941,9 @@ class AppState: ObservableObject {
                     .setData(dto.toDictionary(), merge: true)
             } catch {
                 await MainActor.run {
-                    self.uiErrorMessage = "Abwesenheit konnte nicht gespeichert werden: \(error.localizedDescription)"
+                    let msg = "Abwesenheit konnte nicht gespeichert werden: \(error.localizedDescription)"
+                    self.uiErrorMessage = msg
+                    self.showToast(.error, msg)
                 }
             }
         }

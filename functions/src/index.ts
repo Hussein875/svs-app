@@ -69,12 +69,29 @@ export const adminCreateUserInvite = onCall(async (request) => {
   const roleRaw = String(data.roleRaw ?? "employee") as Role;
   const colorName = String(data.colorName ?? "blue");
   const annualLeaveDays = Number(data.annualLeaveDays ?? 30);
+  const birthdayISO = String(data.birthdayISO ?? "").trim();
 
   if (!email || !email.includes("@")) {
     throw new HttpsError("invalid-argument", "Invalid email.");
   }
   if (!name) {
     throw new HttpsError("invalid-argument", "Name required.");
+  }
+
+  let birthdayTs: admin.firestore.Timestamp | null = null;
+  if (birthdayISO) {
+    const birthdayDate = new Date(birthdayISO);
+    if (Number.isNaN(birthdayDate.getTime())) {
+      throw new HttpsError("invalid-argument", "Invalid birthdayISO.");
+    }
+    // Normalize to 12:00 UTC to avoid day-shifts around timezones.
+    const normalized = new Date(Date.UTC(
+      birthdayDate.getUTCFullYear(),
+      birthdayDate.getUTCMonth(),
+      birthdayDate.getUTCDate(),
+      12, 0, 0, 0
+    ));
+    birthdayTs = admin.firestore.Timestamp.fromDate(normalized);
   }
 
   // 4) Auth-User anlegen (falls nicht existiert)
@@ -101,6 +118,7 @@ export const adminCreateUserInvite = onCall(async (request) => {
     colorName,
     annualLeaveDays,
     email,
+    ...(birthdayTs ? {birthday: birthdayTs} : {}),
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     createdByUid: callerUid,
   };

@@ -11,6 +11,8 @@ struct DayCell: View {
     let date: Date
     let isCurrentMonth: Bool
     let isSelected: Bool
+    let isToday: Bool
+    let hasBirthday: Bool
     let approvedColors: [Color]
     let isHoliday: Bool
     
@@ -28,53 +30,63 @@ struct DayCell: View {
         return AnyView(
             VStack(spacing: 3) {
                 Text("\(day)")
-                    .font(.caption)
+                    .font(.caption.weight(dayNumberWeight))
                     .frame(maxWidth: .infinity)
-                    .foregroundColor(isHoliday ? .red : .primary)
+                    .foregroundColor(dayNumberColor)
                     .padding(.top, 1)
-                
-                // Indicator-Bars (Apple-like)
+
+                // Untere Marker für Urlaub/Krankheit/Bereitschaft
                 indicators
-                    .frame(height: 5) // kleiner als vorher
+                    .frame(height: 5)
             }
-                .frame(maxWidth: .infinity, minHeight: 36)
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
-                )
-                .animation(.easeInOut(duration: 0.15), value: isSelected)
+            .frame(maxWidth: .infinity, minHeight: 36)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.clear)
+            )
+            .animation(.easeInOut(duration: 0.15), value: isSelected)
         )
     }
-    
-    
+
     private var indicators: some View {
         let unique = Array(orderedUniqueColors(approvedColors))
         let maxBars = 3
         let shown = Array(unique.prefix(maxBars))
         let hasMore = unique.count > maxBars
-        
+
         return HStack(spacing: 3) {
             ForEach(Array(shown.enumerated()), id: \.offset) { _, c in
                 Capsule()
                     .fill(c.opacity(isCurrentMonth ? 0.95 : 0.35))
                     .frame(height: 3)
             }
-            
+
             if hasMore {
                 Circle()
                     .fill(Color.secondary.opacity(0.7))
                     .frame(width: 3, height: 3)
             }
-            
-            // Wenn keine Anträge: unsichtbar, aber gleicher Platz
+
             if shown.isEmpty && !hasMore {
                 Capsule().fill(Color.clear).frame(height: 3)
             }
         }
         .padding(.horizontal, 6)
     }
-    
+
+    private var dayNumberColor: Color {
+        if isToday || isHoliday || hasBirthday { return .red }
+        return .primary
+    }
+
+    private var dayNumberWeight: Font.Weight {
+        if isToday || isHoliday || hasBirthday {
+            return .semibold
+        }
+        return .regular
+    }
+
     private func orderedUniqueColors(_ colors: [Color]) -> [Color] {
         var result: [Color] = []
         for c in colors {

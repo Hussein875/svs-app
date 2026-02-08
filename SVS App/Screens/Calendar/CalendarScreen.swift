@@ -102,6 +102,24 @@ struct CalendarScreen: View {
                             .foregroundColor(.red)
                     }
 
+                    let birthdays = appState.users
+                        .filter { isUsersBirthday($0, on: selectedDate) }
+                        .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+                    ForEach(birthdays, id: \.id) { user in
+                        HStack(spacing: 8) {
+                            Image(systemName: "gift.fill")
+                                .font(.caption)
+                                .foregroundColor(.pink)
+                            Text(user.name)
+                                .font(.headline)
+                                .foregroundColor(user.color)
+                            Text("hat Geburtstag")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
                     let requests = appState.requests(for: selectedDate).filter { r in
                         // Abwesenheiten: nur genehmigte anzeigen
                         // Samstagsbereitschaft: auch "submitted" anzeigen (alles außer abgelehnt)
@@ -110,7 +128,7 @@ struct CalendarScreen: View {
                         }
                         return r.status == .approved
                     }
-                    if requests.isEmpty {
+                    if requests.isEmpty && birthdays.isEmpty {
                         Text("Keine Einträge")
                             .foregroundColor(.secondary)
                     } else {
@@ -123,8 +141,14 @@ struct CalendarScreen: View {
                                 Text(displayUser.name)
                                     .font(.headline)
                                     .foregroundColor(displayUser.color)
-                                Text(r.type == .onCallSaturday ? "Bereitschaft" : r.type.rawValue)
-                                    .font(.caption)
+                                HStack(spacing: 6) {
+                                    Image(systemName: leaveTypeIconName(r.type))
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                    Text(r.type == .onCallSaturday ? "Bereitschaft" : r.type.rawValue)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
                             }
                         }
                     }
@@ -139,6 +163,25 @@ struct CalendarScreen: View {
 
     func dateRange(_ start: Date, _ end: Date) -> String {
         dateRangeString(start, end)
+    }
+
+    private func leaveTypeIconName(_ type: LeaveType) -> String {
+        switch type {
+        case .vacation:
+            return "beach.umbrella"
+        case .sick:
+            return "cross.case"
+        case .onCallSaturday:
+            return "person.badge.clock"
+        }
+    }
+
+    private func isUsersBirthday(_ user: User, on date: Date) -> Bool {
+        guard let birthday = user.birthday else { return false }
+        let cal = Calendar.current
+        let bComps = cal.dateComponents([.month, .day], from: birthday)
+        let dComps = cal.dateComponents([.month, .day], from: date)
+        return bComps.month == dComps.month && bComps.day == dComps.day
     }
     
     private func shiftMonth(by delta: Int) {
@@ -316,7 +359,7 @@ struct CalendarGrid: View {
                 }
             }
             LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(days, id: \.self) { date in
+                ForEach(Array(days.enumerated()), id: \.offset) { _, date in
                     let isCurrentMonth = Calendar.current.isDate(date, equalTo: currentMonth, toGranularity: .month)
 
                     let approvedRequests = isCurrentMonth
@@ -334,12 +377,16 @@ struct CalendarGrid: View {
                         }
                         return req.user.color
                     }
+                    let hasBirthdayEntry = isCurrentMonth && hasBirthday(on: date)
                     let isHoliday = isCurrentMonth ? isPublicHolidayBremen(date) : false
+                    let isToday = isCurrentMonth && Calendar.current.isDateInToday(date)
 
                     DayCell(
                         date: date,
                         isCurrentMonth: isCurrentMonth,
                         isSelected: isCurrentMonth && Calendar.current.isDate(date, inSameDayAs: selectedDate),
+                        isToday: isToday,
+                        hasBirthday: hasBirthdayEntry,
                         approvedColors: markerColors,
                         isHoliday: isHoliday
                     )
@@ -354,5 +401,15 @@ struct CalendarGrid: View {
             }
         }
         .padding(.vertical, 6)
+    }
+
+    private func hasBirthday(on date: Date) -> Bool {
+        let cal = Calendar.current
+        let day = cal.dateComponents([.month, .day], from: date)
+        return appState.users.contains { user in
+            guard let birthday = user.birthday else { return false }
+            let birthdayDay = cal.dateComponents([.month, .day], from: birthday)
+            return birthdayDay.month == day.month && birthdayDay.day == day.day
+        }
     }
 }

@@ -9,6 +9,7 @@ import SwiftUI
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseMessaging
+import UIKit
 
 struct MenuView: View {
     @EnvironmentObject var appState: AppState
@@ -204,44 +205,61 @@ struct MenuView: View {
     }
     
     private func removeCurrentDevicePushToken(for userId: String) async throws {
-        guard let token = Messaging.messaging().fcmToken, !token.isEmpty else {
+        let token = Messaging.messaging().fcmToken
+        let deviceId = UIDevice.current.identifierForVendor?.uuidString
+        let hasToken = token?.isEmpty == false
+        let hasDeviceId = deviceId?.isEmpty == false
+
+        guard hasToken || hasDeviceId else {
             return
         }
 
         let db = Firestore.firestore()
         let userRef = db.collection("users").document(userId)
 
-        // Remove from an array field (common schema)
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            userRef.setData([
-                "fcmTokens": FieldValue.arrayRemove([token]),
-                "updatedAt": FieldValue.serverTimestamp()
-            ], merge: true) { err in
-                if let err {
-                    cont.resume(throwing: err)
-                } else {
-                    cont.resume(returning: ())
-                }
-            }
-        }
-
-        // Also try deleting a device doc (alternative schema). Ignore if it doesn't exist.
-        do {
+        if let token, !token.isEmpty {
+            // Remove from array field if present (legacy schema).
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-                userRef.collection("devices").document(token).delete { _ in
-                    // Best effort: ignore errors here
-                    cont.resume(returning: ())
+                userRef.setData([
+                    "fcmTokens": FieldValue.arrayRemove([token]),
+                    "updatedAt": FieldValue.serverTimestamp()
+                ], merge: true) { err in
+                    if let err {
+                        cont.resume(throwing: err)
+                    } else {
+                        cont.resume(returning: ())
+                    }
                 }
             }
         }
 
-        // Finally, delete the local token so this device stops receiving until next sign-in.
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            Messaging.messaging().deleteToken { err in
-                if let err {
-                    cont.resume(throwing: err)
-                } else {
-                    cont.resume(returning: ())
+        // Remove device registration from the active schema: users/<uid>/devices/<deviceId>
+        if let deviceId, !deviceId.isEmpty {
+            do {
+                try await userRef.collection("devices").document(deviceId).delete()
+            } catch {
+                // Best effort.
+            }
+        }
+
+        // Backward-compatible cleanup if older entries used token as document id.
+        if let token, !token.isEmpty, token != deviceId {
+            do {
+                try await userRef.collection("devices").document(token).delete()
+            } catch {
+                // Best effort.
+            }
+        }
+
+        if hasToken {
+            // Finally, delete local token so this device stops receiving until next sign-in.
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                Messaging.messaging().deleteToken { err in
+                    if let err {
+                        cont.resume(throwing: err)
+                    } else {
+                        cont.resume(returning: ())
+                    }
                 }
             }
         }

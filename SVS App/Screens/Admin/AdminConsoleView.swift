@@ -705,6 +705,12 @@ struct EditUserView: View {
         let role: UserRole
         let annualLeaveDays: Int
         let colorName: String
+        let birthday: Date?
+    }
+
+    private func normalizedBirthday(_ date: Date?) -> Date? {
+        guard let date else { return nil }
+        return Calendar.current.startOfDay(for: date)
     }
 
     private var hasUnsavedChanges: Bool {
@@ -713,7 +719,8 @@ struct EditUserView: View {
             name: user.name,
             role: user.role,
             annualLeaveDays: user.annualLeaveDays,
-            colorName: user.colorName
+            colorName: user.colorName,
+            birthday: normalizedBirthday(user.birthday)
         )
     }
 
@@ -756,6 +763,31 @@ struct EditUserView: View {
                 }
             }
 
+            Section(header: Text("Geburtstag")) {
+                HStack(spacing: 10) {
+                    DatePicker(
+                        "Geburtstag",
+                        selection: Binding(
+                            get: { user.birthday ?? (Calendar.current.date(from: DateComponents(year: 1990, month: 1, day: 1)) ?? Date()) },
+                            set: { user.birthday = Calendar.current.startOfDay(for: $0) }
+                        ),
+                        displayedComponents: .date
+                    )
+                    .datePickerStyle(.compact)
+
+                    if user.birthday != nil {
+                        Button {
+                            user.birthday = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Geburtstag entfernen")
+                    }
+                }
+            }
+
             Section {
                 Button("Mitarbeiter löschen", role: .destructive) {
                     appState.deleteUser(user)
@@ -773,7 +805,8 @@ struct EditUserView: View {
                         name: user.name,
                         role: user.role,
                         annualLeaveDays: user.annualLeaveDays,
-                        colorName: user.colorName
+                        colorName: user.colorName,
+                        birthday: normalizedBirthday(user.birthday)
                     )
                     dismiss()
                 }
@@ -812,7 +845,8 @@ struct EditUserView: View {
                     name: user.name,
                     role: user.role,
                     annualLeaveDays: user.annualLeaveDays,
-                    colorName: user.colorName
+                    colorName: user.colorName,
+                    birthday: normalizedBirthday(user.birthday)
                 )
             }
         }
@@ -849,6 +883,7 @@ struct AddUserView: View {
     @State private var role: UserRole = .employee
     @State private var annualLeaveDays: Int = 24
     @State private var colorName: String = "gray"
+    @State private var birthday: Date? = nil
     @State private var isCreating: Bool = false
 
     private let availableColors = UserColor.allCases
@@ -883,6 +918,31 @@ struct AddUserView: View {
                 }
             }
 
+            Section(header: Text("Geburtstag")) {
+                HStack(spacing: 10) {
+                    DatePicker(
+                        "Geburtstag",
+                        selection: Binding(
+                            get: { birthday ?? (Calendar.current.date(from: DateComponents(year: 1990, month: 1, day: 1)) ?? Date()) },
+                            set: { birthday = Calendar.current.startOfDay(for: $0) }
+                        ),
+                        displayedComponents: .date
+                    )
+                        .datePickerStyle(.compact)
+
+                    if birthday != nil {
+                        Button {
+                            birthday = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Geburtstag entfernen")
+                    }
+                }
+            }
+
             Section {
                 Button {
                     let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -897,7 +957,8 @@ struct AddUserView: View {
                             email: cleanEmail,
                             role: role,
                             colorName: colorName,
-                            annualLeaveDays: annualLeaveDays
+                            annualLeaveDays: annualLeaveDays,
+                            birthday: birthday.map { Calendar.current.startOfDay(for: $0) }
                         )
 
                         isCreating = false
@@ -1216,9 +1277,17 @@ struct EditOnCallSaturdayView: View {
     @State private var didLoadInitialValues: Bool = false
     
     private var eligibleUsers: [User] {
-        appState.users
-            .filter { $0.role == .expert || $0.role == .admin }
-            .sorted { $0.name.lowercased() < $1.name.lowercased() }
+        if isAdmin {
+            return appState.users
+                .filter { $0.role == .expert || $0.role == .admin }
+                .sorted { $0.name.lowercased() < $1.name.lowercased() }
+        }
+        guard let me = appState.currentUser else { return [] }
+        return [me]
+    }
+
+    private var isAdmin: Bool {
+        appState.currentUser?.role == .admin
     }
     
     private var takenSaturdaysExcludingCurrent: Set<Date> {
@@ -1297,23 +1366,43 @@ struct EditOnCallSaturdayView: View {
             }
             
             Section(header: Text("Mitarbeiter")) {
-                Picker("Mitarbeiter", selection: Binding(get: {
-                    selectedUserId
-                }, set: { newVal in
-                    selectedUserId = newVal
-                })) {
-                    Text("Bitte auswählen").tag(String?.none)
-                    ForEach(eligibleUsers) { u in
-                        Text(u.name).tag(Optional(u.id))
+                if isAdmin {
+                    Picker("Mitarbeiter", selection: Binding(get: {
+                        selectedUserId
+                    }, set: { newVal in
+                        selectedUserId = newVal
+                    })) {
+                        Text("Bitte auswählen").tag(String?.none)
+                        ForEach(eligibleUsers) { u in
+                            Text(u.name).tag(Optional(u.id))
+                        }
                     }
+                    .pickerStyle(.navigationLink)
+                } else if let me = appState.currentUser, eligibleUsers.contains(where: { $0.id == me.id }) {
+                    HStack {
+                        Text("Mitarbeiter")
+                        Spacer()
+                        Text(me.name)
+                            .foregroundColor(.secondary)
+                    }
+                    .onAppear {
+                        selectedUserId = me.id
+                    }
+                } else {
+                    Text("Bereitschaft kann nur für Admins oder Sachverständige eingetragen werden.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
-                .pickerStyle(.navigationLink)
             }
             
             Section(header: Text("Aktionen")) {
                 Button {
                     guard let id = selectedUserId, let user = eligibleUsers.first(where: { $0.id == id }) else {
                         inlineError = "Bitte einen Admin oder Sachverständigen auswählen."
+                        return
+                    }
+                    if !isAdmin, user.id != appState.currentUser?.id {
+                        inlineError = "Sie können nur sich selbst für Bereitschaft eintragen."
                         return
                     }
                     
@@ -1365,8 +1454,11 @@ struct EditOnCallSaturdayView: View {
             // when coming back from the picker screen. Without this guard, the selection is reset.
             guard !didLoadInitialValues else { return }
             didLoadInitialValues = true
-
-            selectedUserId = existingRequest.user.id
+            if isAdmin {
+                selectedUserId = existingRequest.user.id
+            } else {
+                selectedUserId = appState.currentUser?.id
+            }
             selectedSaturday = Calendar.current.startOfDay(for: existingRequest.startDate)
         }
     }
@@ -1389,10 +1481,18 @@ struct NewOnCallSaturdayView: View {
         self.prefilledDate = prefilledDate
     }
 
+    private var isAdmin: Bool {
+        appState.currentUser?.role == .admin
+    }
+
     private var eligibleUsers: [User] {
-        appState.users
-            .filter { $0.role == .expert || $0.role == .admin }
-            .sorted { $0.name.lowercased() < $1.name.lowercased() }
+        if isAdmin {
+            return appState.users
+                .filter { $0.role == .expert || $0.role == .admin }
+                .sorted { $0.name.lowercased() < $1.name.lowercased() }
+        }
+        guard let me = appState.currentUser else { return [] }
+        return [me]
     }
 
     private var takenSaturdays: Set<Date> {
@@ -1471,23 +1571,40 @@ struct NewOnCallSaturdayView: View {
             }
 
             Section(header: Text("Mitarbeiter")) {
-                Picker("Mitarbeiter", selection: Binding(get: {
-                    selectedUserId
-                }, set: { newVal in
-                    selectedUserId = newVal
-                })) {
-                    Text("Bitte auswählen").tag(String?.none)
-                    ForEach(eligibleUsers) { u in
-                        Text(u.name).tag(Optional(u.id))
+                if isAdmin {
+                    Picker("Mitarbeiter", selection: Binding(get: {
+                        selectedUserId
+                    }, set: { newVal in
+                        selectedUserId = newVal
+                    })) {
+                        Text("Bitte auswählen").tag(String?.none)
+                        ForEach(eligibleUsers) { u in
+                            Text(u.name).tag(Optional(u.id))
+                        }
                     }
+                    .pickerStyle(.navigationLink)
+                } else if let me = appState.currentUser, eligibleUsers.contains(where: { $0.id == me.id }) {
+                    HStack {
+                        Text("Mitarbeiter")
+                        Spacer()
+                        Text(me.name)
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    Text("Bereitschaft kann nur für Admins oder Sachverständige eingetragen werden.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
-                .pickerStyle(.navigationLink)
             }
 
             Section(header: Text("Aktionen")) {
                 Button {
                     guard let id = selectedUserId, let user = eligibleUsers.first(where: { $0.id == id }) else {
                         inlineError = "Bitte einen Admin oder Sachverständigen auswählen."
+                        return
+                    }
+                    if !isAdmin, user.id != appState.currentUser?.id {
+                        inlineError = "Sie können nur sich selbst für Bereitschaft eintragen."
                         return
                     }
                     let ok = appState.createLeaveRequest(
@@ -1522,6 +1639,9 @@ struct NewOnCallSaturdayView: View {
         .onAppear {
             guard !didLoadInitialValues else { return }
             didLoadInitialValues = true
+            if !isAdmin {
+                selectedUserId = appState.currentUser?.id
+            }
             if let d = prefilledDate {
                 selectedSaturday = Calendar.current.startOfDay(for: d)
             }
