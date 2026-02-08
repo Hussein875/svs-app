@@ -625,6 +625,89 @@ export const pushOnTaskReassigned = onDocumentUpdated(
   }
 );
 
+export const pushOnTaskCompleted = onDocumentUpdated(
+  "tasks/{taskId}",
+  async (event) => {
+    const before = event.data?.before;
+    const after = event.data?.after;
+    if (!before || !after) return;
+
+    const beforeData = (before.data() ?? {}) as Record<string, unknown>;
+    const afterData = (after.data() ?? {}) as Record<string, unknown>;
+
+    const beforeStatus = String(beforeData.statusRaw ?? "")
+      .trim()
+      .toLowerCase();
+    const afterStatus = String(afterData.statusRaw ?? "")
+      .trim()
+      .toLowerCase();
+    if (beforeStatus === afterStatus) return;
+    if (afterStatus !== "done") return;
+
+    const creatorUserId = String(afterData.creatorUserId ?? "").trim();
+    const assignedUserId = String(afterData.assignedUserId ?? "").trim();
+    const updatedByUserId = String(afterData.updatedByUserId ?? "").trim();
+    const titleRaw = String(afterData.title ?? "").trim();
+    const title = titleRaw || "Aufgabe";
+
+    if (!creatorUserId) return;
+    if (creatorUserId === updatedByUserId) return;
+    if (creatorUserId === assignedUserId && !updatedByUserId) return;
+
+    const doneByName = await getUserNameOrFallback(
+      updatedByUserId || assignedUserId
+    );
+
+    console.log(
+      "[push][task_completed] taskId=",
+      String(event.params.taskId ?? ""),
+      "to=",
+      creatorUserId,
+      "by=",
+      updatedByUserId || assignedUserId || "<unknown>"
+    );
+
+    const tokenRefs = await getUserTokenRefs(creatorUserId);
+    const tokens = tokenRefs.map((t) => t.token);
+    if (tokens.length === 0) {
+      console.log("[push][task_completed] no user tokens for", creatorUserId);
+      return;
+    }
+
+    const resp = await admin.messaging().sendEachForMulticast({
+      tokens,
+      notification: {
+        title: "Aufgabe erledigt",
+        body: doneByName + " hat eine Aufgabe abgeschlossen: " + title,
+      },
+      data: {
+        type: "task_completed",
+        taskId: String(event.params.taskId ?? ""),
+        toUserId: creatorUserId,
+        fromUserId: updatedByUserId || assignedUserId,
+      },
+    });
+
+    console.log(
+      "[push][task_completed] sent",
+      resp.successCount,
+      "ok,",
+      resp.failureCount,
+      "failed"
+    );
+
+    logMulticastFailures(
+      "task_completed",
+      tokens,
+      resp.responses as Array<{success: boolean; error?: unknown}>
+    );
+    await cleanupDeadTokens(
+      tokenRefs,
+      resp.responses as Array<{success: boolean; error?: unknown}>
+    );
+  }
+);
+
 // ------------------------------------------------------------------
 // Make.com Webhook -> Firestore automation status
 // POST /automationStatusWebhook

@@ -31,6 +31,11 @@ enum TaskStatus: String, Codable {
     case done
 }
 
+enum MeetingTopicStatus: String, Codable {
+    case open
+    case done
+}
+
 enum PayoutMethod: String, Codable, CaseIterable {
     case paypal = "PayPal"
     case iban = "IBAN"

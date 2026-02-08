@@ -107,6 +107,8 @@ class AppState: ObservableObject {
     private var tasksListener: ListenerRegistration?
     private var tasksCreatedByMeListener: ListenerRegistration?
     private var commissionsListener: ListenerRegistration?
+    private var meetingTopicsListener: ListenerRegistration?
+    private var meetingMetaListener: ListenerRegistration?
     
     // Run snapshot processing off the main thread
     private let firestoreListenerQueue = DispatchQueue(label: "svs.firestore.listeners", qos: .userInitiated)
@@ -120,6 +122,9 @@ class AppState: ObservableObject {
     private var tasksCreatedByMeSnapshotCache: [Task] = []
     private var pendingTaskWritesById: [UUID: Task] = [:]
     private var pendingTaskDeletionIds: Set<UUID> = []
+    private var meetingTopicsSnapshotCache: [MeetingTopic] = []
+    private var pendingMeetingTopicWritesById: [UUID: MeetingTopic] = [:]
+    private var pendingMeetingTopicDeletionIds: Set<UUID> = []
     
     @Published var auth = AuthManager()
     
@@ -128,6 +133,8 @@ class AppState: ObservableObject {
     @Published var currentUser: User?
     @Published var leaveRequests: [LeaveRequest]
     @Published var tasks: [Task] = []
+    @Published var meetingTopics: [MeetingTopic] = []
+    @Published var nextMeetingAt: Date? = nil
     @Published var uiErrorMessage: String? = nil
     
     @Published var commissions: [CommissionEntry]
@@ -156,6 +163,7 @@ class AppState: ObservableObject {
         self.leaveRequests = []
         self.commissions = []
         self.tasks = []
+        self.meetingTopics = []
         
         // Firebase Auth -> Firestore Profil laden/anlegen (Quelle der Wahrheit für Profil-Daten)
         auth.$user
@@ -750,7 +758,8 @@ class AppState: ObservableObject {
             assignedUserId: assignedUid.isEmpty ? assignedUser.id : assignedUid,
             creatorUserId: normalizedIdentity(creatorUid),
             createdAt: Date(),
-            updatedAt: nil
+            updatedAt: nil,
+            updatedByUserId: nil
         )
 
         // Optimistic UI
@@ -768,6 +777,7 @@ class AppState: ObservableObject {
 
         var patched = task
         patched.updatedAt = Date()
+        patched.updatedByUserId = canonicalCurrentUid(fallback: currentUser) ?? currentUser?.id
 
         pendingTaskDeletionIds.remove(patched.id)
         pendingTaskWritesById[patched.id] = patched
@@ -797,6 +807,129 @@ class AppState: ObservableObject {
         pendingTaskDeletionIds.insert(task.id)
         mergeTaskSnapshotsAndPublish()
         deleteTaskFromFirestore(task)
+    }
+
+    func canEditMeetingTopic(_ : MeetingTopic, by user: User?) -> Bool {
+        user != nil
+    }
+
+    func canDeleteMeetingTopic(_ topic: MeetingTopic, by user: User?) -> Bool {
+        guard let user else { return false }
+        if user.role == .admin { return true }
+        return currentIdentitySet(for: user).contains(normalizedIdentity(topic.createdByUserId))
+    }
+
+    func createMeetingTopic(title: String, details: String) {
+        guard let creator = currentUser else { return }
+        let creatorId = canonicalCurrentUid(fallback: creator) ?? creator.id
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanDetails = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else {
+            showToast(.error, "Bitte einen Titel für den Meeting-Punkt eingeben.")
+            return
+        }
+
+        let topic = MeetingTopic(
+            id: UUID(),
+            title: cleanTitle,
+            details: cleanDetails,
+            status: .open,
+            createdAt: Date(),
+            createdByUserId: creatorId,
+            updatedAt: nil,
+            updatedByUserId: nil
+        )
+
+        pendingMeetingTopicDeletionIds.remove(topic.id)
+        pendingMeetingTopicWritesById[topic.id] = topic
+        mergeMeetingTopicSnapshotsAndPublish()
+        showToast(.success, "Meeting-Punkt hinzugefügt.")
+        upsertMeetingTopicToFirestore(topic)
+    }
+
+    func toggleMeetingTopicStatus(for topic: MeetingTopic) {
+        guard canEditMeetingTopic(topic, by: currentUser) else {
+            showToast(.error, "Sie dürfen diesen Meeting-Punkt nicht ändern.")
+            return
+        }
+
+        var patched = topic
+        patched.status = (topic.status == .open) ? .done : .open
+        patched.updatedAt = Date()
+        patched.updatedByUserId = canonicalCurrentUid(fallback: currentUser) ?? currentUser?.id
+
+        pendingMeetingTopicDeletionIds.remove(patched.id)
+        pendingMeetingTopicWritesById[patched.id] = patched
+        mergeMeetingTopicSnapshotsAndPublish()
+        upsertMeetingTopicToFirestore(patched)
+    }
+
+    func deleteMeetingTopic(_ topic: MeetingTopic) {
+        guard canDeleteMeetingTopic(topic, by: currentUser) else {
+            showToast(.error, "Sie dürfen diesen Meeting-Punkt nicht löschen.")
+            return
+        }
+
+        pendingMeetingTopicWritesById.removeValue(forKey: topic.id)
+        pendingMeetingTopicDeletionIds.insert(topic.id)
+        mergeMeetingTopicSnapshotsAndPublish()
+        deleteMeetingTopicFromFirestore(topic)
+    }
+
+    func canEditNextMeeting(by user: User?) -> Bool {
+        user?.role == .admin
+    }
+
+    func saveNextMeeting(date: Date) {
+        guard canEditNextMeeting(by: currentUser) else {
+            showToast(.error, "Nur Admins dürfen den Meeting-Termin bearbeiten.")
+            return
+        }
+
+        let actor = canonicalCurrentUid(fallback: currentUser)
+        var payload: [String: Any] = [
+            "nextMeetingAt": Timestamp(date: date),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        if let actor {
+            payload["updatedByUserId"] = actor
+        }
+
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.db.collection("meetingMeta").document("schedule")
+                    .setData(payload, merge: true)
+                await MainActor.run {
+                    self.nextMeetingAt = date
+                    self.uiErrorMessage = nil
+                    self.showToast(.success, "Nächstes Meeting aktualisiert.")
+                }
+            } catch {
+                let msg = "Meeting-Termin konnte nicht gespeichert werden: \(error.localizedDescription)"
+                await MainActor.run {
+                    self.uiErrorMessage = msg
+                    self.showToast(.error, msg)
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func refreshMeetingTopicsFromServer() async {
+        do {
+            let snap = try await db.collection("meetingTopics")
+                .order(by: "createdAt", descending: true)
+                .getDocuments(source: .server)
+
+            meetingTopicsSnapshotCache = mapMeetingTopicsFromDocs(snap.documents)
+            mergeMeetingTopicSnapshotsAndPublish()
+            uiErrorMessage = nil
+        } catch {
+            let msg = "Meeting-Punkte konnten nicht aktualisiert werden: \(error.localizedDescription)"
+            uiErrorMessage = msg
+            showToast(.error, msg)
+        }
     }
 
     @MainActor
@@ -1195,6 +1328,7 @@ class AppState: ObservableObject {
         var creatorUserId: String
         var createdAt: Timestamp
         var updatedAt: Timestamp?
+        var updatedByUserId: String?
 
         init?(id: String, data: [String: Any]) {
             guard
@@ -1215,6 +1349,8 @@ class AppState: ObservableObject {
             self.createdAt = createdAt
             self.dueDate = data["dueDate"] as? Timestamp
             self.updatedAt = data["updatedAt"] as? Timestamp
+            self.updatedByUserId = (data["updatedByUserId"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         init(from task: Task) {
@@ -1227,6 +1363,8 @@ class AppState: ObservableObject {
             self.createdAt = Timestamp(date: task.createdAt)
             self.dueDate = task.dueDate.map { Timestamp(date: $0) }
             self.updatedAt = task.updatedAt.map { Timestamp(date: $0) }
+            self.updatedByUserId = task.updatedByUserId?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         func toDictionary() -> [String: Any] {
@@ -1240,6 +1378,9 @@ class AppState: ObservableObject {
             ]
             if let dueDate { d["dueDate"] = dueDate }
             if let updatedAt { d["updatedAt"] = updatedAt }
+            if let updatedByUserId, !updatedByUserId.isEmpty {
+                d["updatedByUserId"] = updatedByUserId
+            }
             return d
         }
     }
@@ -1262,7 +1403,8 @@ class AppState: ObservableObject {
                 assignedUserId: normalizedIdentity(dto.assignedUserId),
                 creatorUserId: normalizedIdentity(dto.creatorUserId),
                 createdAt: dto.createdAt.dateValue(),
-                updatedAt: dto.updatedAt?.dateValue()
+                updatedAt: dto.updatedAt?.dateValue(),
+                updatedByUserId: dto.updatedByUserId
             )
         }
     }
@@ -1401,6 +1543,219 @@ class AppState: ObservableObject {
                 // serverseitig bereits durch, obwohl lokal ein Fehler zurückkommt.
                 await MainActor.run {
                     self.uiErrorMessage = nil
+                }
+            }
+        }
+    }
+
+    // MARK: - Firestore MeetingTopics DTO
+
+    private struct MeetingTopicDTO {
+        var id: String
+        var title: String
+        var details: String
+        var statusRaw: String
+        var createdAt: Timestamp
+        var createdByUserId: String
+        var updatedAt: Timestamp?
+        var updatedByUserId: String?
+
+        init?(id: String, data: [String: Any]) {
+            guard
+                let title = data["title"] as? String,
+                let statusRaw = data["statusRaw"] as? String,
+                let createdAt = data["createdAt"] as? Timestamp,
+                let createdByUserId = data["createdByUserId"] as? String
+            else { return nil }
+
+            self.id = id
+            self.title = title
+            self.details = (data["details"] as? String) ?? ""
+            self.statusRaw = statusRaw
+            self.createdAt = createdAt
+            self.createdByUserId = createdByUserId
+            self.updatedAt = data["updatedAt"] as? Timestamp
+            self.updatedByUserId = data["updatedByUserId"] as? String
+        }
+
+        init(from topic: MeetingTopic) {
+            self.id = topic.id.uuidString
+            self.title = topic.title
+            self.details = topic.details
+            self.statusRaw = topic.status.rawValue
+            self.createdAt = Timestamp(date: topic.createdAt)
+            self.createdByUserId = topic.createdByUserId
+            self.updatedAt = topic.updatedAt.map { Timestamp(date: $0) }
+            self.updatedByUserId = topic.updatedByUserId
+        }
+
+        func toDictionary() -> [String: Any] {
+            var d: [String: Any] = [
+                "title": title,
+                "details": details,
+                "statusRaw": statusRaw,
+                "createdAt": createdAt,
+                "createdByUserId": createdByUserId
+            ]
+            if let updatedAt { d["updatedAt"] = updatedAt }
+            if let updatedByUserId { d["updatedByUserId"] = updatedByUserId }
+            return d
+        }
+    }
+
+    // MARK: - Firestore MeetingTopics Listener
+
+    private func mapMeetingTopicsFromDocs(_ docs: [QueryDocumentSnapshot]) -> [MeetingTopic] {
+        docs.compactMap { doc in
+            guard let dto = MeetingTopicDTO(id: doc.documentID, data: doc.data()) else { return nil }
+            guard let id = UUID(uuidString: dto.id) else { return nil }
+
+            let status = MeetingTopicStatus(rawValue: dto.statusRaw) ?? .open
+
+            return MeetingTopic(
+                id: id,
+                title: dto.title,
+                details: dto.details,
+                status: status,
+                createdAt: dto.createdAt.dateValue(),
+                createdByUserId: dto.createdByUserId,
+                updatedAt: dto.updatedAt?.dateValue(),
+                updatedByUserId: dto.updatedByUserId
+            )
+        }
+    }
+
+    private func mergeMeetingTopicSnapshotsAndPublish() {
+        var byId: [UUID: MeetingTopic] = [:]
+
+        for topic in meetingTopicsSnapshotCache {
+            byId[topic.id] = topic
+        }
+
+        for id in byId.keys {
+            pendingMeetingTopicWritesById.removeValue(forKey: id)
+            pendingMeetingTopicDeletionIds.remove(id)
+        }
+
+        for id in pendingMeetingTopicDeletionIds {
+            byId.removeValue(forKey: id)
+        }
+
+        for (id, topic) in pendingMeetingTopicWritesById where !pendingMeetingTopicDeletionIds.contains(id) {
+            byId[id] = topic
+        }
+
+        let merged = Array(byId.values).sorted { $0.createdAt > $1.createdAt }
+        DispatchQueue.main.async { [weak self] in
+            self?.meetingTopics = merged
+        }
+    }
+
+    private func startMeetingTopicsListenerIfNeeded() {
+        guard meetingTopicsListener == nil else { return }
+        guard currentUser != nil else { return }
+
+        let query = db.collection("meetingTopics").order(by: "createdAt", descending: true)
+        meetingTopicsListener = query.addSnapshotListener(includeMetadataChanges: false) {
+            [weak self] snapshot, error in
+            guard let self else { return }
+
+            if let error {
+                DispatchQueue.main.async {
+                    self.uiErrorMessage = "Meeting-Punkte konnten nicht geladen werden: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            let docs = snapshot?.documents ?? []
+            self.firestoreListenerQueue.async { [weak self] in
+                guard let self else { return }
+                self.meetingTopicsSnapshotCache = self.mapMeetingTopicsFromDocs(docs)
+                self.mergeMeetingTopicSnapshotsAndPublish()
+            }
+        }
+    }
+
+    private func startMeetingMetaListenerIfNeeded() {
+        guard meetingMetaListener == nil else { return }
+        guard currentUser != nil else { return }
+
+        meetingMetaListener = db.collection("meetingMeta").document("schedule")
+            .addSnapshotListener(includeMetadataChanges: false) { [weak self] snapshot, error in
+                guard let self else { return }
+
+                if let error {
+                    DispatchQueue.main.async {
+                        self.uiErrorMessage = "Meeting-Termin konnte nicht geladen werden: \(error.localizedDescription)"
+                    }
+                    return
+                }
+
+                guard
+                    let data = snapshot?.data(),
+                    let ts = data["nextMeetingAt"] as? Timestamp
+                else {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.nextMeetingAt = nil
+                    }
+                    return
+                }
+
+                let date = ts.dateValue()
+                DispatchQueue.main.async { [weak self] in
+                    self?.nextMeetingAt = date
+                }
+            }
+    }
+
+    private func meetingTopicErrorMessage(prefix: String, error: Error) -> String {
+        let ns = error as NSError
+        if ns.domain == FirestoreErrorDomain &&
+            ns.code == FirestoreErrorCode.permissionDenied.rawValue {
+            return "\(prefix): Zugriff verweigert. Bitte Firestore-Regeln für `meetingTopics` prüfen."
+        }
+        return "\(prefix): \(error.localizedDescription)"
+    }
+
+    private func upsertMeetingTopicToFirestore(_ topic: MeetingTopic) {
+        let dto = MeetingTopicDTO(from: topic)
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.db.collection("meetingTopics").document(dto.id)
+                    .setData(dto.toDictionary(), merge: true)
+            } catch {
+                let msg = self.meetingTopicErrorMessage(
+                    prefix: "Meeting-Punkt konnte nicht gespeichert werden",
+                    error: error
+                )
+                await MainActor.run {
+                    self.pendingMeetingTopicWritesById.removeValue(forKey: topic.id)
+                    self.mergeMeetingTopicSnapshotsAndPublish()
+                    self.uiErrorMessage = msg
+                    self.showToast(.error, msg)
+                }
+            }
+        }
+    }
+
+    private func deleteMeetingTopicFromFirestore(_ topic: MeetingTopic) {
+        let docId = topic.id.uuidString
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.db.collection("meetingTopics").document(docId).delete()
+            } catch {
+                let msg = self.meetingTopicErrorMessage(
+                    prefix: "Meeting-Punkt konnte nicht gelöscht werden",
+                    error: error
+                )
+                await MainActor.run {
+                    self.pendingMeetingTopicDeletionIds.remove(topic.id)
+                    self.pendingMeetingTopicWritesById[topic.id] = topic
+                    self.mergeMeetingTopicSnapshotsAndPublish()
+                    self.uiErrorMessage = msg
+                    self.showToast(.error, msg)
                 }
             }
         }
@@ -1651,6 +2006,8 @@ class AppState: ObservableObject {
         tasksListener?.remove(); tasksListener = nil
         tasksCreatedByMeListener?.remove(); tasksCreatedByMeListener = nil
         commissionsListener?.remove(); commissionsListener = nil
+        meetingTopicsListener?.remove(); meetingTopicsListener = nil
+        meetingMetaListener?.remove(); meetingMetaListener = nil
         usersSnapshotCache = []
         invitesSnapshotCache = []
         leaveRequests = []
@@ -1662,6 +2019,11 @@ class AppState: ObservableObject {
         pendingTaskDeletionIds = []
         tasks = []
         commissions = []
+        meetingTopicsSnapshotCache = []
+        pendingMeetingTopicWritesById = [:]
+        pendingMeetingTopicDeletionIds = []
+        meetingTopics = []
+        nextMeetingAt = nil
         didStartRealtimeListeners = false
         isProfileReady = false
     }
@@ -1678,6 +2040,8 @@ class AppState: ObservableObject {
         startLeaveRequestsListenerIfNeeded()
         startTasksListenerIfNeeded()
         startCommissionsListenerIfNeeded()
+        startMeetingTopicsListenerIfNeeded()
+        startMeetingMetaListenerIfNeeded()
     }
     
     private func startUsersListenersIfNeeded() {

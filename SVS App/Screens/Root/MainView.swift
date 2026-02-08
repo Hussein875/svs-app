@@ -769,6 +769,18 @@ private struct WorkHomeView: View {
             .count
     }
 
+    private var openMeetingTopicsCount: Int {
+        appState.meetingTopics.filter { $0.status == .open }.count
+    }
+
+    private var nextMeetingShortText: String {
+        guard let next = appState.nextMeetingAt else { return "Nicht gesetzt" }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.dateFormat = "dd.MM · HH:mm"
+        return f.string(from: next)
+    }
+
     private var nextMyOnCallSaturdayText: String {
         guard let me = appState.currentUser else { return "—" }
         let cal = Calendar.current
@@ -864,72 +876,104 @@ private struct WorkHomeView: View {
                                 valueText: nextMyOnCallSaturdayText,
                                 systemImage: "calendar.badge.clock"
                             )
-                            StatPill(title: "Offene Aufgaben", value: myOpenTasksCount, systemImage: "checklist")
+                            StatTextPill(
+                                title: "Nächstes Meeting",
+                                valueText: nextMeetingShortText,
+                                systemImage: "person.3.fill"
+                            )
                         }
                     }
                     .padding(.horizontal, 18)
 
-                    // MARK: Cards
-                    VStack(spacing: 12) {
-                        NavigationLink {
-                            MyRequestsScreen()
-                        } label: {
-                            WorkCard(
-                                title: "Abwesenheiten",
-                                subtitle: "Urlaub, Krankheit",
-                                systemImage: "doc.text",
-                                trailingValue: 0
-                            )
-                        }
-                        .buttonStyle(.plain)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Start")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                            .textCase(.uppercase)
+                            .padding(.horizontal, 2)
 
-                        NavigationLink {
-                            MyOnCallSaturdaysScreen()
-                        } label: {
-                            WorkCard(
-                                title: "Samstags-Bereitschaft",
-                                subtitle: "Eintragen & freie Samstage",
-                                systemImage: "calendar.badge.clock",
-                                trailingValue: 0
-                            )
-                        }
-                        .buttonStyle(.plain)
+                        VStack(spacing: 12) {
+                            NavigationLink {
+                                MyRequestsScreen()
+                            } label: {
+                                WorkCard(
+                                    title: "Abwesenheiten",
+                                    subtitle: "Urlaub, Krankheit, Bereitschaft",
+                                    systemImage: "doc.text",
+                                    trailingValue: myActiveRequestsCount
+                                )
+                            }
+                            .buttonStyle(.plain)
 
-                        NavigationLink {
-                            TasksView()
-                        } label: {
-                            WorkCard(
-                                title: "Aufgaben",
-                                subtitle: "To-dos",
-                                systemImage: "checklist",
-                                trailingValue: myOpenTasksCount
-                            )
+                            NavigationLink {
+                                TasksView()
+                            } label: {
+                                WorkCard(
+                                    title: "Aufgaben",
+                                    subtitle: "Offene To-dos",
+                                    systemImage: "checklist",
+                                    trailingValue: myOpenTasksCount
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 18)
 
-                        NavigationLink {
-                            ProvisionenView()
-                        } label: {
-                            WorkCard(
-                                title: "Provision",
-                                subtitle: "Vermittlungsprovision",
-                                systemImage: "eurosign.circle",
-                                trailingValue: 0
-                            )
-                        }
-                        .buttonStyle(.plain)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Weitere Bereiche")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                            .textCase(.uppercase)
+                            .padding(.horizontal, 2)
 
-                        NavigationLink {
-                            DashboardView()
-                        } label: {
-                            WorkCard(
-                                title: "Dashboard",
-                                subtitle: "Übersicht",
-                                systemImage: "chart.bar.xaxis",
-                                trailingValue: 0
-                            )
+                        HStack(spacing: 12) {
+                            NavigationLink {
+                                MyOnCallSaturdaysScreen()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Bereitschaft",
+                                    systemImage: "calendar.badge.clock",
+                                    badgeText: myOnCallSaturdaysThisYearCount > 0 ? "\(myOnCallSaturdaysThisYearCount)" : nil
+                                )
+                            }
+                            .buttonStyle(.plain)
+
+                            NavigationLink {
+                                MeetingTopicsView()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Meeting",
+                                    systemImage: "person.3.fill",
+                                    badgeText: openMeetingTopicsCount > 0 ? "\(openMeetingTopicsCount)" : nil
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+
+                        HStack(spacing: 12) {
+                            NavigationLink {
+                                ProvisionenView()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Provision",
+                                    systemImage: "eurosign.circle",
+                                    badgeText: nil
+                                )
+                            }
+                            .buttonStyle(.plain)
+
+                            NavigationLink {
+                                DashboardView()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Dashboard",
+                                    systemImage: "chart.bar.xaxis",
+                                    badgeText: nil
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     .padding(.horizontal, 18)
                     .padding(.bottom, 18)
@@ -1334,6 +1378,57 @@ private struct WorkCard: View {
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 5)
+    }
+}
+
+private struct CompactWorkCard: View {
+    let title: String
+    let systemImage: String
+    let badgeText: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(.tint.opacity(0.12))
+                    .frame(width: 36, height: 36)
+                    .overlay(
+                        Image(systemName: systemImage)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.tint)
+                    )
+
+                Spacer(minLength: 0)
+
+                if let badgeText {
+                    Text(badgeText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(Color(.secondarySystemBackground)))
+                }
+            }
+
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.primary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.9)
+                .allowsTightening(true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 94, alignment: .topLeading)
+        .padding(.vertical, 12)
+        .padding(.horizontal, 12)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(.secondarySystemBackground))

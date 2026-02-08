@@ -10,19 +10,6 @@ import SwiftUI
 import FirebaseFirestore
 import FirebaseAuth
 
-#if canImport(UIKit)
-extension View {
-    func svsDismissKeyboardOnTap() -> some View {
-        self.simultaneousGesture(
-            TapGesture().onEnded {
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                                to: nil, from: nil, for: nil)
-            }
-        )
-    }
-}
-#endif
-
 struct TasksView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.dismiss) private var dismiss
@@ -197,7 +184,6 @@ struct TasksView: View {
                     }
                 }
         )
-        .svsDismissKeyboardOnTap()
         .background(Color(.systemGroupedBackground))
         .navigationDestination(isPresented: $showNewTaskNav) {
             NewTaskView(mode: .new, task: nil)
@@ -448,6 +434,7 @@ struct NewTaskView: View {
                             Text(user.name).tag(user.id)
                         }
                     }
+                    .pickerStyle(.menu)
 
                     if assignedUserId != current.id,
                        let name = assignableUsers.first(where: { $0.id == assignedUserId })?.name {
@@ -484,15 +471,6 @@ struct NewTaskView: View {
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty || appState.currentUser == nil)
             }
         }
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                focusedField = nil
-                #if canImport(UIKit)
-                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                                to: nil, from: nil, for: nil)
-                #endif
-            }
-        )
         .scrollDismissesKeyboard(.interactively)
         .onAppear { configureInitialState() }
         .onChange(of: assignableUsers.count) { _ in

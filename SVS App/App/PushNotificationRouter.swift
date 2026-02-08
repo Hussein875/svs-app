@@ -25,6 +25,9 @@ enum NotificationType: String, Codable, CaseIterable {
     /// A task was assigned or reassigned.
     case taskAssigned = "task_assigned"
 
+    /// A task was marked as completed.
+    case taskCompleted = "task_completed"
+
     /// A new commission entry was created (admin payout needed).
     case commissionNew = "commission_new"
 
@@ -75,7 +78,7 @@ struct PushRoute: Equatable, Codable {
             self.entityId = payload.string("requestId")
             self.decision = payload.string("decision")
 
-        case .taskAssigned:
+        case .taskAssigned, .taskCompleted:
             self.entityId = payload.string("taskId")
 
         case .commissionNew:
