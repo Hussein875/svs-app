@@ -18,8 +18,12 @@ struct TasksView: View {
     // Beim Push innerhalb einer NavigationStack soll der System-Back-Button genutzt werden.
     let isPresentedModally: Bool
 
-    init(isPresentedModally: Bool = false) {
+    init(isPresentedModally: Bool = false,
+         startInAssignedByMe: Bool = false,
+         startInDoneFilter: Bool = false) {
         self.isPresentedModally = isPresentedModally
+        _scope = State(initialValue: startInAssignedByMe ? .assignedByMe : .assignedToMe)
+        _statusFilter = State(initialValue: startInDoneFilter ? .done : .open)
     }
 
     @State private var showNewTaskNav = false
@@ -35,8 +39,8 @@ struct TasksView: View {
         case done = "Erledigt"
     }
 
-    @State private var scope: TaskScope = .assignedToMe
-    @State private var statusFilter: TaskStatusFilter = .open
+    @State private var scope: TaskScope
+    @State private var statusFilter: TaskStatusFilter
 
 
     private var currentUser: User? { appState.currentUser }

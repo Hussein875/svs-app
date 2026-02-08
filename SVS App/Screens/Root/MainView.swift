@@ -17,25 +17,32 @@ import FirebaseFirestore
 
 struct MainView: View {
     @EnvironmentObject var appState: AppState
+    @State private var selectedTab: MainTab = .calendar
+    @State private var homePushDestination: HomePushDestination?
+    @State private var lastHandledPushRouteKey: String = ""
+    @State private var lastHandledPushRouteAt: Date = .distantPast
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             // Urlaub
             CalendarScreen()
                 .tabItem {
                     Label("Kalender", systemImage: "calendar")
                 }
+                .tag(MainTab.calendar)
 
-            WorkHomeView()
+            WorkHomeView(pushDestination: $homePushDestination)
                 .tabItem {
                     Label("Mein Bereich", systemImage: "person.crop.circle")
                 }
+                .tag(MainTab.home)
             
             // Scanner
             ScannerScreen()
                 .tabItem {
                     Label("Scanner", systemImage: "doc.viewfinder")
                 }
+                .tag(MainTab.scanner)
             
             // Admin-spezifische Tabs
             if appState.currentUser?.role == .admin {
@@ -43,6 +50,7 @@ struct MainView: View {
                     .tabItem {
                         Label("Admin", systemImage: "shield.lefthalf.filled")
                     }
+                    .tag(MainTab.admin)
             }
 
             // Menü Tab
@@ -50,13 +58,109 @@ struct MainView: View {
                 .tabItem {
                     Label("Menü", systemImage: "gearshape")
                 }
+                .tag(MainTab.menu)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .pushRoute)) { notification in
+            guard let route = notification.userInfo?["route"] as? PushRoute else { return }
+            handlePushRoute(route)
         }
         .onAppear {
-            // 1) UI-Kleinkram
             customizeMoreTab(title: "Mehr")
+            if let bufferedRoute = PushNotificationRouter.consumeBufferedRoute() {
+                handlePushRoute(bufferedRoute)
+            }
+        }
+        .onChange(of: appState.currentUser?.role) { role in
+            if role != .admin && selectedTab == .admin {
+                selectedTab = .calendar
+            }
         }
     }
 
+    private func handlePushRoute(_ route: PushRoute) {
+        if isRecentDuplicate(route) {
+            return
+        }
+
+        switch route.type {
+        case .leaveRequestNew:
+            if appState.currentUser?.role == .admin {
+                selectedTab = .admin
+            } else {
+                selectedTab = .calendar
+            }
+
+        case .leaveRequestApproved, .leaveRequestRejected:
+            selectedTab = .home
+            homePushDestination = HomePushDestination(
+                kind: .myRequests,
+                entityId: asUUID(route.entityId)
+            )
+
+        case .taskAssigned:
+            selectedTab = .home
+            homePushDestination = HomePushDestination(
+                kind: .tasksAssigned,
+                entityId: asUUID(route.entityId)
+            )
+
+        case .taskCompleted:
+            selectedTab = .home
+            homePushDestination = HomePushDestination(
+                kind: .tasksCompleted,
+                entityId: asUUID(route.entityId)
+            )
+
+        case .commissionNew:
+            if appState.currentUser?.role == .admin {
+                selectedTab = .admin
+            } else {
+                selectedTab = .home
+            }
+
+        case .unknown:
+            selectedTab = .home
+        }
+    }
+
+    private func asUUID(_ raw: String?) -> UUID? {
+        guard let raw else { return nil }
+        return UUID(uuidString: raw)
+    }
+
+    private func isRecentDuplicate(_ route: PushRoute) -> Bool {
+        let key = "\(route.type.rawValue)|\(route.entityId ?? "")|\(route.decision ?? "")"
+        let now = Date()
+
+        if key == lastHandledPushRouteKey,
+           now.timeIntervalSince(lastHandledPushRouteAt) < 1.2 {
+            return true
+        }
+
+        lastHandledPushRouteKey = key
+        lastHandledPushRouteAt = now
+        return false
+    }
+}
+
+private enum MainTab: Hashable {
+    case calendar
+    case home
+    case scanner
+    case admin
+    case menu
+}
+
+private struct HomePushDestination: Identifiable, Hashable {
+    enum Kind: Hashable {
+        case tasksAssigned
+        case tasksCompleted
+        case myRequests
+    }
+
+    let id = UUID()
+    let kind: Kind
+    let entityId: UUID?
 }
 
 // MARK: - Scanner
@@ -726,6 +830,7 @@ private struct ShareSheet: UIViewControllerRepresentable {
 
 private struct WorkHomeView: View {
     @EnvironmentObject var appState: AppState
+    @Binding var pushDestination: HomePushDestination?
 
     private var displayName: String {
         let name = appState.currentUser?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -978,6 +1083,19 @@ private struct WorkHomeView: View {
                     }
                     .padding(.horizontal, 18)
                     .padding(.bottom, 18)
+                }
+            }
+            .navigationDestination(item: $pushDestination) { destination in
+                switch destination.kind {
+                case .tasksAssigned:
+                    TasksView()
+                case .tasksCompleted:
+                    TasksView(
+                        startInAssignedByMe: true,
+                        startInDoneFilter: true
+                    )
+                case .myRequests:
+                    MyRequestsScreen()
                 }
             }
             .background(Color(.systemGroupedBackground))

@@ -104,6 +104,19 @@ extension Notification.Name {
 /// - Call `PushNotificationRouter.handlePushTap(userInfo:)` from `UNUserNotificationCenterDelegate`.
 /// - Observe `Notification.Name.pushRoute` in SwiftUI and route accordingly.
 final class PushNotificationRouter {
+    private static let routeBufferQueue = DispatchQueue(label: "svs.push.router.routeBuffer")
+    private static var bufferedRoute: PushRoute?
+
+    /// Returns and clears the last buffered route from a push tap.
+    ///
+    /// Useful when the notification tap happened before SwiftUI attached observers.
+    static func consumeBufferedRoute() -> PushRoute? {
+        routeBufferQueue.sync {
+            defer { bufferedRoute = nil }
+            return bufferedRoute
+        }
+    }
+
     /// Extracts a route from a push payload.
     ///
     /// - Parameter userInfo: The raw `userInfo` dictionary.
@@ -140,7 +153,13 @@ final class PushNotificationRouter {
         print("[PushTap][Router] route=\(route.type.rawValue) id=\(route.entityId ?? "—") decision=\(route.decision ?? "—")")
         #endif
 
-        NotificationCenter.default.post(name: .pushRoute, object: nil, userInfo: ["route": route])
+        routeBufferQueue.sync {
+            bufferedRoute = route
+        }
+
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .pushRoute, object: nil, userInfo: ["route": route])
+        }
     }
 }
 

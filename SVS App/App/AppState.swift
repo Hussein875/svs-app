@@ -766,11 +766,12 @@ class AppState: ObservableObject {
         pendingTaskDeletionIds.remove(newTask.id)
         pendingTaskWritesById[newTask.id] = newTask
         mergeTaskSnapshotsAndPublish()
-        upsertTaskToFirestore(newTask)
+        createTaskInFirestore(newTask)
     }
 
     func updateTask(_ task: Task) {
-        guard canEditTask(task, by: currentUser) else {
+        let permissionSource = tasks.first(where: { $0.id == task.id }) ?? task
+        guard canEditTask(permissionSource, by: currentUser) else {
             showToast(.error, "Sie dürfen diesen Task nicht bearbeiten.")
             return
         }
@@ -783,7 +784,7 @@ class AppState: ObservableObject {
         pendingTaskWritesById[patched.id] = patched
         mergeTaskSnapshotsAndPublish()
 
-        upsertTaskToFirestore(patched)
+        updateTaskInFirestore(patched)
     }
 
     func toggleTaskStatus(for task: Task) {
@@ -1512,7 +1513,7 @@ class AppState: ObservableObject {
         }
     }
 
-    private func upsertTaskToFirestore(_ task: Task) {
+    private func createTaskInFirestore(_ task: Task) {
         let dto = TaskDTO(from: task)
 
         _Concurrency.Task { [weak self] in
@@ -1520,6 +1521,46 @@ class AppState: ObservableObject {
             do {
                 try await self.db.collection("tasks").document(dto.id)
                     .setData(dto.toDictionary(), merge: true)
+            } catch {
+                let msg = "Task konnte nicht gespeichert werden: \(error.localizedDescription)"
+                await MainActor.run {
+                    self.pendingTaskWritesById.removeValue(forKey: task.id)
+                    self.mergeTaskSnapshotsAndPublish()
+                    self.uiErrorMessage = msg
+                    self.showToast(.error, msg)
+                }
+            }
+        }
+    }
+
+    private func updateTaskInFirestore(_ task: Task) {
+        let docId = task.id.uuidString
+
+        var payload: [String: Any] = [
+            "title": task.title,
+            "details": task.details,
+            "statusRaw": task.status.rawValue,
+            "assignedUserId": task.assignedUserId.trimmingCharacters(in: .whitespacesAndNewlines),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        if let dueDate = task.dueDate {
+            payload["dueDate"] = Timestamp(date: dueDate)
+        } else {
+            payload["dueDate"] = FieldValue.delete()
+        }
+
+        if let updatedBy = task.updatedByUserId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !updatedBy.isEmpty {
+            payload["updatedByUserId"] = updatedBy
+        } else {
+            payload["updatedByUserId"] = FieldValue.delete()
+        }
+
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.db.collection("tasks").document(docId).updateData(payload)
             } catch {
                 let msg = "Task konnte nicht gespeichert werden: \(error.localizedDescription)"
                 await MainActor.run {
