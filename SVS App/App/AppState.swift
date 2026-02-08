@@ -18,19 +18,22 @@ struct UserProfile: Codable {
     var annualLeaveDays: Int
     var email: String
     var birthday: Date?
+    var pushEnabled: Bool
 
     init(name: String,
          roleRaw: String,
          colorName: String,
          annualLeaveDays: Int,
          email: String,
-         birthday: Date? = nil) {
+         birthday: Date? = nil,
+         pushEnabled: Bool = true) {
         self.name = name
         self.roleRaw = roleRaw
         self.colorName = colorName
         self.annualLeaveDays = annualLeaveDays
         self.email = email
         self.birthday = birthday
+        self.pushEnabled = pushEnabled
     }
 
     init(from user: User) {
@@ -40,6 +43,7 @@ struct UserProfile: Codable {
         self.annualLeaveDays = user.annualLeaveDays
         self.email = user.email
         self.birthday = user.birthday
+        self.pushEnabled = user.pushNotificationsEnabled
     }
 
     init?(from data: [String: Any]) {
@@ -56,6 +60,7 @@ struct UserProfile: Codable {
         self.colorName = colorName
         self.annualLeaveDays = annualLeaveDays
         self.email = email
+        self.pushEnabled = (data["pushEnabled"] as? Bool) ?? true
         if let ts = data["birthday"] as? Timestamp {
             self.birthday = ts.dateValue()
         } else if let d = data["birthday"] as? Date {
@@ -74,7 +79,8 @@ struct UserProfile: Codable {
             "roleRaw": roleRaw,
             "colorName": colorName,
             "annualLeaveDays": annualLeaveDays,
-            "email": email
+            "email": email,
+            "pushEnabled": pushEnabled
         ]
         if let birthday {
             dict["birthday"] = Timestamp(date: birthday)
@@ -90,7 +96,8 @@ struct UserProfile: Codable {
             colorName: colorName,
             annualLeaveDays: annualLeaveDays,
             email: email,
-            birthday: birthday
+            birthday: birthday,
+            pushNotificationsEnabled: pushEnabled
         )
     }
 }
@@ -109,6 +116,7 @@ class AppState: ObservableObject {
     private var commissionsListener: ListenerRegistration?
     private var meetingTopicsListener: ListenerRegistration?
     private var meetingMetaListener: ListenerRegistration?
+    private var meetingArchivesListener: ListenerRegistration?
     
     // Run snapshot processing off the main thread
     private let firestoreListenerQueue = DispatchQueue(label: "svs.firestore.listeners", qos: .userInitiated)
@@ -123,6 +131,7 @@ class AppState: ObservableObject {
     private var pendingTaskWritesById: [UUID: Task] = [:]
     private var pendingTaskDeletionIds: Set<UUID> = []
     private var meetingTopicsSnapshotCache: [MeetingTopic] = []
+    private var meetingArchivesSnapshotCache: [MeetingArchive] = []
     private var pendingMeetingTopicWritesById: [UUID: MeetingTopic] = [:]
     private var pendingMeetingTopicDeletionIds: Set<UUID> = []
     
@@ -134,6 +143,7 @@ class AppState: ObservableObject {
     @Published var leaveRequests: [LeaveRequest]
     @Published var tasks: [Task] = []
     @Published var meetingTopics: [MeetingTopic] = []
+    @Published var meetingArchives: [MeetingArchive] = []
     @Published var nextMeetingAt: Date? = nil
     @Published var uiErrorMessage: String? = nil
     
@@ -164,6 +174,7 @@ class AppState: ObservableObject {
         self.commissions = []
         self.tasks = []
         self.meetingTopics = []
+        self.meetingArchives = []
         
         // Firebase Auth -> Firestore Profil laden/anlegen (Quelle der Wahrheit für Profil-Daten)
         auth.$user
@@ -472,6 +483,38 @@ class AppState: ObservableObject {
                     self.uiErrorMessage = "Profil konnte nicht gelöscht werden: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    func setMyPushNotificationsEnabled(_ enabled: Bool) async -> Bool {
+        guard var me = currentUser else { return false }
+
+        let previous = me.pushNotificationsEnabled
+        if previous == enabled { return true }
+
+        me.pushNotificationsEnabled = enabled
+        currentUser = me
+        if let idx = users.firstIndex(where: { $0.id == me.id }) {
+            users[idx] = me
+        }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            _ = try await functions.httpsCallable("setMyPushEnabled").call([
+                "enabled": enabled
+            ])
+            uiErrorMessage = nil
+            return true
+        } catch {
+            me.pushNotificationsEnabled = previous
+            currentUser = me
+            if let idx = users.firstIndex(where: { $0.id == me.id }) {
+                users[idx] = me
+            }
+            uiErrorMessage = "Push-Einstellung konnte nicht gespeichert werden: \(error.localizedDescription)"
+            return false
         }
     }
     
@@ -881,6 +924,180 @@ class AppState: ObservableObject {
         user?.role == .admin
     }
 
+    func canArchiveMeeting(by user: User?) -> Bool {
+        user?.role == .admin
+    }
+
+    func canDeleteMeetingArchive(by user: User?) -> Bool {
+        user?.role == .admin
+    }
+
+    @MainActor
+    func archiveCurrentMeeting() async {
+        guard canArchiveMeeting(by: currentUser) else {
+            showToast(.error, "Nur Admins dürfen Meetings archivieren.")
+            return
+        }
+
+        let topicsToArchive = meetingTopics
+            .sorted {
+                let lhs = $0.updatedAt ?? $0.createdAt
+                let rhs = $1.updatedAt ?? $1.createdAt
+                return lhs < rhs
+            }
+
+        guard !topicsToArchive.isEmpty else {
+            showToast(.error, "Keine Meeting-Punkte zum Archivieren vorhanden.")
+            return
+        }
+
+        let meetingDate = nextMeetingAt ?? Date()
+        let actorUid = canonicalCurrentUid(fallback: currentUser)
+            ?? currentUser?.id
+            ?? ""
+        let archiveId = UUID().uuidString
+        let archiveRef = db.collection("meetingArchives").document(archiveId)
+        let meetingMetaRef = db.collection("meetingMeta").document("schedule")
+
+        let topicsPayload: [[String: Any]] = topicsToArchive.map { topic in
+            var d: [String: Any] = [
+                "id": topic.id.uuidString,
+                "title": topic.title,
+                "details": topic.details,
+                "statusRaw": topic.status.rawValue,
+                "createdAt": Timestamp(date: topic.createdAt),
+                "createdByUserId": topic.createdByUserId
+            ]
+            if let updatedAt = topic.updatedAt {
+                d["updatedAt"] = Timestamp(date: updatedAt)
+            }
+            if let updatedByUserId = topic.updatedByUserId, !updatedByUserId.isEmpty {
+                d["updatedByUserId"] = updatedByUserId
+            }
+            return d
+        }
+
+        let protocolText = buildMeetingProtocol(
+            topics: topicsToArchive,
+            meetingDate: meetingDate
+        )
+
+        let archiveData: [String: Any] = [
+            "meetingDate": Timestamp(date: meetingDate),
+            "archivedAt": FieldValue.serverTimestamp(),
+            "archivedByUserId": actorUid,
+            "topicCount": topicsToArchive.count,
+            "protocolText": protocolText,
+            "topics": topicsPayload
+        ]
+
+        do {
+            let batch = db.batch()
+            batch.setData(archiveData, forDocument: archiveRef, merge: false)
+            batch.setData([
+                "nextMeetingAt": FieldValue.delete(),
+                "updatedAt": FieldValue.serverTimestamp(),
+                "updatedByUserId": actorUid
+            ], forDocument: meetingMetaRef, merge: true)
+
+            for topic in topicsToArchive {
+                let topicRef = db.collection("meetingTopics")
+                    .document(topic.id.uuidString)
+                batch.deleteDocument(topicRef)
+            }
+
+            try await batch.commit()
+
+            // Clear local active points immediately; listener will reconcile shortly.
+            meetingTopicsSnapshotCache = []
+            pendingMeetingTopicWritesById = [:]
+            pendingMeetingTopicDeletionIds = []
+            meetingTopics = []
+            nextMeetingAt = nil
+
+            uiErrorMessage = nil
+            showToast(
+                .success,
+                "Meeting archiviert. \(topicsToArchive.count) Punkt(e) verschoben."
+            )
+        } catch {
+            let msg = meetingArchiveErrorMessage(
+                prefix: "Meeting konnte nicht archiviert werden",
+                error: error
+            )
+            uiErrorMessage = msg
+            showToast(.error, msg)
+        }
+    }
+
+    func clearNextMeetingDate() {
+        guard canEditNextMeeting(by: currentUser) else {
+            showToast(.error, "Nur Admins dürfen den Meeting-Termin löschen.")
+            return
+        }
+
+        let actor = canonicalCurrentUid(fallback: currentUser)
+        var payload: [String: Any] = [
+            "nextMeetingAt": FieldValue.delete(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        if let actor {
+            payload["updatedByUserId"] = actor
+        }
+
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.db.collection("meetingMeta").document("schedule")
+                    .setData(payload, merge: true)
+                await MainActor.run {
+                    self.nextMeetingAt = nil
+                    self.uiErrorMessage = nil
+                    self.showToast(.success, "Meeting-Termin gelöscht.")
+                }
+            } catch {
+                let msg = "Meeting-Termin konnte nicht gelöscht werden: \(error.localizedDescription)"
+                await MainActor.run {
+                    self.uiErrorMessage = msg
+                    self.showToast(.error, msg)
+                }
+            }
+        }
+    }
+
+    func deleteMeetingArchive(_ archive: MeetingArchive) {
+        guard canDeleteMeetingArchive(by: currentUser) else {
+            showToast(.error, "Nur Admins dürfen archivierte Meetings löschen.")
+            return
+        }
+
+        let docId = archive.id.uuidString
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            do {
+                let functions = Functions.functions(region: "us-central1")
+                _ = try await functions.httpsCallable("adminDeleteMeetingArchive").call([
+                    "archiveId": docId
+                ])
+                await MainActor.run {
+                    self.meetingArchivesSnapshotCache.removeAll { $0.id == archive.id }
+                    self.meetingArchives.removeAll { $0.id == archive.id }
+                    self.uiErrorMessage = nil
+                    self.showToast(.success, "Archiviertes Meeting gelöscht.")
+                }
+            } catch {
+                let msg = self.meetingArchiveErrorMessage(
+                    prefix: "Archiviertes Meeting konnte nicht gelöscht werden",
+                    error: error
+                )
+                await MainActor.run {
+                    self.uiErrorMessage = msg
+                    self.showToast(.error, msg)
+                }
+            }
+        }
+    }
+
     func saveNextMeeting(date: Date) {
         guard canEditNextMeeting(by: currentUser) else {
             showToast(.error, "Nur Admins dürfen den Meeting-Termin bearbeiten.")
@@ -919,18 +1136,72 @@ class AppState: ObservableObject {
     @MainActor
     func refreshMeetingTopicsFromServer() async {
         do {
-            let snap = try await db.collection("meetingTopics")
+            let topicsSnap = try await db.collection("meetingTopics")
                 .order(by: "createdAt", descending: true)
                 .getDocuments(source: .server)
 
-            meetingTopicsSnapshotCache = mapMeetingTopicsFromDocs(snap.documents)
+            meetingTopicsSnapshotCache = mapMeetingTopicsFromDocs(topicsSnap.documents)
             mergeMeetingTopicSnapshotsAndPublish()
             uiErrorMessage = nil
         } catch {
             let msg = "Meeting-Punkte konnten nicht aktualisiert werden: \(error.localizedDescription)"
             uiErrorMessage = msg
             showToast(.error, msg)
+            return
         }
+
+        do {
+            let archivesSnap = try await db.collection("meetingArchives")
+                .order(by: "meetingDate", descending: true)
+                .getDocuments(source: .server)
+
+            meetingArchivesSnapshotCache = mapMeetingArchivesFromDocs(archivesSnap.documents)
+            meetingArchives = meetingArchivesSnapshotCache
+        } catch {
+            // Archive read can be intentionally restricted by rules.
+            // Do not fail the whole meeting refresh in that case.
+            if isPermissionDeniedError(error) {
+                meetingArchivesSnapshotCache = []
+                meetingArchives = []
+                return
+            }
+
+            let msg = "Meeting-Archiv konnte nicht aktualisiert werden: \(error.localizedDescription)"
+            uiErrorMessage = msg
+            showToast(.error, msg)
+        }
+    }
+
+    private func buildMeetingProtocol(
+        topics: [MeetingTopic],
+        meetingDate: Date
+    ) -> String {
+        let dateText = meetingArchiveDateString(meetingDate)
+
+        var lines: [String] = [
+            "Meetingprotokoll vom \(dateText)",
+            "",
+            "Punkte (\(topics.count)):"
+        ]
+
+        for (index, topic) in topics.enumerated() {
+            let statusText = topic.status == .done ? "Erledigt" : "Offen"
+            var line = "\(index + 1). \(topic.title) [\(statusText)]"
+            let cleanDetails = topic.details.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleanDetails.isEmpty {
+                line += " - \(cleanDetails)"
+            }
+            lines.append(line)
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private func meetingArchiveDateString(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.dateFormat = "dd.MM.yyyy HH:mm"
+        return f.string(from: date)
     }
 
     @MainActor
@@ -1644,7 +1915,29 @@ class AppState: ObservableObject {
         }
     }
 
-    // MARK: - Firestore MeetingTopics Listener
+    private struct MeetingArchiveDTO {
+        var id: String
+        var meetingDate: Timestamp
+        var archivedAt: Timestamp?
+        var archivedByUserId: String
+        var topicCount: Int
+        var protocolText: String
+        var topics: [[String: Any]]
+
+        init?(id: String, data: [String: Any]) {
+            guard let meetingDate = data["meetingDate"] as? Timestamp else { return nil }
+
+            self.id = id
+            self.meetingDate = meetingDate
+            self.archivedAt = data["archivedAt"] as? Timestamp
+            self.archivedByUserId = (data["archivedByUserId"] as? String) ?? ""
+            self.topicCount = (data["topicCount"] as? Int) ?? 0
+            self.protocolText = (data["protocolText"] as? String) ?? ""
+            self.topics = (data["topics"] as? [[String: Any]]) ?? []
+        }
+    }
+
+    // MARK: - Firestore MeetingTopics / MeetingArchives Listener
 
     private func mapMeetingTopicsFromDocs(_ docs: [QueryDocumentSnapshot]) -> [MeetingTopic] {
         docs.compactMap { doc in
@@ -1664,6 +1957,53 @@ class AppState: ObservableObject {
                 updatedByUserId: dto.updatedByUserId
             )
         }
+    }
+
+    private func mapMeetingArchivesFromDocs(_ docs: [QueryDocumentSnapshot]) -> [MeetingArchive] {
+        docs.compactMap { doc in
+            guard let dto = MeetingArchiveDTO(id: doc.documentID, data: doc.data()) else { return nil }
+            guard let archiveId = UUID(uuidString: dto.id) else { return nil }
+
+            let mappedTopics: [MeetingTopic] = dto.topics.compactMap { topicData in
+                guard
+                    let topicIdRaw = topicData["id"] as? String,
+                    let topicId = UUID(uuidString: topicIdRaw),
+                    let title = topicData["title"] as? String,
+                    let statusRaw = topicData["statusRaw"] as? String,
+                    let createdByUserId = topicData["createdByUserId"] as? String
+                else {
+                    return nil
+                }
+
+                let createdAt = (topicData["createdAt"] as? Timestamp)?.dateValue() ?? Date.distantPast
+                let status = MeetingTopicStatus(rawValue: statusRaw) ?? .open
+                let details = (topicData["details"] as? String) ?? ""
+                let updatedAt = (topicData["updatedAt"] as? Timestamp)?.dateValue()
+                let updatedBy = topicData["updatedByUserId"] as? String
+
+                return MeetingTopic(
+                    id: topicId,
+                    title: title,
+                    details: details,
+                    status: status,
+                    createdAt: createdAt,
+                    createdByUserId: createdByUserId,
+                    updatedAt: updatedAt,
+                    updatedByUserId: updatedBy
+                )
+            }
+
+            return MeetingArchive(
+                id: archiveId,
+                meetingDate: dto.meetingDate.dateValue(),
+                archivedAt: dto.archivedAt?.dateValue() ?? dto.meetingDate.dateValue(),
+                archivedByUserId: dto.archivedByUserId,
+                topicCount: dto.topicCount,
+                protocolText: dto.protocolText,
+                topics: mappedTopics
+            )
+        }
+        .sorted { $0.meetingDate > $1.meetingDate }
     }
 
     private func mergeMeetingTopicSnapshotsAndPublish() {
@@ -1749,13 +2089,59 @@ class AppState: ObservableObject {
             }
     }
 
+    private func startMeetingArchivesListenerIfNeeded() {
+        guard meetingArchivesListener == nil else { return }
+        guard currentUser != nil else { return }
+
+        let query = db.collection("meetingArchives").order(by: "meetingDate", descending: true)
+        meetingArchivesListener = query.addSnapshotListener(includeMetadataChanges: false) {
+            [weak self] snapshot, error in
+            guard let self else { return }
+
+            if let error {
+                if self.isPermissionDeniedError(error) {
+                    DispatchQueue.main.async {
+                        self.meetingArchivesSnapshotCache = []
+                        self.meetingArchives = []
+                    }
+                    return
+                }
+                DispatchQueue.main.async {
+                    self.uiErrorMessage = "Meeting-Archiv konnte nicht geladen werden: \(error.localizedDescription)"
+                }
+                return
+            }
+
+            let docs = snapshot?.documents ?? []
+            self.firestoreListenerQueue.async { [weak self] in
+                guard let self else { return }
+                let mapped = self.mapMeetingArchivesFromDocs(docs)
+                DispatchQueue.main.async {
+                    self.meetingArchivesSnapshotCache = mapped
+                    self.meetingArchives = mapped
+                }
+            }
+        }
+    }
+
     private func meetingTopicErrorMessage(prefix: String, error: Error) -> String {
-        let ns = error as NSError
-        if ns.domain == FirestoreErrorDomain &&
-            ns.code == FirestoreErrorCode.permissionDenied.rawValue {
+        if isPermissionDeniedError(error) {
             return "\(prefix): Zugriff verweigert. Bitte Firestore-Regeln für `meetingTopics` prüfen."
         }
         return "\(prefix): \(error.localizedDescription)"
+    }
+
+    private func meetingArchiveErrorMessage(prefix: String, error: Error) -> String {
+        if isPermissionDeniedError(error) {
+            return "\(prefix): Zugriff verweigert. Bitte Firestore-Regeln für `meetingTopics` und `meetingArchives` prüfen."
+        }
+        return "\(prefix): \(error.localizedDescription)"
+    }
+
+    private func isPermissionDeniedError(_ error: Error) -> Bool {
+        let ns = error as NSError
+        return ns.domain == FirestoreErrorDomain &&
+            ns.code == FirestoreErrorCode.permissionDenied.rawValue
     }
 
     private func upsertMeetingTopicToFirestore(_ topic: MeetingTopic) {
@@ -2026,7 +2412,8 @@ class AppState: ObservableObject {
                     a.role != b.role ||
                     a.colorName != b.colorName ||
                     a.annualLeaveDays != b.annualLeaveDays ||
-                    a.birthday != b.birthday {
+                    a.birthday != b.birthday ||
+                    a.pushNotificationsEnabled != b.pushNotificationsEnabled {
                     same = false
                     break
                 }
@@ -2049,6 +2436,7 @@ class AppState: ObservableObject {
         commissionsListener?.remove(); commissionsListener = nil
         meetingTopicsListener?.remove(); meetingTopicsListener = nil
         meetingMetaListener?.remove(); meetingMetaListener = nil
+        meetingArchivesListener?.remove(); meetingArchivesListener = nil
         usersSnapshotCache = []
         invitesSnapshotCache = []
         leaveRequests = []
@@ -2061,9 +2449,11 @@ class AppState: ObservableObject {
         tasks = []
         commissions = []
         meetingTopicsSnapshotCache = []
+        meetingArchivesSnapshotCache = []
         pendingMeetingTopicWritesById = [:]
         pendingMeetingTopicDeletionIds = []
         meetingTopics = []
+        meetingArchives = []
         nextMeetingAt = nil
         didStartRealtimeListeners = false
         isProfileReady = false
@@ -2083,6 +2473,7 @@ class AppState: ObservableObject {
         startCommissionsListenerIfNeeded()
         startMeetingTopicsListenerIfNeeded()
         startMeetingMetaListenerIfNeeded()
+        startMeetingArchivesListenerIfNeeded()
     }
     
     private func startUsersListenersIfNeeded() {

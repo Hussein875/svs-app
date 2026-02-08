@@ -60,6 +60,7 @@ struct PushRoute: Equatable, Codable {
 
     /// Optional helper field for additional data (e.g., decision for leave requests).
     var decision: String?
+    var leaveTypeRaw: String?
 
     /// Raw `userInfo` payload as a debug-only string (not for persistence).
     var debugDescription: String?
@@ -77,6 +78,7 @@ struct PushRoute: Equatable, Codable {
         case .leaveRequestNew, .leaveRequestApproved, .leaveRequestRejected:
             self.entityId = payload.string("requestId")
             self.decision = payload.string("decision")
+            self.leaveTypeRaw = payload.leaveTypeRaw
 
         case .taskAssigned, .taskCompleted:
             self.entityId = payload.string("taskId")
@@ -178,6 +180,13 @@ private struct PushPayload {
         string("type")
     }
 
+    var leaveTypeRaw: String? {
+        string("leaveTypeRaw")
+            ?? string("typeRaw")
+            ?? string("requestTypeRaw")
+            ?? alertBody
+    }
+
     /// Reads a string value for a given key from the payload.
     func string(_ key: String) -> String? {
         if let v = userInfo[key] {
@@ -185,6 +194,23 @@ private struct PushPayload {
             return s.isEmpty ? nil : s
         }
         return nil
+    }
+
+    private var alertBody: String? {
+        if let aps = userInfo["aps"] as? [AnyHashable: Any] {
+            if let alert = aps["alert"] as? [AnyHashable: Any],
+               let body = alert["body"] {
+                let s = String(describing: body).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !s.isEmpty { return s }
+            }
+
+            if let alert = aps["alert"] {
+                let s = String(describing: alert).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !s.isEmpty { return s }
+            }
+        }
+
+        return string("gcm.notification.body") ?? string("body")
     }
 
     /// Tries multiple keys and returns the first string value found.

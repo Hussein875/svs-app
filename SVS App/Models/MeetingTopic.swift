@@ -17,3 +17,13 @@ struct MeetingTopic: Identifiable, Codable, Equatable, Hashable {
     var updatedAt: Date?
     var updatedByUserId: String?
 }
+
+struct MeetingArchive: Identifiable, Codable, Equatable, Hashable {
+    let id: UUID
+    var meetingDate: Date
+    var archivedAt: Date
+    var archivedByUserId: String
+    var topicCount: Int
+    var protocolText: String
+    var topics: [MeetingTopic]
+}

@@ -19,6 +19,7 @@ struct MainView: View {
     @EnvironmentObject var appState: AppState
     @State private var selectedTab: MainTab = .calendar
     @State private var homePushDestination: HomePushDestination?
+    @State private var adminPushDestination: AdminPushDestination?
     @State private var lastHandledPushRouteKey: String = ""
     @State private var lastHandledPushRouteAt: Date = .distantPast
 
@@ -46,7 +47,7 @@ struct MainView: View {
             
             // Admin-spezifische Tabs
             if appState.currentUser?.role == .admin {
-                AdminConsoleView()
+                AdminConsoleView(pushDestination: $adminPushDestination)
                     .tabItem {
                         Label("Admin", systemImage: "shield.lefthalf.filled")
                     }
@@ -86,6 +87,10 @@ struct MainView: View {
         case .leaveRequestNew:
             if appState.currentUser?.role == .admin {
                 selectedTab = .admin
+                adminPushDestination = AdminPushDestination(
+                    kind: isOnCallRequest(route.leaveTypeRaw) ? .onCallSaturdays : .requests,
+                    entityId: asUUID(route.entityId)
+                )
             } else {
                 selectedTab = .calendar
             }
@@ -114,6 +119,10 @@ struct MainView: View {
         case .commissionNew:
             if appState.currentUser?.role == .admin {
                 selectedTab = .admin
+                adminPushDestination = AdminPushDestination(
+                    kind: .commissions,
+                    entityId: asUUID(route.entityId)
+                )
             } else {
                 selectedTab = .home
             }
@@ -126,6 +135,15 @@ struct MainView: View {
     private func asUUID(_ raw: String?) -> UUID? {
         guard let raw else { return nil }
         return UUID(uuidString: raw)
+    }
+
+    private func isOnCallRequest(_ leaveTypeRaw: String?) -> Bool {
+        let normalized = (leaveTypeRaw ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized.contains("bereitschaft")
+            || normalized.contains("oncall")
+            || normalized.contains("on_call")
     }
 
     private func isRecentDuplicate(_ route: PushRoute) -> Bool {

@@ -38,6 +38,25 @@ function normalizeEmail(email: string): string {
 }
 
 /**
+ * Ensures a caller uid belongs to an admin user in Firestore.
+ *
+ * @param {string} callerUid Auth uid of the callable invoker.
+ * @return {Promise<void>} Resolves for admins, throws otherwise.
+ */
+async function ensureCallerIsAdmin(callerUid: string): Promise<void> {
+  const callerSnap = await admin
+    .firestore()
+    .collection("users")
+    .doc(callerUid)
+    .get();
+
+  const callerRole = String(callerSnap.data()?.roleRaw ?? "").trim();
+  if (callerRole !== "admin") {
+    throw new HttpsError("permission-denied", "Admin only.");
+  }
+}
+
+/**
  * Callable Function (Admin-only):
  * - Checks caller is authenticated and has roleRaw==admin in Firestore/<uid>
  * - Creates (or fetches) Firebase Auth user by email.
@@ -51,16 +70,7 @@ export const adminCreateUserInvite = onCall(async (request) => {
   }
 
   // 2) Admin-Rechte prüfen (Firestore users/<callerUid>.roleRaw)
-  const callerSnap = await admin
-    .firestore()
-    .collection("users")
-    .doc(callerUid)
-    .get();
-
-  const callerRole = callerSnap.data()?.roleRaw as string | undefined;
-  if (callerRole !== "admin") {
-    throw new HttpsError("permission-denied", "Admin only.");
-  }
+  await ensureCallerIsAdmin(callerUid);
 
   // 3) Payload validieren
   const data = request.data ?? {};
@@ -118,6 +128,7 @@ export const adminCreateUserInvite = onCall(async (request) => {
     colorName,
     annualLeaveDays,
     email,
+    pushEnabled: true,
     ...(birthdayTs ? {birthday: birthdayTs} : {}),
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     createdByUid: callerUid,
@@ -231,6 +242,31 @@ function logMulticastFailures(
 }
 
 /**
+ * Returns a minimal APNs config that sets a visible app icon badge.
+ *
+ * Badge must be an absolute number (APNs requirement), therefore callers
+ * should pass the current unread counter for the target user.
+ *
+ * @param {number} badgeCount Unread counter value for the target user.
+ * @return {admin.messaging.ApnsConfig} APNs config with concrete badge value.
+ */
+function appIconBadgeApnsConfig(
+  badgeCount: number
+): admin.messaging.ApnsConfig {
+  const normalized = Number.isFinite(badgeCount) ?
+    Math.max(0, Math.min(999, Math.floor(badgeCount))) :
+    0;
+
+  return {
+    payload: {
+      aps: {
+        badge: normalized,
+      },
+    },
+  };
+}
+
+/**
  * Fetches all FCM token refs for users with roleRaw == "admin".
  *
  * @return {Promise<TokenRef[]>} A deduplicated list of admin device tokens.
@@ -294,6 +330,42 @@ async function getUserTokenRefs(userId: string): Promise<TokenRef[]> {
 }
 
 /**
+ * Fetches FCM token refs for all non-admin users (employee/expert and others).
+ *
+ * @return {Promise<TokenRef[]>} Deduplicated list of non-admin device tokens.
+ */
+async function getNonAdminTokenRefs(): Promise<TokenRef[]> {
+  const usersSnap = await admin.firestore()
+    .collection("users")
+    .get();
+
+  const out: TokenRef[] = [];
+  const seen = new Set<string>();
+
+  for (const u of usersSnap.docs) {
+    const roleRaw = String(u.data()?.roleRaw ?? "").trim().toLowerCase();
+    if (roleRaw === "admin") continue;
+
+    const devicesSnap = await admin.firestore()
+      .collection("users")
+      .doc(u.id)
+      .collection("devices")
+      .get();
+
+    for (const d of devicesSnap.docs) {
+      const t = d.data()?.fcmToken;
+      const token = typeof t === "string" ? t.trim() : "";
+      if (!token) continue;
+      if (seen.has(token)) continue;
+      seen.add(token);
+      out.push({token, ref: d.ref, ownerUserId: u.id});
+    }
+  }
+
+  return out;
+}
+
+/**
  * Best-effort lookup of a user's name for push messages.
  *
  * @param {string} userId - Firebase Auth UID of the target user.
@@ -313,6 +385,113 @@ async function getUserNameOrFallback(userId: string): Promise<string> {
 }
 
 /**
+ * Creates a human-readable fallback display name from an email address.
+ *
+ * @param {string} email The email to derive a name from.
+ * @return {string} Display name fallback.
+ */
+function displayNameFromEmail(email: string): string {
+  const local = normalizeEmail(email).split("@")[0] ?? "";
+  const cleaned = local.replace(/[._-]+/g, " ").trim();
+  if (!cleaned) return "Jemand";
+  return cleaned
+    .split(/\s+/)
+    .map((part) => {
+      if (!part) return "";
+      return part.charAt(0).toUpperCase() + part.slice(1);
+    })
+    .join(" ")
+    .trim() || "Jemand";
+}
+
+/**
+ * Formats a Date using German locale.
+ *
+ * @param {Date} date Date to format.
+ * @param {boolean} includeWeekday Whether weekday should be included.
+ * @return {string} Formatted date label.
+ */
+function formatGermanDate(date: Date, includeWeekday = true): string {
+  const opts: Intl.DateTimeFormatOptions = {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    // Keep push dates aligned with the app's target locale.
+    // Without a fixed zone, Cloud Functions defaults can shift dates by -1 day.
+    timeZone: "Europe/Berlin",
+  };
+  if (includeWeekday) {
+    opts.weekday = "short";
+  }
+  return new Intl.DateTimeFormat("de-DE", opts).format(date);
+}
+
+/**
+ * Returns true if two dates fall on the same calendar day (UTC).
+ *
+ * @param {Date} a First date.
+ * @param {Date} b Second date.
+ * @return {boolean} True if same day.
+ */
+function isSameUtcDay(a: Date, b: Date): boolean {
+  return a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate();
+}
+
+/**
+ * Builds a human-readable leave date label from Firestore timestamps.
+ *
+ * @param {unknown} startRaw startDate value.
+ * @param {unknown} endRaw endDate value.
+ * @param {boolean} includeWeekday Whether weekday should be included.
+ * @return {string} Date label for push body.
+ */
+function leaveDateLabel(
+  startRaw: unknown,
+  endRaw: unknown,
+  includeWeekday = true
+): string {
+  const startTs =
+    startRaw instanceof admin.firestore.Timestamp ? startRaw : null;
+  const endTs =
+    endRaw instanceof admin.firestore.Timestamp ? endRaw : null;
+  const startDate = startTs?.toDate() ?? null;
+  const endDate = endTs?.toDate() ?? null;
+
+  if (!startDate && !endDate) return "";
+
+  if (startDate && endDate) {
+    if (isSameUtcDay(startDate, endDate)) {
+      return formatGermanDate(startDate, includeWeekday);
+    }
+    return `${formatGermanDate(startDate, includeWeekday)} - ` +
+      `${formatGermanDate(endDate, includeWeekday)}`;
+  }
+
+  const single = startDate ?? endDate;
+  return single ? formatGermanDate(single, includeWeekday) : "";
+}
+
+/**
+ * Formats a meeting datetime for user-facing push notifications.
+ *
+ * @param {Date} date Meeting date and time.
+ * @return {string} Formatted datetime label.
+ */
+function formatGermanDateTime(date: Date): string {
+  return new Intl.DateTimeFormat("de-DE", {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Berlin",
+  }).format(date);
+}
+
+/**
  * Filters out all token refs that belong to a specific user.
  * Useful to prevent self-notifications (e.g. creator is also an admin).
  *
@@ -329,6 +508,304 @@ function filterOutUserTokenRefs(
   return tokenRefs.filter((tr) => tr.ownerUserId !== uid);
 }
 
+/**
+ * Normalizes an unread badge counter value from Firestore.
+ *
+ * @param {unknown} raw Value from Firestore.
+ * @return {number} Safe integer in the range 0...999.
+ */
+function normalizeUnreadBadgeCount(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(999, Math.floor(n)));
+}
+
+/**
+ * Increments the unread badge counter for one user and returns the new value.
+ *
+ * Counter is stored in users/<uid>.unreadNotificationCount.
+ *
+ * @param {string} userId Firebase Auth UID.
+ * @return {Promise<number>} New unread count after increment.
+ */
+async function incrementUnreadBadgeForUser(userId: string): Promise<number> {
+  const uid = String(userId ?? "").trim();
+  if (!uid) return 1;
+
+  const userRef = admin.firestore().collection("users").doc(uid);
+  return admin.firestore().runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    const current = normalizeUnreadBadgeCount(
+      (snap.data() as Record<string, unknown> | undefined)
+        ?.unreadNotificationCount
+    );
+    const next = Math.min(999, current + 1);
+    tx.set(userRef, {
+      unreadNotificationCount: next,
+      unreadNotificationUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+    return next;
+  });
+}
+
+/**
+ * Clears the unread badge counter for one user.
+ *
+ * @param {string} userId Firebase Auth UID.
+ * @return {Promise<void>} Resolves when reset is written.
+ */
+async function clearUnreadBadgeForUser(userId: string): Promise<void> {
+  const uid = String(userId ?? "").trim();
+  if (!uid) return;
+
+  await admin.firestore().collection("users").doc(uid).set({
+    unreadNotificationCount: 0,
+    unreadNotificationUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+}
+
+/**
+ * Splits token refs by owner user id so each owner can receive its own badge.
+ *
+ * @param {TokenRef[]} tokenRefs Token refs to split.
+ * @return {Map<string, TokenRef[]>} Grouped refs keyed by owner uid.
+ */
+function groupTokenRefsByOwner(tokenRefs: TokenRef[]): Map<string, TokenRef[]> {
+  const out = new Map<string, TokenRef[]>();
+  for (const tr of tokenRefs) {
+    const owner = String(tr.ownerUserId ?? "").trim();
+    if (!owner) continue;
+    const list = out.get(owner) ?? [];
+    list.push(tr);
+    out.set(owner, list);
+  }
+  return out;
+}
+
+/**
+ * Sends one logical push payload to many users while maintaining per-user
+ * unread badge counters.
+ *
+ * Each owner gets:
+ * 1) unreadNotificationCount incremented in users/<uid>
+ * 2) push to all of their devices with that concrete badge value
+ *
+ * @param {string} tag Short logging tag.
+ * @param {TokenRef[]} tokenRefs Recipient device token refs.
+ * @param {admin.messaging.Notification} notification Notification payload.
+ * @param {Record<string, string>} data Data payload.
+ * @return {Promise<void>} Resolves after all owner groups are handled.
+ */
+async function sendBadgeCountedMulticast(
+  tag: string,
+  tokenRefs: TokenRef[],
+  notification: admin.messaging.Notification,
+  data: Record<string, string>
+): Promise<void> {
+  const byOwner = groupTokenRefsByOwner(tokenRefs);
+  if (byOwner.size === 0) {
+    console.log("[push][" + tag + "] no owner groups");
+    return;
+  }
+
+  let totalSuccess = 0;
+  let totalFailure = 0;
+
+  for (const [ownerUserId, ownerRefs] of byOwner.entries()) {
+    const tokens = ownerRefs.map((t) => t.token);
+    if (tokens.length === 0) continue;
+
+    let badgeCount = 1;
+    try {
+      badgeCount = await incrementUnreadBadgeForUser(ownerUserId);
+    } catch (e) {
+      console.warn(
+        "[push][" + tag + "] badge increment failed for",
+        ownerUserId,
+        e
+      );
+    }
+
+    const resp = await admin.messaging().sendEachForMulticast({
+      tokens,
+      apns: appIconBadgeApnsConfig(badgeCount),
+      notification,
+      data,
+    });
+
+    totalSuccess += resp.successCount;
+    totalFailure += resp.failureCount;
+
+    logMulticastFailures(
+      tag,
+      tokens,
+      resp.responses as Array<{success: boolean; error?: unknown}>
+    );
+    await cleanupDeadTokens(
+      ownerRefs,
+      resp.responses as Array<{success: boolean; error?: unknown}>
+    );
+  }
+
+  console.log(
+    "[push][" + tag + "] sent",
+    totalSuccess,
+    "ok,",
+    totalFailure,
+    "failed"
+  );
+}
+
+export const clearMyUnreadBadge = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  await clearUnreadBadgeForUser(callerUid);
+  return {ok: true};
+});
+
+export const setMyPushEnabled = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  const data = (request.data ?? {}) as Record<string, unknown>;
+  const enabledRaw = data.enabled;
+  if (typeof enabledRaw !== "boolean") {
+    throw new HttpsError("invalid-argument", "enabled must be boolean.");
+  }
+
+  const enabled = enabledRaw;
+  const patch: Record<string, unknown> = {
+    pushEnabled: enabled,
+    pushEnabledUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (!enabled) {
+    patch.unreadNotificationCount = 0;
+    patch.unreadNotificationUpdatedAt =
+      admin.firestore.FieldValue.serverTimestamp();
+  }
+
+  await admin.firestore().collection("users").doc(callerUid)
+    .set(patch, {merge: true});
+
+  return {
+    ok: true,
+    pushEnabled: enabled,
+  };
+});
+
+export const adminDeleteMeetingArchive = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  await ensureCallerIsAdmin(callerUid);
+
+  const data = (request.data ?? {}) as Record<string, unknown>;
+  const archiveId = String(data.archiveId ?? "").trim();
+  if (!archiveId) {
+    throw new HttpsError("invalid-argument", "archiveId required.");
+  }
+
+  await admin.firestore()
+    .collection("meetingArchives")
+    .doc(archiveId)
+    .delete();
+
+  return {
+    ok: true,
+    archiveId,
+  };
+});
+
+/**
+ * Sends a "meeting date set/changed" push to all non-admin users.
+ *
+ * @param {admin.firestore.Timestamp} meetingAtTs Timestamp of the next meeting.
+ * @param {string} updatedByUid User who changed the date (excluded from push).
+ * @param {string} tag Short log tag.
+ */
+async function pushMeetingDateChanged(
+  meetingAtTs: admin.firestore.Timestamp,
+  updatedByUid: string,
+  tag: string
+): Promise<void> {
+  const meetingAt = meetingAtTs.toDate();
+  const meetingDateLabel = formatGermanDateTime(meetingAt);
+
+  const allTokenRefs = await getNonAdminTokenRefs();
+  const tokenRefs = filterOutUserTokenRefs(allTokenRefs, updatedByUid);
+  if (tokenRefs.length === 0) {
+    console.log("[push][" + tag + "] no employee tokens");
+    return;
+  }
+
+  await sendBadgeCountedMulticast(
+    tag,
+    tokenRefs,
+    {
+      title: "Neuer Meeting-Termin",
+      body: "Nächstes Meeting: " + meetingDateLabel,
+    },
+    {
+      type: "meeting_schedule_updated",
+      meetingDateLabel,
+      meetingDateIso: meetingAt.toISOString(),
+    }
+  );
+}
+
+export const pushOnMeetingScheduleCreated = onDocumentCreated(
+  "meetingMeta/schedule",
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const data = (snap.data() ?? {}) as Record<string, unknown>;
+    const meetingAtTs = data.nextMeetingAt;
+    if (!(meetingAtTs instanceof admin.firestore.Timestamp)) return;
+
+    const updatedByUid = String(data.updatedByUserId ?? "").trim();
+    await pushMeetingDateChanged(meetingAtTs, updatedByUid, "meeting_created");
+  }
+);
+
+export const pushOnMeetingScheduleUpdated = onDocumentUpdated(
+  "meetingMeta/schedule",
+  async (event) => {
+    const before = event.data?.before;
+    const after = event.data?.after;
+    if (!before || !after) return;
+
+    const beforeData = (before.data() ?? {}) as Record<string, unknown>;
+    const afterData = (after.data() ?? {}) as Record<string, unknown>;
+
+    const beforeTs = beforeData.nextMeetingAt;
+    const afterTs = afterData.nextMeetingAt;
+
+    const beforeDate =
+      beforeTs instanceof admin.firestore.Timestamp ? beforeTs.toDate() : null;
+    const afterDate =
+      afterTs instanceof admin.firestore.Timestamp ? afterTs.toDate() : null;
+
+    // No push when the date was removed (e.g., meeting archived).
+    if (!afterDate) return;
+
+    // No push if timestamp did not change.
+    if (beforeDate && beforeDate.getTime() === afterDate.getTime()) return;
+
+    const updatedByUid = String(afterData.updatedByUserId ?? "").trim();
+    const meetingAtTs = afterTs as admin.firestore.Timestamp;
+    await pushMeetingDateChanged(meetingAtTs, updatedByUid, "meeting_updated");
+  }
+);
+
 // Neuer Antrag -> Admins
 export const pushOnNewLeaveRequest =
   onDocumentCreated(
@@ -340,6 +817,51 @@ export const pushOnNewLeaveRequest =
       const data = (snap.data() ?? {}) as Record<string, unknown>;
 
       const typeRaw = String(data.typeRaw ?? "").trim() || "Antrag";
+      const normalizedType = typeRaw.toLowerCase();
+      const isOnCall = normalizedType === "bereitschaft";
+      const isSick = normalizedType === "krankheit";
+      const isVacation = normalizedType === "urlaub";
+      const requestUserId = String(data.userId ?? "").trim();
+      const requestUserEmail = normalizeEmail(String(data.userEmail ?? ""));
+      const requestDate = leaveDateLabel(
+        data.startDate,
+        data.endDate,
+        false
+      );
+      let requestUserName = requestUserId ?
+        await getUserNameOrFallback(requestUserId) :
+        "Jemand";
+      if (requestUserName === "Jemand" && requestUserEmail) {
+        requestUserName = displayNameFromEmail(requestUserEmail);
+      }
+
+      let notificationTitle = "Neuer Antrag";
+      if (isOnCall) {
+        notificationTitle = "Neue Bereitschaft";
+      } else if (isSick) {
+        notificationTitle = "Krankheit gemeldet";
+      } else if (isVacation) {
+        notificationTitle = "Neuer Urlaubsantrag";
+      }
+      let notificationBody = typeRaw;
+      const hasName = requestUserName && requestUserName !== "Jemand";
+      const hasDate = !!requestDate;
+      let requesterAndDate = "";
+      if (hasName && hasDate) {
+        requesterAndDate = `${requestUserName} · ${requestDate}`;
+      } else if (hasName) {
+        requesterAndDate = requestUserName;
+      } else if (hasDate) {
+        requesterAndDate = requestDate;
+      }
+
+      if (isOnCall || isSick || isVacation) {
+        if (requesterAndDate) {
+          notificationBody = requesterAndDate;
+        }
+      } else if (requesterAndDate) {
+        notificationBody = `${typeRaw} · ${requesterAndDate}`;
+      }
 
       // Prevent self-notifications: if the creator is also an admin,
       // do not send the "new request" push to their own devices.
@@ -361,40 +883,25 @@ export const pushOnNewLeaveRequest =
         allAdminTokenRefs,
         creatorUserId
       );
-      const tokens = tokenRefs.map((t) => t.token);
-      if (tokens.length === 0) {
+      if (tokenRefs.length === 0) {
         console.log("[push][new] no admin tokens");
         return;
       }
 
-      const resp = await admin.messaging().sendEachForMulticast({
-        tokens,
-        notification: {
-          title: "Neuer Antrag",
-          body: `${typeRaw}`,
-        },
-        data: {
-          type: "leave_request_new",
-          requestId: String(event.params.requestId ?? ""),
-        },
-      });
-
-      console.log(
-        "[push][new] sent",
-        resp.successCount,
-        "ok,",
-        resp.failureCount,
-        "failed"
-      );
-
-      logMulticastFailures(
+      await sendBadgeCountedMulticast(
         "new",
-        tokens,
-        resp.responses as Array<{success: boolean; error?: unknown}>
-      );
-      await cleanupDeadTokens(
         tokenRefs,
-        resp.responses as Array<{success: boolean; error?: unknown}>
+        {
+          title: notificationTitle,
+          body: notificationBody,
+        },
+        {
+          type: "leave_request_new",
+          leaveTypeRaw: typeRaw,
+          requesterName: requestUserName,
+          requestDateLabel: requestDate,
+          requestId: String(event.params.requestId ?? ""),
+        }
       );
     }
   );
@@ -422,6 +929,32 @@ export const pushOnLeaveRequestApproved = onDocumentUpdated(
 
     const userId = String(afterData.userId ?? "").trim();
     if (!userId) return;
+    const leaveTypeRaw = String(afterData.typeRaw ?? "").trim() || "Antrag";
+    const leaveTypeNormalized = leaveTypeRaw.toLowerCase();
+    const requestDate = leaveDateLabel(
+      afterData.startDate,
+      afterData.endDate,
+      false
+    );
+
+    let notificationTitle = isApproved ? "Antrag genehmigt" :
+      "Antrag abgelehnt";
+
+    if (leaveTypeNormalized === "urlaub") {
+      notificationTitle = isApproved ? "Urlaubsantrag genehmigt" :
+        "Urlaubsantrag abgelehnt";
+    } else if (leaveTypeNormalized === "krankheit") {
+      notificationTitle = isApproved ? "Krankmeldung bestätigt" :
+        "Krankmeldung abgelehnt";
+    } else if (leaveTypeNormalized === "bereitschaft") {
+      notificationTitle = isApproved ? "Bereitschaft bestätigt" :
+        "Bereitschaft abgelehnt";
+    }
+
+    let notificationBody = leaveTypeRaw;
+    if (requestDate) {
+      notificationBody = `${leaveTypeRaw} · ${requestDate}`;
+    }
 
     console.log(
       "[push][decision] requestId=",
@@ -433,45 +966,25 @@ export const pushOnLeaveRequestApproved = onDocumentUpdated(
     );
 
     const tokenRefs = await getUserTokenRefs(userId);
-    const tokens = tokenRefs.map((t) => t.token);
-    if (tokens.length === 0) {
+    if (tokenRefs.length === 0) {
       console.log("[push][decision] no user tokens for", userId);
       return;
     }
 
-    const resp = await admin.messaging().sendEachForMulticast({
-      tokens,
-      notification: {
-        title: isApproved ? "Antrag genehmigt" : "Antrag abgelehnt",
-        body: isApproved ? "Dein Antrag wurde genehmigt." :
-          "Dein Antrag wurde abgelehnt.",
+    await sendBadgeCountedMulticast(
+      isApproved ? "approved" : "rejected",
+      tokenRefs,
+      {
+        title: notificationTitle,
+        body: notificationBody,
       },
-      data: {
+      {
         type: isApproved ? "leave_request_approved" : "leave_request_rejected",
         requestId: String(event.params.requestId ?? ""),
         decision: isApproved ? "approved" : "rejected",
-      },
-    });
-
-    const tag = isApproved ? "approved" : "rejected";
-
-    console.log(
-      "[push][decision] sent",
-      tag,
-      resp.successCount,
-      "ok,",
-      resp.failureCount,
-      "failed"
-    );
-
-    logMulticastFailures(
-      tag,
-      tokens,
-      resp.responses as Array<{success: boolean; error?: unknown}>
-    );
-    await cleanupDeadTokens(
-      tokenRefs,
-      resp.responses as Array<{success: boolean; error?: unknown}>
+        leaveTypeRaw,
+        requestDateLabel: requestDate,
+      }
     );
   }
 );
@@ -510,42 +1023,24 @@ export const pushOnTaskAssigned = onDocumentCreated(
     const fromName = await getUserNameOrFallback(creatorUserId);
 
     const tokenRefs = await getUserTokenRefs(assignedUserId);
-    const tokens = tokenRefs.map((t) => t.token);
-    if (tokens.length === 0) {
+    if (tokenRefs.length === 0) {
       console.log("[push][task_assigned] no user tokens for", assignedUserId);
       return;
     }
 
-    const resp = await admin.messaging().sendEachForMulticast({
-      tokens,
-      notification: {
+    await sendBadgeCountedMulticast(
+      "task_assigned",
+      tokenRefs,
+      {
         title: "Neue Aufgabe",
         body: fromName + " hat dir eine Aufgabe zugeteilt: " + title,
       },
-      data: {
+      {
         type: "task_assigned",
         taskId: String(event.params.taskId ?? ""),
         toUserId: assignedUserId,
         fromUserId: creatorUserId,
-      },
-    });
-
-    console.log(
-      "[push][task_assigned] sent",
-      resp.successCount,
-      "ok,",
-      resp.failureCount,
-      "failed"
-    );
-
-    logMulticastFailures(
-      "task_assigned",
-      tokens,
-      resp.responses as Array<{success: boolean; error?: unknown}>
-    );
-    await cleanupDeadTokens(
-      tokenRefs,
-      resp.responses as Array<{success: boolean; error?: unknown}>
+      }
     );
   }
 );
@@ -584,43 +1079,25 @@ export const pushOnTaskReassigned = onDocumentUpdated(
     const fromName = await getUserNameOrFallback(creatorUserId);
 
     const tokenRefs = await getUserTokenRefs(afterAssignee);
-    const tokens = tokenRefs.map((t) => t.token);
-    if (tokens.length === 0) {
+    if (tokenRefs.length === 0) {
       console.log("[push][task_reassigned] no user tokens for", afterAssignee);
       return;
     }
 
-    const resp = await admin.messaging().sendEachForMulticast({
-      tokens,
-      notification: {
+    await sendBadgeCountedMulticast(
+      "task_reassigned",
+      tokenRefs,
+      {
         title: "Aufgabe zugeteilt",
         body: fromName + " hat dir eine Aufgabe zugeteilt: " + title,
       },
-      data: {
+      {
         type: "task_assigned",
         taskId: String(event.params.taskId ?? ""),
         toUserId: afterAssignee,
         fromUserId: creatorUserId,
         reassigned: "1",
-      },
-    });
-
-    console.log(
-      "[push][task_reassigned] sent",
-      resp.successCount,
-      "ok,",
-      resp.failureCount,
-      "failed"
-    );
-
-    logMulticastFailures(
-      "task_reassigned",
-      tokens,
-      resp.responses as Array<{success: boolean; error?: unknown}>
-    );
-    await cleanupDeadTokens(
-      tokenRefs,
-      resp.responses as Array<{success: boolean; error?: unknown}>
+      }
     );
   }
 );
@@ -668,42 +1145,24 @@ export const pushOnTaskCompleted = onDocumentUpdated(
     );
 
     const tokenRefs = await getUserTokenRefs(creatorUserId);
-    const tokens = tokenRefs.map((t) => t.token);
-    if (tokens.length === 0) {
+    if (tokenRefs.length === 0) {
       console.log("[push][task_completed] no user tokens for", creatorUserId);
       return;
     }
 
-    const resp = await admin.messaging().sendEachForMulticast({
-      tokens,
-      notification: {
+    await sendBadgeCountedMulticast(
+      "task_completed",
+      tokenRefs,
+      {
         title: "Aufgabe erledigt",
         body: doneByName + " hat eine Aufgabe abgeschlossen: " + title,
       },
-      data: {
+      {
         type: "task_completed",
         taskId: String(event.params.taskId ?? ""),
         toUserId: creatorUserId,
         fromUserId: updatedByUserId || assignedUserId,
-      },
-    });
-
-    console.log(
-      "[push][task_completed] sent",
-      resp.successCount,
-      "ok,",
-      resp.failureCount,
-      "failed"
-    );
-
-    logMulticastFailures(
-      "task_completed",
-      tokens,
-      resp.responses as Array<{success: boolean; error?: unknown}>
-    );
-    await cleanupDeadTokens(
-      tokenRefs,
-      resp.responses as Array<{success: boolean; error?: unknown}>
+      }
     );
   }
 );
@@ -1723,9 +2182,7 @@ export const commissionCreatedSendPdf = onDocumentCreated(
           allAdminTokenRefs,
           creatorUid
         );
-        const tokens = tokenRefs.map((t) => t.token);
-
-        if (tokens.length === 0) {
+        if (tokenRefs.length === 0) {
           console.log("[push][commission_new] no admin tokens");
         } else {
           const name = String(data.recommenderName ?? "").trim();
@@ -1736,35 +2193,17 @@ export const commissionCreatedSendPdf = onDocumentCreated(
             amountTxt !== "—" ? amountTxt : "",
           ].filter(Boolean);
 
-          const resp = await admin.messaging().sendEachForMulticast({
-            tokens,
-            notification: {
+          await sendBadgeCountedMulticast(
+            "commission_new",
+            tokenRefs,
+            {
               title: "Provision auszuzahlen",
               body: bodyParts.join(" · "),
             },
-            data: {
+            {
               type: "commission_new",
               commissionId,
-            },
-          });
-
-          console.log(
-            "[push][commission_new] sent",
-            resp.successCount,
-            "ok,",
-            resp.failureCount,
-            "failed"
-          );
-
-          logMulticastFailures(
-            "commission_new",
-            tokens,
-            resp.responses as Array<{success: boolean; error?: unknown}>
-          );
-
-          await cleanupDeadTokens(
-            tokenRefs,
-            resp.responses as Array<{success: boolean; error?: unknown}>
+            }
           );
         }
 

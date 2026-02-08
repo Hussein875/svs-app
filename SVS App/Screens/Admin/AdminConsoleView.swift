@@ -8,8 +8,25 @@ import Foundation
 import SwiftUI
 import FirebaseFirestore
 
+struct AdminPushDestination: Identifiable, Hashable {
+    enum Kind: Hashable {
+        case requests
+        case onCallSaturdays
+        case commissions
+    }
+
+    let id = UUID()
+    let kind: Kind
+    let entityId: UUID?
+}
+
 struct AdminConsoleView: View {
     @EnvironmentObject var appState: AppState
+    @Binding private var pushDestination: AdminPushDestination?
+
+    init(pushDestination: Binding<AdminPushDestination?> = .constant(nil)) {
+        _pushDestination = pushDestination
+    }
     
     var body: some View {
         NavigationStack {
@@ -109,6 +126,19 @@ struct AdminConsoleView: View {
                     Spacer(minLength: 18)
                 }
                 .padding(.top, 2)
+            }
+            .navigationDestination(item: $pushDestination) { destination in
+                switch destination.kind {
+                case .requests:
+                    AdminRequestsScreen()
+                        .environmentObject(appState)
+                case .onCallSaturdays:
+                    AdminOnCallSaturdaysScreen()
+                        .environmentObject(appState)
+                case .commissions:
+                    AdminCommissionsScreen()
+                        .environmentObject(appState)
+                }
             }
             .background(Color(.systemGroupedBackground))
             .onAppear {
