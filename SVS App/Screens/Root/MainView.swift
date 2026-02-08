@@ -757,6 +757,7 @@ private struct WorkHomeView: View {
         return appState.leaveRequests
             .filter { $0.user.id == me.id }
             .filter { $0.endDate >= today }
+            .filter { $0.type != .onCallSaturday }
             .count
     }
 
