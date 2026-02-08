@@ -188,6 +188,12 @@ struct MeetingTopicsView: View {
         }
         .listStyle(.insetGrouped)
         .scrollDismissesKeyboard(.interactively)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                isInputFocused = false
+            },
+            including: .subviews
+        )
         .refreshable {
             await appState.refreshMeetingTopicsFromServer()
         }
