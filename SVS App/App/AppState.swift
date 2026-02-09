@@ -7,6 +7,8 @@
 import Foundation
 import SwiftUI
 import Combine
+import UIKit
+import UserNotifications
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseFunctions
@@ -515,6 +517,46 @@ class AppState: ObservableObject {
             }
             uiErrorMessage = "Push-Einstellung konnte nicht gespeichert werden: \(error.localizedDescription)"
             return false
+        }
+    }
+
+    /// Resets the unread push counter for the current user (server-side).
+    /// Call this when opening the in-app notifications screen.
+    @MainActor
+    @discardableResult
+    func clearMyUnreadBadge() async -> Bool {
+        guard Auth.auth().currentUser != nil else { return false }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            _ = try await functions.httpsCallable("clearMyUnreadBadge").call([:])
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Called whenever the app becomes active.
+    /// Ensures the app icon badge is cleared locally and server-side.
+    @MainActor
+    func resetUnreadBadgeOnAppOpen() {
+        if #available(iOS 16.0, *) {
+            UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
+        } else {
+            UIApplication.shared.applicationIconBadgeNumber = 0
+        }
+
+        _Concurrency.Task { [weak self] in
+            guard let self else { return }
+
+            // Auth restore can lag a bit after cold start; retry briefly.
+            for _ in 0..<8 {
+                if Auth.auth().currentUser != nil {
+                    _ = await self.clearMyUnreadBadge()
+                    return
+                }
+                try? await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
+            }
         }
     }
     

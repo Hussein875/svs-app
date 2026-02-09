@@ -22,7 +22,7 @@ struct MenuView: View {
     var body: some View {
         NavigationStack {
             menuList
-                .navigationTitle("Menü")
+                .navigationTitle("Einstellungen")
                 .navigationBarTitleDisplayMode(.inline)
         }
     }
@@ -64,87 +64,84 @@ struct MenuView: View {
     }
 
     private var userSection: some View {
-        Section(header: Text("Benutzer")) {
+        Section {
             if let user = appState.currentUser {
-                LabeledContent("Eingeloggt als") {
-                    Text(user.name)
-                        .foregroundColor(user.color)
-                }
-
-                LabeledContent("Rolle") {
-                    Text(germanRoleName(user.role))
-                        .foregroundColor(.secondary)
-                }
+                userProfileCard(user)
             } else {
                 Text("Nicht eingeloggt")
                     .foregroundColor(.secondary)
             }
         }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 
     private var appearanceSection: some View {
         Section(header: Text("Erscheinungsbild")) {
-            Picker("Akzentfarbe", selection: $selectedColorName) {
-                ForEach(availableColors, id: \.self) { c in
-                    HStack(spacing: 10) {
-                        Circle()
-                            .fill(c.color)
-                            .frame(width: 14, height: 14)
-                            .overlay(
-                                Circle().stroke(
-                                    Color.secondary.opacity(0.25),
-                                    lineWidth: 1
-                                )
-                            )
-                        Text(c.germanName)
+            VStack(alignment: .leading, spacing: 8) {
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 30, maximum: 30), spacing: 10)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
+                    ForEach(availableColors, id: \.self) { color in
+                        colorChip(color)
                     }
-                    .tag(c.rawValue)
                 }
             }
+            .padding(.vertical, 2)
             .disabled(isSavingColor)
-
-            HStack(spacing: 8) {
-                Text("Vorschau")
+            HStack(spacing: 6) {
+                Text("Aktuell:")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Circle()
-                    .fill(Color.svsAccentColor(from: selectedColorName))
-                    .frame(width: 16, height: 16)
-                    .overlay(Circle().stroke(Color.secondary.opacity(0.25), lineWidth: 1))
+                Text(UserColor.from(selectedColorName).germanName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
             }
         }
     }
 
     private var appInfoSection: some View {
         Section(header: Text("App-Info")) {
-            LabeledContent("Version") {
-                Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–")
-                    .foregroundColor(.secondary)
-            }
-            LabeledContent("Entwickelt von") {
-                Text("Hussein Souleiman")
-                    .foregroundColor(.secondary)
-            }
-            LabeledContent("Entwickelt für") {
-                Text("SV Souleiman")
-                    .foregroundColor(.secondary)
-            }
+            infoRow(
+                title: "Version",
+                value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–",
+                systemImage: "number"
+            )
+            infoRow(
+                title: "Entwickelt von",
+                value: "Hussein Souleiman",
+                systemImage: "person.crop.circle"
+            )
+            infoRow(
+                title: "Entwickelt für",
+                value: "SV Souleiman",
+                systemImage: "building.2"
+            )
         }
     }
 
     private var signOutAndFooterSection: some View {
         Section {
-            VStack(spacing: 6) {
+            VStack(spacing: 12) {
                 if appState.currentUser != nil {
                     Button {
                         showSignOutConfirm = true
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 8) {
                             Image(systemName: "rectangle.portrait.and.arrow.right")
                             Text("Ausloggen")
+                            Spacer(minLength: 0)
                         }
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.red)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(Color.red.opacity(0.08))
+                        )
                     }
                     .buttonStyle(.plain)
                 }
@@ -163,6 +160,97 @@ struct MenuView: View {
         }
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+    }
+
+    private func userProfileCard(_ user: User) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(user.color.opacity(0.18))
+                    .frame(width: 42, height: 42)
+                    .overlay(
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(user.color)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(user.name)
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Text(germanRoleName(user.role))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "envelope")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+                Text(user.email)
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(user.color.opacity(0.30), lineWidth: 1)
+        )
+    }
+
+    private func infoRow(title: String, value: String, systemImage: String) -> some View {
+        HStack(spacing: 10) {
+            Label(title, systemImage: systemImage)
+                .foregroundColor(.secondary)
+            Spacer(minLength: 0)
+            Text(value)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+    }
+
+    private func colorChip(_ color: UserColor) -> some View {
+        let isSelected = selectedColorName == color.rawValue
+
+        return Button {
+            guard !isSavingColor else { return }
+            selectedColorName = color.rawValue
+        } label: {
+            Circle()
+                .fill(color.color)
+                .frame(width: 24, height: 24)
+                .overlay(
+                    Circle()
+                        .stroke(
+                            isSelected ? Color.primary.opacity(0.7) : Color.secondary.opacity(0.24),
+                            lineWidth: isSelected ? 2 : 1
+                        )
+                )
+                .overlay {
+                    if isSelected {
+                        Circle()
+                            .stroke(Color(.systemBackground), lineWidth: 1.5)
+                            .padding(3)
+                    Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(Color.white, Color.black.opacity(0.25))
+                }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(color.germanName)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     private func syncStateFromCurrentUser() {

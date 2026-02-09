@@ -102,10 +102,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// Wird aufgerufen, wenn eine Push Notification eingeht,
     /// während die App im Vordergrund aktiv ist.
     /// - Steuert, wie die Notification angezeigt wird
-    /// - Rückgabe von Banner + Sound + Badge
+    /// - Rückgabe von Banner + Sound (kein Badge im Vordergrund)
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound, .badge]
+        [.banner, .sound]
     }
 
     /// Wird aufgerufen, wenn der User aktiv auf eine Push Notification tippt.
@@ -156,17 +156,26 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             }
         }
     }
+
 }
 
 @main
 struct SVS_AppApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var appState = AppState()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
+                .onAppear {
+                    appState.resetUnreadBadgeOnAppOpen()
+                }
+        }
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            appState.resetUnreadBadgeOnAppOpen()
         }
     }
 }

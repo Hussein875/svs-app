@@ -321,7 +321,7 @@ private struct ScannerScreen: View {
                     .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
             )
 
-            Text("Dateiname: \(formattedScanName)")
+            Text("Dateiname: \(formattedScanNameNoLeadingZeros)")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -500,7 +500,7 @@ private struct ScannerScreen: View {
             .sheet(isPresented: $isPresentingScanner) {
                 DocumentScanner { images in
                     do {
-                        let safeBase = sanitizedFileName(formattedScanName)
+                        let safeBase = sanitizedFileName(formattedScanNameNoLeadingZeros)
                         let finalName = "\(safeBase)_\(timestampString()).pdf"
                         let url = try makePDF(from: images, fileName: finalName)
                         scannedPDFURL = url
@@ -645,7 +645,7 @@ private struct ScannerScreen: View {
         defer { isUploadingToDrive = false }
 
         do {
-            let safeBase = sanitizedFileName(formattedScanName)
+            let safeBase = sanitizedFileName(formattedScanNameNoLeadingZeros)
             let finalName = "\(safeBase)_\(timestampString()).pdf"
 
             let storagePath = "scans/\(user.uid)/\(finalName)"
@@ -662,7 +662,7 @@ private struct ScannerScreen: View {
             )
 
             driveUploadSuccessMessage =
-              "Datei wurde in Google Drive abgelegt. (ID: \(driveFileId))"
+              "Datei wurde in Google Drive abgelegt."
         } catch {
             uiErrorMessage = "Drive-Upload fehlgeschlagen: \(error.localizedDescription)"
         }
