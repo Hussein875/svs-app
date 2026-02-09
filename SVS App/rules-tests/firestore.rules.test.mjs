@@ -18,7 +18,7 @@ import {
 } from "firebase/firestore";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const RULES_PATH = resolve(__dirname, "../firestore.rules");
+const RULES_PATH = resolve(__dirname, "./firestore.rules");
 const rules = readFileSync(RULES_PATH, "utf8");
 
 let testEnv;

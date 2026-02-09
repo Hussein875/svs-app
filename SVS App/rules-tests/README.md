@@ -1,6 +1,6 @@
 # Firestore Rules Tests
 
-Diese Tests prüfen die produktiven Firestore-Regeln aus `../firestore.rules`.
+Diese Tests prüfen die produktiven Firestore-Regeln aus `../firestore.rules` (werden beim Testlauf automatisch nach `./firestore.rules` kopiert).
 
 ## Voraussetzungen
 
