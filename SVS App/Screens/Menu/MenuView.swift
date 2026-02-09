@@ -132,11 +132,8 @@ struct MenuView: View {
                     Button {
                         showSignOutConfirm = true
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                            Text("Ausloggen")
-                            Spacer(minLength: 0)
-                        }
+                        Text("Ausloggen")
+                            .frame(maxWidth: .infinity, alignment: .center)
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.red)
                         .padding(.horizontal, 12)
