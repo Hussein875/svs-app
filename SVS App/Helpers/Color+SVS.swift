@@ -20,6 +20,7 @@ enum UserColor: String, CaseIterable, Identifiable {
     case mint
     case teal
     case indigo
+    case brown
 
     var id: String { rawValue }
 
@@ -36,6 +37,7 @@ enum UserColor: String, CaseIterable, Identifiable {
         case .mint: return .mint
         case .teal: return .teal
         case .indigo: return .indigo
+        case .brown: return .brown
         }
     }
 
@@ -52,6 +54,7 @@ enum UserColor: String, CaseIterable, Identifiable {
         case .mint: return "Mint"
         case .teal: return "Türkis"
         case .indigo: return "Indigo"
+        case .brown: return "Braun"
         }
     }
 
@@ -72,6 +75,7 @@ enum UserColor: String, CaseIterable, Identifiable {
         case "mint": return .mint
         case "teal": return .teal
         case "indigo": return .indigo
+        case "braun", "brown": return .brown
         default: return .blue
         }
     }

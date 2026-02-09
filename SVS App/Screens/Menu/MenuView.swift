@@ -80,7 +80,10 @@ struct MenuView: View {
         Section(header: Text("Erscheinungsbild")) {
             VStack(alignment: .leading, spacing: 8) {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 30, maximum: 30), spacing: 10)],
+                    columns: Array(
+                        repeating: GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 10),
+                        count: 6
+                    ),
                     alignment: .leading,
                     spacing: 8
                 ) {
@@ -229,7 +232,7 @@ struct MenuView: View {
         } label: {
             Circle()
                 .fill(color.color)
-                .frame(width: 24, height: 24)
+                .frame(width: 32, height: 32)
                 .overlay(
                     Circle()
                         .stroke(
@@ -241,14 +244,15 @@ struct MenuView: View {
                     if isSelected {
                         Circle()
                             .stroke(Color(.systemBackground), lineWidth: 1.5)
-                            .padding(3)
+                            .padding(4)
                     Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(Color.white, Color.black.opacity(0.25))
                 }
                 }
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, minHeight: 36)
         .accessibilityLabel(color.germanName)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
