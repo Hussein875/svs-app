@@ -1,0 +1,484 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function myUid() {
+      return signedIn() ? request.auth.uid : "";
+    }
+
+    function myEmail() {
+      return signedIn() && request.auth.token.email != null
+        ? lower(request.auth.token.email)
+        : "";
+    }
+
+    function userDocPath() {
+      return /databases/$(database)/documents/users/$(myUid());
+    }
+
+    function isAdmin() {
+      return signedIn() && (
+        request.auth.token.role == "admin" ||
+        (exists(userDocPath()) && get(userDocPath()).data.roleRaw == "admin")
+      );
+    }
+
+    // Optionaler Bootstrap-Admin (nur behalten, wenn du das wirklich willst)
+    function isBootstrapAdminEmail() {
+      return myEmail() == "hussein@sv-souleiman.de";
+    }
+
+    function invitePathForMe() {
+      return /databases/$(database)/documents/invites/$(myEmail());
+    }
+
+    function hasInviteForMe() {
+      return signedIn() && myEmail() != "" && exists(invitePathForMe());
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasOnly([
+        "name",
+        "roleRaw",
+        "colorName",
+        "annualLeaveDays",
+        "email",
+        "createdAt",
+        "updatedAt",
+        "fcmTokens"
+      ]) &&
+      data.name is string &&
+      data.roleRaw is string &&
+      data.colorName is string &&
+      data.annualLeaveDays is int &&
+      data.email is string;
+    }
+
+    function createProfileMatchesInvite() {
+      let invite = get(invitePathForMe()).data;
+      return lower(request.resource.data.email) == myEmail() &&
+             request.resource.data.name == invite.name &&
+             request.resource.data.roleRaw == invite.roleRaw &&
+             request.resource.data.colorName == invite.colorName &&
+             request.resource.data.annualLeaveDays == invite.annualLeaveDays;
+    }
+
+    function createProfileIsBootstrapAdmin() {
+      return isBootstrapAdminEmail() &&
+             lower(request.resource.data.email) == myEmail() &&
+             request.resource.data.roleRaw == "admin";
+    }
+
+    function isValidLeaveType(v) {
+      return v == "Urlaub" || v == "Krankheit" || v == "Bereitschaft";
+    }
+
+    function isValidLeaveStatus(v) {
+      return v == "Offen" || v == "Genehmigt" || v == "Abgelehnt";
+    }
+
+    function isOwnLeaveData(data) {
+      return signedIn() && (
+        (data.userId is string && data.userId == myUid()) ||
+        (data.userEmail is string && lower(data.userEmail) == myEmail())
+      );
+    }
+
+    function isValidLeavePayload(data) {
+      return data.keys().hasAll([
+        "userEmail",
+        "startDate",
+        "endDate",
+        "typeRaw",
+        "reason",
+        "statusRaw",
+        "createdAt",
+        "createdByEmail",
+        "userId",
+        "createdByUid"
+      ]) &&
+      data.keys().hasOnly([
+        "userEmail",
+        "startDate",
+        "endDate",
+        "typeRaw",
+        "reason",
+        "statusRaw",
+        "createdAt",
+        "createdByEmail",
+        "updatedAt",
+        "updatedByEmail",
+        "userId",
+        "createdByUid",
+        "updatedByUid"
+      ]) &&
+      data.userEmail is string &&
+      data.startDate is timestamp &&
+      data.endDate is timestamp &&
+      data.typeRaw is string &&
+      data.reason is string &&
+      data.statusRaw is string &&
+      data.createdAt is timestamp &&
+      data.createdByEmail is string &&
+      data.userId is string &&
+      data.createdByUid is string &&
+      isValidLeaveType(data.typeRaw) &&
+      isValidLeaveStatus(data.statusRaw);
+    }
+
+    function isValidTaskPayload(data) {
+      return data.keys().hasAll([
+        "title",
+        "details",
+        "statusRaw",
+        "assignedUserId",
+        "creatorUserId",
+        "createdAt"
+      ]) &&
+      data.keys().hasOnly([
+        "title",
+        "details",
+        "dueDate",
+        "statusRaw",
+        "assignedUserId",
+        "creatorUserId",
+        "createdAt",
+        "updatedAt"
+      ]) &&
+      data.title is string &&
+      data.details is string &&
+      data.statusRaw is string &&
+      (data.statusRaw == "open" || data.statusRaw == "done") &&
+      data.assignedUserId is string &&
+      data.creatorUserId is string &&
+      data.createdAt is timestamp &&
+      (!("dueDate" in data) || data.dueDate is timestamp) &&
+      (!("updatedAt" in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidCommissionPayload(data) {
+      return data.createdByUid is string;
+    }
+
+    // ------------------------------------------------------------------
+    // users/<uid>
+    // ------------------------------------------------------------------
+    match /users/{uid} {
+      // Admin darf alles
+      allow read, write: if isAdmin();
+
+      // Eingeloggte User dürfen lesen (für Kalender/User-Liste)
+      allow read: if signedIn();
+
+      // Create nur mit Invite (oder Bootstrap-Admin-Fall)
+      allow create: if signedIn()
+                    && request.auth.uid == uid
+                    && isValidUserProfile(request.resource.data)
+                    && (
+                      (hasInviteForMe() && createProfileMatchesInvite()) ||
+                      createProfileIsBootstrapAdmin()
+                    );
+
+      // Eigenes Update: nur Farbe / updatedAt / fcmTokens
+      allow update: if signedIn()
+                    && request.auth.uid == uid
+                    && request.resource.data.keys().hasOnly([
+                      "name",
+                      "roleRaw",
+                      "colorName",
+                      "annualLeaveDays",
+                      "email",
+                      "createdAt",
+                      "updatedAt",
+                      "fcmTokens"
+                    ])
+                    && request.resource.data.name == resource.data.name
+                    && request.resource.data.roleRaw == resource.data.roleRaw
+                    && request.resource.data.annualLeaveDays == resource.data.annualLeaveDays
+                    && request.resource.data.email == resource.data.email
+                    && request.resource.data.diff(resource.data).changedKeys()
+                      .hasOnly(["colorName", "updatedAt", "fcmTokens"]);
+
+      match /devices/{deviceId} {
+        allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+        allow delete: if isAdmin() || (signedIn() && request.auth.uid == uid);
+
+        allow create, update: if signedIn()
+                              && request.auth.uid == uid
+                              && request.resource.data.keys().hasOnly([
+                                "fcmToken",
+                                "platform",
+                                "deviceId",
+                                "updatedAt"
+                              ])
+                              && request.resource.data.fcmToken is string
+                              && request.resource.data.platform == "ios"
+                              && request.resource.data.deviceId == deviceId;
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // invites/<email>
+    // ------------------------------------------------------------------
+    match /invites/{emailDoc} {
+      allow read, delete: if isAdmin() || (signedIn() && emailDoc == myEmail());
+
+      allow create, update: if isAdmin()
+                            && isValidUserProfile(request.resource.data)
+                            && lower(request.resource.data.email) == emailDoc;
+    }
+
+    // ------------------------------------------------------------------
+    // leaveRequests/<id>
+    // ------------------------------------------------------------------
+    match /leaveRequests/{id} {
+      allow read, write: if isAdmin();
+
+      allow read: if signedIn() && (
+        isOwnLeaveData(resource.data) ||
+        (resource.data.statusRaw is string && resource.data.statusRaw == "Genehmigt")
+      );
+
+allow create: if signedIn()
+  && request.resource.data.userId == request.auth.uid
+  && (
+    (request.resource.data.typeRaw == "Urlaub" && request.resource.data.statusRaw == "Offen") ||
+    (request.resource.data.typeRaw == "Krankheit" && request.resource.data.statusRaw == "Genehmigt") ||
+    (request.resource.data.typeRaw == "Bereitschaft" &&
+      (request.resource.data.statusRaw == "Genehmigt" || request.resource.data.statusRaw == "Offen"))
+  );
+
+
+      allow update: if signedIn()
+                    && isValidLeavePayload(request.resource.data)
+                    && isOwnLeaveData(resource.data)
+                    && request.resource.data.userId == resource.data.userId
+                    && request.resource.data.userEmail == resource.data.userEmail
+                    && request.resource.data.typeRaw == resource.data.typeRaw
+                    && request.resource.data.statusRaw == resource.data.statusRaw
+                    && request.resource.data.createdAt == resource.data.createdAt
+                    && request.resource.data.createdByUid == resource.data.createdByUid
+                    && request.resource.data.createdByEmail == resource.data.createdByEmail
+                    && request.resource.data.updatedByUid == myUid()
+                    && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+                      "startDate",
+                      "endDate",
+                      "reason",
+                      "updatedAt",
+                      "updatedByUid",
+                      "updatedByEmail"
+                    ]);
+
+      allow delete: if signedIn() && isOwnLeaveData(resource.data);
+    }
+
+   // ---------------------------
+// Task Helpers
+// ---------------------------
+function taskMatchesMe(data) {
+  return
+    data.creatorUserId == myUid() ||
+    data.assignedUserId == myUid() ||
+    data.creatorUserId == myEmail() ||
+    data.assignedUserId == myEmail() ||
+    data.creatorUserId == ("invite:" + myEmail()) ||
+    data.assignedUserId == ("invite:" + myEmail());
+}
+
+function isValidTaskCreate(data) {
+  return data.keys().hasOnly([
+      "title",
+      "details",
+      "dueDate",
+      "statusRaw",
+      "assignedUserId",
+      "creatorUserId",
+      "createdAt",
+      "updatedAt",
+      "updatedByUserId"
+    ])
+    && data.title is string
+    && data.title.size() > 0
+    && data.details is string
+    && data.statusRaw in ["open", "done"]
+    && data.assignedUserId is string
+    && data.assignedUserId.size() > 0
+    && data.creatorUserId == myUid()
+    && data.createdAt is timestamp
+    && (!("dueDate" in data) || data.dueDate == null || data.dueDate is timestamp)
+    && (!("updatedAt" in data) || data.updatedAt is timestamp)
+    && (!("updatedByUserId" in data) || data.updatedByUserId is string);
+}
+
+function isValidTaskUpdate() {
+  return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+      "title",
+      "details",
+      "dueDate",
+      "statusRaw",
+      "assignedUserId",
+      "updatedAt",
+      "updatedByUserId"
+    ])
+    && request.resource.data.title is string
+    && request.resource.data.title.size() > 0
+    && request.resource.data.details is string
+    && request.resource.data.statusRaw in ["open", "done"]
+    && request.resource.data.assignedUserId is string
+    && request.resource.data.assignedUserId.size() > 0
+    && (!("dueDate" in request.resource.data) || request.resource.data.dueDate == null || request.resource.data.dueDate is timestamp)
+    && (!("updatedAt" in request.resource.data) || request.resource.data.updatedAt is timestamp)
+    && (!("updatedByUserId" in request.resource.data) || request.resource.data.updatedByUserId is string);
+}
+
+// ------------------------------------------------------------------
+// tasks/<id>
+// ------------------------------------------------------------------
+match /tasks/{id} {
+  allow read, write: if isAdmin();
+
+  // Lesen: Creator oder Assigned (inkl. Legacy IDs)
+  allow read: if signedIn() && taskMatchesMe(resource.data);
+
+  // Erstellen: creator muss immer ich sein
+  allow create: if signedIn() && isValidTaskCreate(request.resource.data);
+
+  // Bearbeiten: Creator ODER Assigned darf bearbeiten (auch Re-Assign erlaubt)
+  allow update: if signedIn()
+                && taskMatchesMe(resource.data)
+                && isValidTaskUpdate();
+
+  // Löschen: nur Creator (inkl. Legacy-Formate)
+  allow delete: if signedIn()
+                && (
+                  resource.data.creatorUserId == myUid() ||
+                  resource.data.creatorUserId == myEmail() ||
+                  resource.data.creatorUserId == ("invite:" + myEmail())
+                );
+}
+
+
+
+    // ------------------------------------------------------------------
+    // pushQueue/<id> (nur enqueue aus App)
+    // ------------------------------------------------------------------
+    match /pushQueue/{id} {
+      allow read, update, delete: if false;
+
+      allow create: if signedIn()
+                    && request.resource.data.keys().hasAll([
+                      "type",
+                      "toUserId",
+                      "fromUserId",
+                      "title",
+                      "body",
+                      "createdAt"
+                    ])
+                    && request.resource.data.keys().hasOnly([
+                      "type",
+                      "toUserId",
+                      "fromUserId",
+                      "title",
+                      "body",
+                      "createdAt",
+                      "taskId"
+                    ])
+                    && request.resource.data.type is string
+                    && request.resource.data.toUserId is string
+                    && request.resource.data.fromUserId == myUid()
+                    && request.resource.data.title is string
+                    && request.resource.data.body is string
+                    && request.resource.data.createdAt is timestamp;
+    }
+
+    // ------------------------------------------------------------------
+    // automations/<id>
+    // ------------------------------------------------------------------
+    match /automations/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+
+      match /events/{eventId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+    
+    // meetingTopics
+match /meetingTopics/{id} {
+  allow read: if signedIn();
+
+  // Jeder eingeloggte User darf eigene Punkte erstellen
+  allow create: if signedIn()
+                && request.resource.data.createdByUserId == request.auth.uid;
+
+  // Admin immer, sonst nur Ersteller
+  allow update, delete: if isAdmin()
+                        || (signedIn() && resource.data.createdByUserId == request.auth.uid);
+}
+
+// meetingMeta (nächstes Meeting)
+match /meetingMeta/{id} {
+  allow read: if signedIn();
+  allow write: if isAdmin();
+}
+
+// meetingArchives (immutable)
+match /meetingArchives/{id} {
+  allow read: if signedIn();   // wenn alle das Archiv sehen sollen
+  allow create: if isAdmin();  // Archivierung durch Admin
+  allow update, delete: if false;
+}
+
+
+    // ------------------------------------------------------------------
+    // commissions/<id>
+    // ------------------------------------------------------------------
+    match /commissions/{id} {
+      allow read, write: if isAdmin();
+
+      allow read: if signedIn() && resource.data.createdByUid == myUid();
+
+      allow create: if signedIn()
+                    && isValidCommissionPayload(request.resource.data)
+                    && request.resource.data.createdByUid == myUid();
+
+      allow update: if signedIn()
+                    && isValidCommissionPayload(request.resource.data)
+                    && resource.data.createdByUid == myUid()
+                    && request.resource.data.createdByUid == resource.data.createdByUid;
+
+      allow delete: if signedIn() && resource.data.createdByUid == myUid();
+    }
+    
+match /meetingTopics/{id} {
+  allow read: if signedIn();
+
+  allow create: if signedIn()
+    && request.resource.data.createdByUserId == request.auth.uid
+    && request.resource.data.title is string
+    && request.resource.data.statusRaw in ["open", "done"];
+
+  allow update: if signedIn() && (
+    isAdmin()
+    || resource.data.createdByUserId == request.auth.uid
+    || request.resource.data.diff(resource.data).changedKeys()
+         .hasOnly(["statusRaw", "updatedAt", "updatedByUserId"])
+  );
+
+  allow delete: if signedIn()
+    && (isAdmin() || resource.data.createdByUserId == request.auth.uid);
+}
+
+match /meetingMeta/{id} {
+  allow read: if signedIn();
+  allow write: if isAdmin();
+}
+
+
+  }
+}

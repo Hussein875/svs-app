@@ -1,0 +1,44 @@
+name: Firestore Rules Tests
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "SVS App/firestore.rules"
+      - "SVS App/rules-tests/**"
+      - ".github/workflows/firestore-rules-tests.yml"
+  pull_request:
+    paths:
+      - "SVS App/firestore.rules"
+      - "SVS App/rules-tests/**"
+      - ".github/workflows/firestore-rules-tests.yml"
+
+jobs:
+  rules-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: "SVS App/rules-tests"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: "SVS App/rules-tests/package-lock.json"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Firestore Rules tests
+        run: npm test
