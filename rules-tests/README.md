@@ -11,8 +11,8 @@ Diese Tests prüfen die produktiven Firestore-Regeln aus `../firestore.rules` (w
 ## Ausführen
 
 ```bash
-npm --prefix "/Users/husseinsouleiman/Documents/SVS App/SVS App/rules-tests" install
-npm --prefix "/Users/husseinsouleiman/Documents/SVS App/SVS App/rules-tests" test
+npm --prefix "/Users/husseinsouleiman/Documents/SVS App/rules-tests" install
+npm --prefix "/Users/husseinsouleiman/Documents/SVS App/rules-tests" test
 ```
 
 ## Abgedeckte Bereiche

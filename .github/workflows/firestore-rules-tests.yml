@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "SVS App/firestore.rules"
-      - "SVS App/rules-tests/**"
+      - "firestore.rules"
+      - "rules-tests/**"
       - ".github/workflows/firestore-rules-tests.yml"
   pull_request:
     paths:
-      - "SVS App/firestore.rules"
-      - "SVS App/rules-tests/**"
+      - "firestore.rules"
+      - "rules-tests/**"
       - ".github/workflows/firestore-rules-tests.yml"
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: "SVS App/rules-tests"
+        working-directory: "rules-tests"
 
     steps:
       - name: Checkout
@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: "SVS App/rules-tests/package-lock.json"
+          cache-dependency-path: "rules-tests/package-lock.json"
 
       - name: Setup Java
         uses: actions/setup-java@v4
