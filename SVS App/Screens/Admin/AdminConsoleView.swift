@@ -910,7 +910,7 @@ struct AddUserView: View {
 
     @State private var name: String = ""
     @State private var email: String = ""
-    @State private var role: UserRole = .employee
+    @State private var role: UserRole = .expert
     @State private var annualLeaveDays: Int = 24
     @State private var colorName: String = "gray"
     @State private var birthday: Date? = nil
@@ -928,7 +928,6 @@ struct AddUserView: View {
                     .autocorrectionDisabled(true)
                 Picker("Rolle", selection: $role) {
                     Text("Admin").tag(UserRole.admin)
-                    Text("Mitarbeiter").tag(UserRole.employee)
                     Text("Sachverständiger").tag(UserRole.expert)
                 }
             }
