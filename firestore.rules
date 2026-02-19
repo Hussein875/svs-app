@@ -47,6 +47,11 @@ service cloud.firestore {
         "colorName",
         "annualLeaveDays",
         "email",
+        "birthday",
+        "pushEnabled",
+        "pushEnabledUpdatedAt",
+        "unreadNotificationCount",
+        "unreadNotificationUpdatedAt",
         "createdAt",
         "updatedAt",
         "fcmTokens"
@@ -55,16 +60,52 @@ service cloud.firestore {
       data.roleRaw is string &&
       data.colorName is string &&
       data.annualLeaveDays is int &&
-      data.email is string;
+      data.email is string &&
+      (!("birthday" in data) || data.birthday is timestamp) &&
+      (!("pushEnabled" in data) || data.pushEnabled is bool) &&
+      (!("pushEnabledUpdatedAt" in data) || data.pushEnabledUpdatedAt is timestamp) &&
+      (!("unreadNotificationCount" in data) || data.unreadNotificationCount is int) &&
+      (!("unreadNotificationUpdatedAt" in data) || data.unreadNotificationUpdatedAt is timestamp);
+    }
+
+    function userDocHasCompleteProfileCore(data) {
+      return data.name is string &&
+             data.roleRaw is string &&
+             data.colorName is string &&
+             data.annualLeaveDays is int &&
+             data.email is string;
     }
 
     function createProfileMatchesInvite() {
-      let invite = get(invitePathForMe()).data;
-      return lower(request.resource.data.email) == myEmail() &&
-             request.resource.data.name == invite.name &&
-             request.resource.data.roleRaw == invite.roleRaw &&
-             request.resource.data.colorName == invite.colorName &&
-             request.resource.data.annualLeaveDays == invite.annualLeaveDays;
+      // Keep invite check permissive to avoid type/format mismatches on
+      // legacy invite payloads (e.g. numeric coercion).
+      return hasInviteForMe() &&
+             request.resource.data.email is string &&
+             lower(request.resource.data.email) == myEmail();
+    }
+
+    function canHydrateOwnProfileFromInvite() {
+      return hasInviteForMe()
+             && request.resource.data.name is string
+             && request.resource.data.roleRaw is string
+             && request.resource.data.colorName is string
+             && request.resource.data.annualLeaveDays is int
+             && request.resource.data.email is string
+             && createProfileMatchesInvite()
+             && lower(request.resource.data.email) == myEmail();
+    }
+
+    // Emergency fallback for first-login bootstrap:
+    // If a stub users/<uid> exists (e.g. only unread badge fields), allow the
+    // user to write their own non-admin profile once.
+    function canBootstrapOwnProfileFromStub() {
+      return !userDocHasCompleteProfileCore(resource.data)
+             && request.resource.data.name is string
+             && request.resource.data.colorName is string
+             && request.resource.data.annualLeaveDays is int
+             && request.resource.data.email is string
+             && lower(request.resource.data.email) == myEmail()
+             && request.resource.data.roleRaw in ["employee", "expert"];
     }
 
     function createProfileIsBootstrapAdmin() {
@@ -186,22 +227,45 @@ service cloud.firestore {
       // Eigenes Update: nur Farbe / updatedAt / fcmTokens
       allow update: if signedIn()
                     && request.auth.uid == uid
-                    && request.resource.data.keys().hasOnly([
-                      "name",
-                      "roleRaw",
-                      "colorName",
-                      "annualLeaveDays",
-                      "email",
-                      "createdAt",
-                      "updatedAt",
-                      "fcmTokens"
-                    ])
-                    && request.resource.data.name == resource.data.name
-                    && request.resource.data.roleRaw == resource.data.roleRaw
-                    && request.resource.data.annualLeaveDays == resource.data.annualLeaveDays
-                    && request.resource.data.email == resource.data.email
-                    && request.resource.data.diff(resource.data).changedKeys()
-                      .hasOnly(["colorName", "updatedAt", "fcmTokens"]);
+                    && (
+                      (
+                        request.resource.data.keys().hasOnly([
+                          "name",
+                          "roleRaw",
+                          "colorName",
+                          "annualLeaveDays",
+                          "email",
+                          "birthday",
+                          "pushEnabled",
+                          "pushEnabledUpdatedAt",
+                          "unreadNotificationCount",
+                          "unreadNotificationUpdatedAt",
+                          "createdAt",
+                          "updatedAt",
+                          "fcmTokens"
+                        ])
+                        && request.resource.data.name == resource.data.name
+                        && request.resource.data.roleRaw == resource.data.roleRaw
+                        && request.resource.data.annualLeaveDays == resource.data.annualLeaveDays
+                        && request.resource.data.email == resource.data.email
+                        && request.resource.data.diff(resource.data).changedKeys()
+                          .hasOnly(["colorName", "updatedAt", "fcmTokens"])
+                      )
+                      ||
+                      (
+                        // First login edge-case:
+                        // Cloud Functions can create users/<uid> with badge fields before profile hydration.
+                        // Allow one-time profile hydration from invite onto that stub document.
+                        !userDocHasCompleteProfileCore(resource.data)
+                        && canHydrateOwnProfileFromInvite()
+                      )
+                      ||
+                      (
+                        // Fallback: allow bootstrap from stub even if invite lookup
+                        // fails due inconsistent legacy invite state.
+                        canBootstrapOwnProfileFromStub()
+                      )
+                    );
 
       match /devices/{deviceId} {
         allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
@@ -225,7 +289,7 @@ service cloud.firestore {
     // invites/<email>
     // ------------------------------------------------------------------
     match /invites/{emailDoc} {
-      allow read, delete: if isAdmin() || (signedIn() && emailDoc == myEmail());
+      allow read, delete: if isAdmin() || (signedIn() && lower(emailDoc) == myEmail());
 
       allow create, update: if isAdmin()
                             && isValidUserProfile(request.resource.data)

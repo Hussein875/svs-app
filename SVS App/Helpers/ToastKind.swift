@@ -7,11 +7,6 @@
 import Foundation
 import SwiftUI
 
-enum ToastKind {
-    case success
-    case error
-}
-
 struct AppToast: Identifiable, Equatable {
     let id = UUID()
     let kind: ToastKind

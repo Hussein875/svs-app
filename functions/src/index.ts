@@ -140,12 +140,199 @@ export const adminCreateUserInvite = onCall(async (request) => {
     .doc(email)
     .set(invite, {merge: true});
 
+  // Also pre-create/update the concrete profile doc so first login does not
+  // depend on client-side invite hydration.
+  await admin
+    .firestore()
+    .collection("users")
+    .doc(userRecord.uid)
+    .set({
+      name,
+      roleRaw,
+      colorName,
+      annualLeaveDays,
+      email,
+      pushEnabled: true,
+      ...(birthdayTs ? {birthday: birthdayTs} : {}),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+
   return {
     ok: true,
     uid: userRecord.uid,
     email,
   };
 });
+
+/**
+ * Callable (signed-in):
+ * Hydrates users/<uid> from invites/<email> server-side and deletes invite.
+ * This avoids client-side rule races
+ * when a stub users/<uid> doc already exists.
+ */
+export const bootstrapMyProfileFromInvite = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  const userRecord = await admin.auth().getUser(callerUid);
+  const email = normalizeEmail(userRecord.email ?? "");
+  if (!email) {
+    throw new HttpsError("failed-precondition", "No email on auth user.");
+  }
+
+  const db = admin.firestore();
+  const inviteRef = db.collection("invites").doc(email);
+  const userRef = db.collection("users").doc(callerUid);
+
+  await db.runTransaction(async (tx) => {
+    const inviteSnap = await tx.get(inviteRef);
+    if (!inviteSnap.exists) {
+      throw new HttpsError("not-found", "No invite found for current email.");
+    }
+
+    const raw = (inviteSnap.data() ?? {}) as Record<string, unknown>;
+    const name = String(raw.name ?? "").trim();
+    const colorName = String(raw.colorName ?? "gray").trim() || "gray";
+    const roleInput = String(raw.roleRaw ?? "employee").trim().toLowerCase();
+    const roleRaw: Role = roleInput === "admin" || roleInput === "expert" ?
+      roleInput : "employee";
+
+    const annualRaw = Number(raw.annualLeaveDays ?? 30);
+    const annualLeaveDays = Number.isFinite(annualRaw) ?
+      Math.max(0, Math.floor(annualRaw)) : 30;
+
+    if (!name) {
+      throw new HttpsError("failed-precondition", "Invite missing name.");
+    }
+
+    const patch: Record<string, unknown> = {
+      name,
+      roleRaw,
+      colorName,
+      annualLeaveDays,
+      email,
+      pushEnabled: typeof raw.pushEnabled === "boolean" ?
+        raw.pushEnabled :
+        true,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (raw.birthday instanceof admin.firestore.Timestamp) {
+      patch.birthday = raw.birthday;
+    }
+
+    tx.set(userRef, patch, {merge: true});
+    tx.delete(inviteRef);
+  });
+
+  return {
+    ok: true,
+    uid: callerUid,
+    email,
+  };
+});
+
+/**
+ * Returns true if a user document already has the required profile core.
+ *
+ * @param {unknown} raw Firestore document data.
+ * @return {boolean} True when core fields are present with expected types.
+ */
+function hasUserProfileCore(raw: unknown): boolean {
+  const d = (raw ?? {}) as Record<string, unknown>;
+  return typeof d.name === "string" &&
+    typeof d.roleRaw === "string" &&
+    typeof d.colorName === "string" &&
+    Number.isInteger(d.annualLeaveDays) &&
+    typeof d.email === "string";
+}
+
+/**
+ * Hydrates users/<uid> from invites/<email> if the user doc is only a stub.
+ *
+ * @param {string} uid Firebase Auth UID.
+ * @return {Promise<void>} Resolves once hydration attempt finishes.
+ */
+async function hydrateUserFromInviteIfNeeded(uid: string): Promise<void> {
+  const cleanUid = String(uid ?? "").trim();
+  if (!cleanUid) return;
+
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(cleanUid);
+
+  const userRecord = await admin.auth().getUser(cleanUid).catch(() => null);
+  const email = normalizeEmail(userRecord?.email ?? "");
+  if (!email) return;
+
+  const inviteRef = db.collection("invites").doc(email);
+
+  await db.runTransaction(async (tx) => {
+    const userSnap = await tx.get(userRef);
+    if (hasUserProfileCore(userSnap.data())) return;
+
+    const inviteSnap = await tx.get(inviteRef);
+    if (!inviteSnap.exists) return;
+
+    const raw = (inviteSnap.data() ?? {}) as Record<string, unknown>;
+    const name = String(raw.name ?? "").trim();
+    if (!name) return;
+
+    const colorName = String(raw.colorName ?? "gray").trim() || "gray";
+    const roleInput = String(raw.roleRaw ?? "employee").trim().toLowerCase();
+    const roleRaw: Role = roleInput === "admin" || roleInput === "expert" ?
+      roleInput : "employee";
+    const annualRaw = Number(raw.annualLeaveDays ?? 30);
+    const annualLeaveDays = Number.isFinite(annualRaw) ?
+      Math.max(0, Math.floor(annualRaw)) : 30;
+
+    const patch: Record<string, unknown> = {
+      name,
+      roleRaw,
+      colorName,
+      annualLeaveDays,
+      email,
+      pushEnabled: typeof raw.pushEnabled === "boolean" ?
+        raw.pushEnabled :
+        true,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (raw.birthday instanceof admin.firestore.Timestamp) {
+      patch.birthday = raw.birthday;
+    }
+
+    tx.set(userRef, patch, {merge: true});
+    tx.delete(inviteRef);
+  });
+}
+
+/**
+ * Auto-hydrates a stub users/<uid> document from invite data.
+ */
+export const hydrateUserProfileFromInviteOnCreate = onDocumentCreated(
+  "users/{uid}",
+  async (event) => {
+    const uid = String(event.params.uid ?? "").trim();
+    if (!uid) return;
+    await hydrateUserFromInviteIfNeeded(uid);
+  }
+);
+
+/**
+ * Also hydrate on updates because badge writes can create/update stubs first.
+ */
+export const hydrateUserProfileFromInviteOnUpdate = onDocumentUpdated(
+  "users/{uid}",
+  async (event) => {
+    const uid = String(event.params.uid ?? "").trim();
+    if (!uid) return;
+
+    const afterData = event.data?.after.data();
+    if (hasUserProfileCore(afterData)) return;
+    await hydrateUserFromInviteIfNeeded(uid);
+  }
+);
 
 // ------------------------------------------------------------------
 // Push Notifications (FCM)
@@ -177,6 +364,20 @@ function isTokenGone(err: unknown): boolean {
 }
 
 /**
+ * Returns true when FCM reports APNs auth mismatch for a token.
+ *
+ * This usually indicates a stale token from another app/project config.
+ *
+ * @param {unknown} err The error object from FCM response.
+ * @return {boolean} True if token likely belongs to wrong APNs credentials.
+ */
+function isThirdPartyAuthTokenError(err: unknown): boolean {
+  const anyErr = err as {code?: unknown};
+  const code = String(anyErr?.code ?? "");
+  return code === "messaging/third-party-auth-error";
+}
+
+/**
  * Removes invalid or unregistered FCM tokens from Firestore.
  *
  * Iterates over multicast send responses and deletes device documents
@@ -185,16 +386,24 @@ function isTokenGone(err: unknown): boolean {
  *
  * @param {TokenRef[]} tokenRefs - Token refs aligned with multicast order.
  * @param {Array<Object>} responses - Multicast send responses from FCM.
+ * @param {boolean} removeThirdPartyAuthFailures Whether APNs auth failures
+ * should also be removed as stale token docs.
  * @return {Promise<void>} Resolves when invalid tokens are removed.
  */
 async function cleanupDeadTokens(
   tokenRefs: TokenRef[],
-  responses: Array<{success: boolean; error?: unknown}>
+  responses: Array<{success: boolean; error?: unknown}>,
+  removeThirdPartyAuthFailures = false
 ): Promise<void> {
   const toDelete: admin.firestore.DocumentReference[] = [];
 
   responses.forEach((r, i) => {
-    if (!r.success && isTokenGone(r.error)) {
+    const shouldDelete =
+      !r.success && (
+        isTokenGone(r.error) ||
+        (removeThirdPartyAuthFailures && isThirdPartyAuthTokenError(r.error))
+      );
+    if (shouldDelete) {
       const tr = tokenRefs[i];
       if (tr?.ref) toDelete.push(tr.ref);
     }
@@ -301,16 +510,49 @@ async function getAdminTokenRefs(): Promise<TokenRef[]> {
 }
 
 /**
- * Fetches all FCM token refs for a given user.
+ * Returns true when identity is not a plain Firebase UID.
  *
- * @param {string} userId - Firebase Auth UID of the target user.
- * @return {Promise<TokenRef[]>} Deduplicated list of user device tokens.
+ * @param {string} identity Raw identity from Firestore.
+ * @return {boolean} True for legacy invite/email identities.
  */
-async function getUserTokenRefs(userId: string): Promise<TokenRef[]> {
+function isLegacyInviteIdentity(identity: string): boolean {
+  const v = String(identity ?? "").trim().toLowerCase();
+  if (!v) return false;
+  return v.startsWith("invite:") || v.includes("@");
+}
+
+/**
+ * Extracts a normalized email from legacy identity forms.
+ *
+ * @param {string} identity Raw id (uid, invite:email or email).
+ * @return {string} Normalized email or empty string.
+ */
+function emailFromIdentity(identity: string): string {
+  const v = String(identity ?? "").trim();
+  if (!v) return "";
+  if (v.toLowerCase().startsWith("invite:")) {
+    return normalizeEmail(v.slice("invite:".length));
+  }
+  if (v.includes("@")) {
+    return normalizeEmail(v);
+  }
+  return "";
+}
+
+/**
+ * Fetches deduplicated token refs for one concrete UID.
+ *
+ * @param {string} uid Firebase Auth UID.
+ * @return {Promise<TokenRef[]>} Device tokens for this user.
+ */
+async function getUserTokenRefsByUid(uid: string): Promise<TokenRef[]> {
+  const cleanUid = String(uid ?? "").trim();
+  if (!cleanUid) return [];
+
   const devicesSnap = await admin
     .firestore()
     .collection("users")
-    .doc(userId)
+    .doc(cleanUid)
     .collection("devices")
     .get();
 
@@ -323,10 +565,71 @@ async function getUserTokenRefs(userId: string): Promise<TokenRef[]> {
     if (!token) continue;
     if (seen.has(token)) continue;
     seen.add(token);
-    out.push({token, ref: d.ref, ownerUserId: userId});
+    out.push({token, ref: d.ref, ownerUserId: cleanUid});
   }
 
   return out;
+}
+
+/**
+ * Resolves a concrete users/<uid> document id by email.
+ *
+ * @param {string} rawEmail Email candidate.
+ * @return {Promise<string>} Resolved uid or empty string.
+ */
+async function resolveUidByEmail(rawEmail: string): Promise<string> {
+  const email = normalizeEmail(rawEmail);
+  if (!email) return "";
+
+  const qs = await admin.firestore()
+    .collection("users")
+    .where("email", "==", email)
+    .limit(1)
+    .get();
+
+  if (!qs.empty) {
+    return String(qs.docs[0].id ?? "").trim();
+  }
+
+  try {
+    const rec = await admin.auth().getUserByEmail(email);
+    return String(rec.uid ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Fetches all FCM token refs for a given user.
+ *
+ * Supports legacy identities (`invite:<email>` / `<email>`) by resolving
+ * them to a concrete users/<uid> profile first.
+ *
+ * @param {string} userId - Target identity (uid or legacy identity).
+ * @param {string} userEmailHint Optional explicit email from document payload.
+ * @return {Promise<TokenRef[]>} Deduplicated list of user device tokens.
+ */
+async function getUserTokenRefs(
+  userId: string,
+  userEmailHint = ""
+): Promise<TokenRef[]> {
+  const identity = String(userId ?? "").trim();
+  if (!identity) return [];
+
+  // Fast path for normal UIDs.
+  if (!isLegacyInviteIdentity(identity)) {
+    return getUserTokenRefsByUid(identity);
+  }
+
+  // Legacy path: invite:<email> or raw email -> resolve to real uid.
+  const hint = normalizeEmail(userEmailHint);
+  const email = hint || emailFromIdentity(identity);
+  if (!email) return [];
+
+  const resolvedUid = await resolveUidByEmail(email);
+  if (!resolvedUid) return [];
+
+  return getUserTokenRefsByUid(resolvedUid);
 }
 
 /**
@@ -371,16 +674,28 @@ async function getNonAdminTokenRefs(): Promise<TokenRef[]> {
  * @param {string} userId - Firebase Auth UID of the target user.
  */
 async function getUserNameOrFallback(userId: string): Promise<string> {
-  if (!userId) return "Jemand";
+  const identity = String(userId ?? "").trim();
+  if (!identity) return "Jemand";
+
+  const email = emailFromIdentity(identity);
+  const uid = isLegacyInviteIdentity(identity) ?
+    await resolveUidByEmail(email) :
+    identity;
+
+  if (!uid) {
+    return email ? displayNameFromEmail(email) : "Jemand";
+  }
+
   try {
     const snap = await admin.firestore()
       .collection("users")
-      .doc(userId)
+      .doc(uid)
       .get();
     const name = String(snap.data()?.name ?? "").trim();
-    return name || "Jemand";
+    if (name) return name;
+    return email ? displayNameFromEmail(email) : "Jemand";
   } catch {
-    return "Jemand";
+    return email ? displayNameFromEmail(email) : "Jemand";
   }
 }
 
@@ -641,9 +956,15 @@ async function sendBadgeCountedMulticast(
       tokens,
       resp.responses as Array<{success: boolean; error?: unknown}>
     );
+
+    // If at least one token succeeded, remove third-party auth failures.
+    // This cleans up stale tokens from wrong bundle/project APNs config
+    // without risking a full wipe during a global APNs outage.
+    const removeThirdPartyAuthFailures = resp.successCount > 0;
     await cleanupDeadTokens(
       ownerRefs,
-      resp.responses as Array<{success: boolean; error?: unknown}>
+      resp.responses as Array<{success: boolean; error?: unknown}>,
+      removeThirdPartyAuthFailures
     );
   }
 
@@ -928,7 +1249,8 @@ export const pushOnLeaveRequestApproved = onDocumentUpdated(
     if (!isApproved && !isRejected) return;
 
     const userId = String(afterData.userId ?? "").trim();
-    if (!userId) return;
+    const userEmail = String(afterData.userEmail ?? "").trim();
+    if (!userId && !userEmail) return;
     const leaveTypeRaw = String(afterData.typeRaw ?? "").trim() || "Antrag";
     const leaveTypeNormalized = leaveTypeRaw.toLowerCase();
     const requestDate = leaveDateLabel(
@@ -965,9 +1287,12 @@ export const pushOnLeaveRequestApproved = onDocumentUpdated(
       afterStatus
     );
 
-    const tokenRefs = await getUserTokenRefs(userId);
+    const tokenRefs = await getUserTokenRefs(userId, userEmail);
     if (tokenRefs.length === 0) {
-      console.log("[push][decision] no user tokens for", userId);
+      console.log(
+        "[push][decision] no user tokens for",
+        userId || userEmail
+      );
       return;
     }
 
