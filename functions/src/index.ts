@@ -76,7 +76,11 @@ export const adminCreateUserInvite = onCall(async (request) => {
   const data = request.data ?? {};
   const email = normalizeEmail(data.email);
   const name = String(data.name ?? "").trim();
-  const roleRaw = String(data.roleRaw ?? "employee") as Role;
+  const roleInput = String(data.roleRaw ?? "employee").trim().toLowerCase();
+  const roleRaw: Role =
+    roleInput === "admin" || roleInput === "employee" || roleInput === "expert" ?
+      roleInput :
+      "employee";
   const colorName = String(data.colorName ?? "blue");
   const annualLeaveDays = Number(data.annualLeaveDays ?? 30);
   const birthdayISO = String(data.birthdayISO ?? "").trim();
@@ -165,6 +169,44 @@ export const adminCreateUserInvite = onCall(async (request) => {
 });
 
 /**
+ * Callable Function (Admin-only):
+ * - Checks caller is authenticated and admin.
+ * - Deletes a Firebase Auth user by uid.
+ * - Returns ok=true even if the user is already missing in Auth.
+ */
+export const adminDeleteUser = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  await ensureCallerIsAdmin(callerUid);
+
+  const uid = String(request.data?.uid ?? "").trim();
+  if (!uid) {
+    throw new HttpsError("invalid-argument", "uid required.");
+  }
+  if (uid === callerUid) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Admin cannot delete own account."
+    );
+  }
+
+  try {
+    await admin.auth().deleteUser(uid);
+  } catch (e: unknown) {
+    const code = String((e as {code?: unknown})?.code ?? "");
+    if (code !== "auth/user-not-found") {
+      const message = e instanceof Error ? e.message : String(e);
+      throw new HttpsError("internal", "Auth delete failed: " + message);
+    }
+  }
+
+  return {ok: true, uid};
+});
+
+/**
  * Callable (signed-in):
  * Hydrates users/<uid> from invites/<email> server-side and deletes invite.
  * This avoids client-side rule races
@@ -196,7 +238,8 @@ export const bootstrapMyProfileFromInvite = onCall(async (request) => {
     const name = String(raw.name ?? "").trim();
     const colorName = String(raw.colorName ?? "gray").trim() || "gray";
     const roleInput = String(raw.roleRaw ?? "employee").trim().toLowerCase();
-    const roleRaw: Role = roleInput === "admin" || roleInput === "expert" ?
+    const roleRaw: Role =
+      roleInput === "admin" || roleInput === "employee" || roleInput === "expert" ?
       roleInput : "employee";
 
     const annualRaw = Number(raw.annualLeaveDays ?? 30);
@@ -281,7 +324,8 @@ async function hydrateUserFromInviteIfNeeded(uid: string): Promise<void> {
 
     const colorName = String(raw.colorName ?? "gray").trim() || "gray";
     const roleInput = String(raw.roleRaw ?? "employee").trim().toLowerCase();
-    const roleRaw: Role = roleInput === "admin" || roleInput === "expert" ?
+    const roleRaw: Role =
+      roleInput === "admin" || roleInput === "employee" || roleInput === "expert" ?
       roleInput : "employee";
     const annualRaw = Number(raw.annualLeaveDays ?? 30);
     const annualLeaveDays = Number.isFinite(annualRaw) ?

@@ -194,59 +194,56 @@ extension AppState {
         }
     }
     
-    func deleteUser(_ user: User) {
+    @MainActor
+    @discardableResult
+    func deleteUser(_ user: User) async -> Bool {
         // Cloud delete (Admin only)
         guard currentUser?.role == .admin else {
             uiErrorMessage = "Nur Admins dürfen Benutzer löschen."
-            return
+            return false
         }
 
         let cleanEmail = user.email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
-        _Concurrency.Task { [weak self] in
-            guard let self else { return }
-            do {
-                let isInviteOnly = user.id.hasPrefix("invite:")
+        do {
+            let isInviteOnly = user.id.hasPrefix("invite:")
 
-                // Delete Firebase Auth account for real users to prevent re-login.
-                if !isInviteOnly {
-                    let functions = Functions.functions(region: "us-central1")
-                    _ = try await functions.httpsCallable("adminDeleteUser").call([
-                        "uid": user.id
-                    ])
-                }
+            // Delete Firebase Auth account for real users to prevent re-login.
+            if !isInviteOnly {
+                let functions = Functions.functions(region: "us-central1")
+                _ = try await functions.httpsCallable("adminDeleteUser").call([
+                    "uid": user.id
+                ])
+            }
 
-                // Remove invite record (if known)
-                if !cleanEmail.isEmpty {
-                    try await self.db.collection("invites").document(cleanEmail).delete()
-                }
+            // Remove invite record (if known)
+            if !cleanEmail.isEmpty {
+                try await self.db.collection("invites").document(cleanEmail).delete()
+            }
 
-                // Remove profile doc by uid when this is a real account.
-                if !isInviteOnly {
-                    try await self.db.collection("users").document(user.id).delete()
-                }
+            // Remove profile doc by uid when this is a real account.
+            if !isInviteOnly {
+                try await self.db.collection("users").document(user.id).delete()
+            }
 
-                // Remove possible duplicates by email (legacy safety net).
-                if !cleanEmail.isEmpty {
-                    let qs = try await self.db.collection("users")
-                        .whereField("email", isEqualTo: cleanEmail)
-                        .getDocuments()
+            // Remove possible duplicates by email (legacy safety net).
+            if !cleanEmail.isEmpty {
+                let qs = try await self.db.collection("users")
+                    .whereField("email", isEqualTo: cleanEmail)
+                    .getDocuments()
 
-                    for doc in qs.documents {
-                        try await self.db.collection("users").document(doc.documentID).delete()
-                    }
-                }
-                
-                await MainActor.run {
-                    self.users.removeAll { $0.id == user.id }
-                    self.leaveRequests.removeAll { $0.user.id == user.id }
-                    self.uiErrorMessage = nil
-                }
-            } catch {
-                await MainActor.run {
-                    self.uiErrorMessage = "Profil konnte nicht gelöscht werden: \(error.localizedDescription)"
+                for doc in qs.documents {
+                    try await self.db.collection("users").document(doc.documentID).delete()
                 }
             }
+
+            self.users.removeAll { $0.id == user.id }
+            self.leaveRequests.removeAll { $0.user.id == user.id }
+            self.uiErrorMessage = nil
+            return true
+        } catch {
+            self.uiErrorMessage = "Profil konnte nicht gelöscht werden: \(error.localizedDescription)"
+            return false
         }
     }
 

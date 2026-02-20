@@ -21,6 +21,7 @@ struct ScannerScreen: View {
 
     @State private var isPresentingScanner = false
     @State private var isPresentingShare = false
+    @State private var scannedImages: [UIImage] = []
     @State private var scannedPDFURL: URL? = nil
     @State private var gutachtenNr: String = ""
     @State private var uiErrorMessage: String? = nil
@@ -242,6 +243,22 @@ struct ScannerScreen: View {
             .opacity(isUploadingToDrive ? 0.6 : 1.0)
         }
 
+        if !scannedImages.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Seiten (\(scannedImages.count))")
+                    .font(.headline)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(Array(scannedImages.enumerated()), id: \.offset) { item in
+                            pageThumbnail(image: item.element, index: item.offset)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
+
         if isUploadingToDrive {
             HStack(spacing: 10) {
                 ProgressView()
@@ -267,6 +284,32 @@ struct ScannerScreen: View {
                 )
         }
         .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private func pageThumbnail(image: UIImage, index: Int) -> some View {
+        ZStack(alignment: .topTrailing) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 88, height: 120)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                )
+
+            Button {
+                deleteScannedPage(at: index)
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white, Color.red)
+            }
+            .padding(6)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Seite \(index + 1) löschen")
+        }
     }
 
     @ViewBuilder
@@ -332,16 +375,8 @@ struct ScannerScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $isPresentingScanner) {
                 DocumentScanner { images in
-                    do {
-                        let safeBase = sanitizedFileName(formattedScanNameNoLeadingZeros)
-                        let finalName = "\(safeBase)_\(timestampString()).pdf"
-                        let url = try makePDF(from: images, fileName: finalName)
-                        scannedPDFURL = url
-                    } catch {
-                        uiErrorMessage =
-                          "PDF konnte nicht erstellt werden: "
-                          + error.localizedDescription
-                    }
+                    scannedImages = images
+                    rebuildPDFFromScannedImages()
                 } onCancel: {
                     // no-op
                 }
@@ -572,6 +607,35 @@ struct ScannerScreen: View {
                 code: status,
                 userInfo: [NSLocalizedDescriptionKey: msg]
             )
+        }
+    }
+
+    private func deleteScannedPage(at index: Int) {
+        guard scannedImages.indices.contains(index) else { return }
+        scannedImages.remove(at: index)
+        rebuildPDFFromScannedImages()
+    }
+
+    private func rebuildPDFFromScannedImages() {
+        guard !scannedImages.isEmpty else {
+            if let oldURL = scannedPDFURL {
+                try? FileManager.default.removeItem(at: oldURL)
+            }
+            scannedPDFURL = nil
+            return
+        }
+
+        do {
+            let safeBase = sanitizedFileName(formattedScanNameNoLeadingZeros)
+            let finalName = "\(safeBase)_\(timestampString()).pdf"
+            let newURL = try makePDF(from: scannedImages, fileName: finalName)
+
+            if let oldURL = scannedPDFURL, oldURL != newURL {
+                try? FileManager.default.removeItem(at: oldURL)
+            }
+            scannedPDFURL = newURL
+        } catch {
+            uiErrorMessage = "PDF konnte nicht aktualisiert werden: \(error.localizedDescription)"
         }
     }
 }

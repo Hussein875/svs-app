@@ -210,6 +210,10 @@ struct EditUserView: View {
     @State private var showNewRequest: Bool = false
     @State private var showPinResetAlert: Bool = false
     @State private var showLoginAlert: Bool = false
+    @State private var showDeleteConfirm: Bool = false
+    @State private var showDeleteSuccess: Bool = false
+    @State private var isDeletingUser: Bool = false
+    @State private var deleteErrorMessage: String? = nil
 
     @State private var showUnsavedConfirm: Bool = false
     @State private var initialSnapshot: UserEditSnapshot? = nil
@@ -247,8 +251,9 @@ struct EditUserView: View {
                 Picker("Rolle", selection: binding(for: \.role)) {
                     Text("Admin").tag(UserRole.admin)
                     Text("Mitarbeiter").tag(UserRole.employee)
-                    Text("Sachverständiger").tag(UserRole.expert)
+                    Text("SV").tag(UserRole.expert)
                 }
+                .pickerStyle(.segmented)
             }
 
             Section(header: Text("Login"), footer: Text("Passwörter werden über Firebase Auth verwaltet.")) {
@@ -280,35 +285,22 @@ struct EditUserView: View {
             }
 
             Section(header: Text("Geburtstag")) {
-                HStack(spacing: 10) {
-                    DatePicker(
-                        "Geburtstag",
-                        selection: Binding(
-                            get: { user.birthday ?? (Calendar.current.date(from: DateComponents(year: 1990, month: 1, day: 1)) ?? Date()) },
-                            set: { user.birthday = Calendar.current.startOfDay(for: $0) }
-                        ),
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.compact)
-
-                    if user.birthday != nil {
-                        Button {
-                            user.birthday = nil
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Geburtstag entfernen")
-                    }
-                }
+                DatePicker(
+                    "Geburtstag",
+                    selection: Binding(
+                        get: { user.birthday ?? (Calendar.current.date(from: DateComponents(year: 2000, month: 1, day: 1)) ?? Date()) },
+                        set: { user.birthday = Calendar.current.startOfDay(for: $0) }
+                    ),
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.compact)
             }
 
             Section {
                 Button("Mitarbeiter löschen", role: .destructive) {
-                    appState.deleteUser(user)
-                    dismiss()
+                    showDeleteConfirm = true
                 }
+                .disabled(isDeletingUser)
             }
         }
         .navigationTitle("Mitarbeiter bearbeiten")
@@ -327,8 +319,16 @@ struct EditUserView: View {
                     dismiss()
                 }
                 .font(.subheadline.weight(.semibold))
-                .disabled(!hasUnsavedChanges)
+                .disabled(!hasUnsavedChanges || isDeletingUser)
             }
+        }
+        .confirmationDialog("Mitarbeiter löschen?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+            Button("Löschen", role: .destructive) {
+                performDeleteUser()
+            }
+            Button("Abbrechen", role: .cancel) { }
+        } message: {
+            Text("Dieser Vorgang kann nicht rückgängig gemacht werden.")
         }
         .alert("Ungespeicherte Änderungen", isPresented: $showUnsavedConfirm) {
             Button("Speichern") {
@@ -355,6 +355,37 @@ struct EditUserView: View {
         } message: {
             Text("Wenn der Account existiert, wurde eine Passwort-Reset E-Mail an \(user.email) gesendet.")
         }
+        .alert("Mitarbeiter gelöscht", isPresented: $showDeleteSuccess) {
+            Button("OK", role: .cancel) {
+                dismiss()
+            }
+        } message: {
+            Text("\(user.name) wurde erfolgreich gelöscht.")
+        }
+        .alert(
+            "Löschen fehlgeschlagen",
+            isPresented: Binding(
+                get: { deleteErrorMessage != nil },
+                set: { _ in deleteErrorMessage = nil }
+            )
+        ) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(deleteErrorMessage ?? "Unbekannter Fehler.")
+        }
+        .overlay {
+            if isDeletingUser {
+                ZStack {
+                    Color.black.opacity(0.12).ignoresSafeArea()
+                    ProgressView("Mitarbeiter wird gelöscht…")
+                        .padding(18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Color(.secondarySystemBackground))
+                        )
+                }
+            }
+        }
         .onAppear {
             if initialSnapshot == nil {
                 initialSnapshot = UserEditSnapshot(
@@ -373,6 +404,23 @@ struct EditUserView: View {
             get: { user[keyPath: keyPath] },
             set: { user[keyPath: keyPath] = $0 }
         )
+    }
+
+    private func performDeleteUser() {
+        guard !isDeletingUser else { return }
+        isDeletingUser = true
+
+        _Concurrency.Task {
+            let success = await appState.deleteUser(user)
+            await MainActor.run {
+                isDeletingUser = false
+                if success {
+                    showDeleteSuccess = true
+                } else {
+                    deleteErrorMessage = appState.uiErrorMessage ?? "Profil konnte nicht gelöscht werden."
+                }
+            }
+        }
     }
 
 }
@@ -396,9 +444,8 @@ struct AddUserView: View {
 
     @State private var name: String = ""
     @State private var email: String = ""
-    @State private var role: UserRole = .expert
+    @State private var role: UserRole = .employee
     @State private var annualLeaveDays: Int = 24
-    @State private var colorName: String = "gray"
     @State private var birthday: Date? = nil
     @State private var isCreating: Bool = false
 
@@ -426,8 +473,10 @@ struct AddUserView: View {
                     .onSubmit { dismissKeyboard() }
                 Picker("Rolle", selection: $role) {
                     Text("Admin").tag(UserRole.admin)
-                    Text("Sachverständiger").tag(UserRole.expert)
+                    Text("Mitarbeiter").tag(UserRole.employee)
+                    Text("SV").tag(UserRole.expert)
                 }
+                .pickerStyle(.segmented)
             }
 
             Section(header: Text("Urlaub")) {
@@ -436,38 +485,22 @@ struct AddUserView: View {
                 }
             }
 
-            Section(header: Text("Farbe")) {
-                Picker("Farbe", selection: $colorName) {
-                    ForEach(availableColors, id: \.self) { color in
-                        Text(color.germanName)
-                            .tag(color.rawValue)
-                    }
-                }
+            Section {
+                Text("Farbe wird automatisch zufällig vergeben.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
             }
 
             Section(header: Text("Geburtstag")) {
-                HStack(spacing: 10) {
-                    DatePicker(
-                        "Geburtstag",
-                        selection: Binding(
-                            get: { birthday ?? (Calendar.current.date(from: DateComponents(year: 1990, month: 1, day: 1)) ?? Date()) },
-                            set: { birthday = Calendar.current.startOfDay(for: $0) }
-                        ),
-                        displayedComponents: .date
-                    )
-                        .datePickerStyle(.compact)
-
-                    if birthday != nil {
-                        Button {
-                            birthday = nil
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Geburtstag entfernen")
-                    }
-                }
+                DatePicker(
+                    "Geburtstag",
+                    selection: Binding(
+                        get: { birthday ?? (Calendar.current.date(from: DateComponents(year: 2000, month: 1, day: 1)) ?? Date()) },
+                        set: { birthday = Calendar.current.startOfDay(for: $0) }
+                    ),
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.compact)
             }
 
             Section {
@@ -480,6 +513,7 @@ struct AddUserView: View {
                     isCreating = true
 
                     _Concurrency.Task {
+                        let colorName = availableColors.randomElement()?.rawValue ?? "gray"
                         await appState.adminCreateUserViaFunction(
                             name: cleanName,
                             email: cleanEmail,
@@ -517,10 +551,6 @@ struct AddUserView: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            dismissKeyboard()
-        }
         .overlay {
             if isCreating {
                 ZStack {
