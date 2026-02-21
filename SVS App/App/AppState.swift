@@ -182,6 +182,84 @@ class AppState: ObservableObject {
         }
     }
 
+    @MainActor
+    @discardableResult
+    func setMyReceiveAdminPushesEnabled(_ enabled: Bool) async -> Bool {
+        guard var me = currentUser else { return false }
+        guard me.role == .admin else { return false }
+
+        let previous = me.receiveAdminPushes
+        if previous == enabled { return true }
+
+        me.receiveAdminPushes = enabled
+        currentUser = me
+        if let idx = users.firstIndex(where: { $0.id == me.id }) {
+            users[idx] = me
+        }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            _ = try await functions.httpsCallable("setMyReceiveAdminPushes").call([
+                "enabled": enabled
+            ])
+            uiErrorMessage = nil
+            return true
+        } catch {
+            // Fallback path:
+            // If the callable function is not deployed yet, write directly to
+            // users/<uid> so the toggle remains usable.
+            do {
+                try await db.collection("users").document(me.id).setData([
+                    "receiveAdminPushes": enabled,
+                    "receiveAdminPushesUpdatedAt": FieldValue.serverTimestamp(),
+                    "updatedAt": FieldValue.serverTimestamp()
+                ], merge: true)
+                uiErrorMessage = nil
+                return true
+            } catch {
+                me.receiveAdminPushes = previous
+                currentUser = me
+                if let idx = users.firstIndex(where: { $0.id == me.id }) {
+                    users[idx] = me
+                }
+                uiErrorMessage = "Provisions-Push-Einstellung konnte nicht gespeichert werden: \(error.localizedDescription)"
+                return false
+            }
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    func setMyMeetingSchedulePushEnabled(_ enabled: Bool) async -> Bool {
+        guard var me = currentUser else { return false }
+
+        let previous = me.meetingSchedulePushEnabled
+        if previous == enabled { return true }
+
+        me.meetingSchedulePushEnabled = enabled
+        currentUser = me
+        if let idx = users.firstIndex(where: { $0.id == me.id }) {
+            users[idx] = me
+        }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            _ = try await functions.httpsCallable("setMyMeetingSchedulePushEnabled").call([
+                "enabled": enabled
+            ])
+            uiErrorMessage = nil
+            return true
+        } catch {
+            me.meetingSchedulePushEnabled = previous
+            currentUser = me
+            if let idx = users.firstIndex(where: { $0.id == me.id }) {
+                users[idx] = me
+            }
+            uiErrorMessage = "Meeting-Push-Einstellung konnte nicht gespeichert werden: \(error.localizedDescription)"
+            return false
+        }
+    }
+
     /// Resets the unread push counter for the current user (server-side).
     /// Call this when opening the in-app notifications screen.
     @MainActor

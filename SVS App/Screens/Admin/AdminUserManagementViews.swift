@@ -322,7 +322,7 @@ struct EditUserView: View {
                 .disabled(!hasUnsavedChanges || isDeletingUser)
             }
         }
-        .confirmationDialog("Mitarbeiter löschen?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+        .alert("Mitarbeiter löschen?", isPresented: $showDeleteConfirm) {
             Button("Löschen", role: .destructive) {
                 performDeleteUser()
             }

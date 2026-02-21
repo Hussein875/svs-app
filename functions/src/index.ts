@@ -15,6 +15,10 @@ import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
 import {google} from "googleapis";
 import {Readable} from "stream";
+import {
+  filterTokenRefsByPreference,
+  isBooleanPreferenceEnabled,
+} from "./pushPreferences";
 
 admin.initializeApp();
 
@@ -35,6 +39,24 @@ type Role = "admin" | "employee" | "expert";
  */
 function normalizeEmail(email: string): string {
   return String(email ?? "").trim().toLowerCase();
+}
+
+/**
+ * Normalizes role input to one of the supported role values.
+ *
+ * @param {unknown} rawRole Raw incoming role value.
+ * @return {Role} Safe role value.
+ */
+function normalizeRole(rawRole: unknown): Role {
+  const roleInput = String(rawRole ?? "employee").trim().toLowerCase();
+  if (
+    roleInput === "admin" ||
+    roleInput === "employee" ||
+    roleInput === "expert"
+  ) {
+    return roleInput;
+  }
+  return "employee";
 }
 
 /**
@@ -76,11 +98,7 @@ export const adminCreateUserInvite = onCall(async (request) => {
   const data = request.data ?? {};
   const email = normalizeEmail(data.email);
   const name = String(data.name ?? "").trim();
-  const roleInput = String(data.roleRaw ?? "employee").trim().toLowerCase();
-  const roleRaw: Role =
-    roleInput === "admin" || roleInput === "employee" || roleInput === "expert" ?
-      roleInput :
-      "employee";
+  const roleRaw = normalizeRole(data.roleRaw);
   const colorName = String(data.colorName ?? "blue");
   const annualLeaveDays = Number(data.annualLeaveDays ?? 30);
   const birthdayISO = String(data.birthdayISO ?? "").trim();
@@ -237,10 +255,7 @@ export const bootstrapMyProfileFromInvite = onCall(async (request) => {
     const raw = (inviteSnap.data() ?? {}) as Record<string, unknown>;
     const name = String(raw.name ?? "").trim();
     const colorName = String(raw.colorName ?? "gray").trim() || "gray";
-    const roleInput = String(raw.roleRaw ?? "employee").trim().toLowerCase();
-    const roleRaw: Role =
-      roleInput === "admin" || roleInput === "employee" || roleInput === "expert" ?
-      roleInput : "employee";
+    const roleRaw = normalizeRole(raw.roleRaw);
 
     const annualRaw = Number(raw.annualLeaveDays ?? 30);
     const annualLeaveDays = Number.isFinite(annualRaw) ?
@@ -323,10 +338,7 @@ async function hydrateUserFromInviteIfNeeded(uid: string): Promise<void> {
     if (!name) return;
 
     const colorName = String(raw.colorName ?? "gray").trim() || "gray";
-    const roleInput = String(raw.roleRaw ?? "employee").trim().toLowerCase();
-    const roleRaw: Role =
-      roleInput === "admin" || roleInput === "employee" || roleInput === "expert" ?
-      roleInput : "employee";
+    const roleRaw = normalizeRole(raw.roleRaw);
     const annualRaw = Number(raw.annualLeaveDays ?? 30);
     const annualLeaveDays = Number.isFinite(annualRaw) ?
       Math.max(0, Math.floor(annualRaw)) : 30;
@@ -530,10 +542,50 @@ async function getAdminTokenRefs(): Promise<TokenRef[]> {
     .where("roleRaw", "==", "admin")
     .get();
 
+  const admins = adminsSnap.docs.filter((u) => u.data()?.pushEnabled !== false);
+
   const out: TokenRef[] = [];
   const seen = new Set<string>();
 
-  for (const u of adminsSnap.docs) {
+  for (const u of admins) {
+    const devicesSnap = await admin.firestore()
+      .collection("users")
+      .doc(u.id)
+      .collection("devices")
+      .get();
+
+    for (const d of devicesSnap.docs) {
+      const t = d.data()?.fcmToken;
+      const token = typeof t === "string" ? t.trim() : "";
+      if (!token) continue;
+      if (seen.has(token)) continue;
+      seen.add(token);
+      out.push({token, ref: d.ref, ownerUserId: u.id});
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Fetches FCM token refs for admins that explicitly opted into
+ * provision payout pushes.
+ *
+ * @return {Promise<TokenRef[]>} A deduplicated list of admin device tokens.
+ */
+async function getProvisionPushAdminTokenRefs(): Promise<TokenRef[]> {
+  const adminsSnap = await admin.firestore()
+    .collection("users")
+    .where("roleRaw", "==", "admin")
+    .where("receiveAdminPushes", "==", true)
+    .get();
+
+  const admins = adminsSnap.docs.filter((u) => u.data()?.pushEnabled !== false);
+
+  const out: TokenRef[] = [];
+  const seen = new Set<string>();
+
+  for (const u of admins) {
     const devicesSnap = await admin.firestore()
       .collection("users")
       .doc(u.id)
@@ -677,11 +729,11 @@ async function getUserTokenRefs(
 }
 
 /**
- * Fetches FCM token refs for all non-admin users (employee/expert and others).
+ * Fetches FCM token refs for all users.
  *
- * @return {Promise<TokenRef[]>} Deduplicated list of non-admin device tokens.
+ * @return {Promise<TokenRef[]>} Deduplicated list of all user device tokens.
  */
-async function getNonAdminTokenRefs(): Promise<TokenRef[]> {
+async function getAllUserTokenRefs(): Promise<TokenRef[]> {
   const usersSnap = await admin.firestore()
     .collection("users")
     .get();
@@ -690,8 +742,7 @@ async function getNonAdminTokenRefs(): Promise<TokenRef[]> {
   const seen = new Set<string>();
 
   for (const u of usersSnap.docs) {
-    const roleRaw = String(u.data()?.roleRaw ?? "").trim().toLowerCase();
-    if (roleRaw === "admin") continue;
+    if (u.data()?.pushEnabled === false) continue;
 
     const devicesSnap = await admin.firestore()
       .collection("users")
@@ -710,6 +761,50 @@ async function getNonAdminTokenRefs(): Promise<TokenRef[]> {
   }
 
   return out;
+}
+
+/**
+ * Filters token refs by a boolean user preference on users/<uid>.
+ *
+ * @param {TokenRef[]} tokenRefs Token refs to filter.
+ * @param {string} fieldName Boolean preference field name.
+ * @param {boolean} defaultEnabled Fallback when field is missing.
+ * @return {Promise<TokenRef[]>} Filtered token refs.
+ */
+async function filterTokenRefsByUserBooleanPreference(
+  tokenRefs: TokenRef[],
+  fieldName: string,
+  defaultEnabled: boolean
+): Promise<TokenRef[]> {
+  if (tokenRefs.length === 0) return tokenRefs;
+
+  const ownerIds = Array.from(
+    new Set(
+      tokenRefs
+        .map((tr) => String(tr.ownerUserId ?? "").trim())
+        .filter((uid) => uid.length > 0)
+    )
+  );
+  if (ownerIds.length === 0) return [];
+
+  const enabledByUid = new Map<string, boolean>();
+
+  await Promise.all(
+    ownerIds.map(async (uid) => {
+      try {
+        const snap = await admin.firestore().collection("users").doc(uid).get();
+        const raw = (
+          snap.data() as Record<string, unknown> | undefined
+        )?.[fieldName];
+        const enabled = isBooleanPreferenceEnabled(raw, defaultEnabled);
+        enabledByUid.set(uid, enabled);
+      } catch {
+        enabledByUid.set(uid, defaultEnabled);
+      }
+    })
+  );
+
+  return filterTokenRefsByPreference(tokenRefs, enabledByUid, defaultEnabled);
 }
 
 /**
@@ -1064,6 +1159,60 @@ export const setMyPushEnabled = onCall(async (request) => {
   };
 });
 
+export const setMyReceiveAdminPushes = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  await ensureCallerIsAdmin(callerUid);
+
+  const data = (request.data ?? {}) as Record<string, unknown>;
+  const enabledRaw = data.enabled;
+  if (typeof enabledRaw !== "boolean") {
+    throw new HttpsError("invalid-argument", "enabled must be boolean.");
+  }
+
+  const enabled = enabledRaw;
+
+  await admin.firestore().collection("users").doc(callerUid).set({
+    receiveAdminPushes: enabled,
+    receiveAdminPushesUpdatedAt:
+      admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  return {
+    ok: true,
+    receiveAdminPushes: enabled,
+  };
+});
+
+export const setMyMeetingSchedulePushEnabled = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  const data = (request.data ?? {}) as Record<string, unknown>;
+  const enabledRaw = data.enabled;
+  if (typeof enabledRaw !== "boolean") {
+    throw new HttpsError("invalid-argument", "enabled must be boolean.");
+  }
+
+  const enabled = enabledRaw;
+
+  await admin.firestore().collection("users").doc(callerUid).set({
+    meetingSchedulePushEnabled: enabled,
+    meetingSchedulePushUpdatedAt:
+      admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  return {
+    ok: true,
+    meetingSchedulePushEnabled: enabled,
+  };
+});
+
 export const adminDeleteMeetingArchive = onCall(async (request) => {
   const callerUid = request.auth?.uid;
   if (!callerUid) {
@@ -1090,7 +1239,7 @@ export const adminDeleteMeetingArchive = onCall(async (request) => {
 });
 
 /**
- * Sends a "meeting date set/changed" push to all non-admin users.
+ * Sends a "meeting date set/changed" push to all users.
  *
  * @param {admin.firestore.Timestamp} meetingAtTs Timestamp of the next meeting.
  * @param {string} updatedByUid User who changed the date (excluded from push).
@@ -1104,10 +1253,15 @@ async function pushMeetingDateChanged(
   const meetingAt = meetingAtTs.toDate();
   const meetingDateLabel = formatGermanDateTime(meetingAt);
 
-  const allTokenRefs = await getNonAdminTokenRefs();
-  const tokenRefs = filterOutUserTokenRefs(allTokenRefs, updatedByUid);
+  const allTokenRefs = await getAllUserTokenRefs();
+  const withoutSelf = filterOutUserTokenRefs(allTokenRefs, updatedByUid);
+  const tokenRefs = await filterTokenRefsByUserBooleanPreference(
+    withoutSelf,
+    "meetingSchedulePushEnabled",
+    true
+  );
   if (tokenRefs.length === 0) {
-    console.log("[push][" + tag + "] no employee tokens");
+    console.log("[push][" + tag + "] no user meeting-push tokens");
     return;
   }
 
@@ -2545,14 +2699,14 @@ export const commissionCreatedSendPdf = onDocumentCreated(
     // Push an Admins: Neue Provisionsanfrage (idempotent)
     if (!data.adminPushSentAt) {
       try {
-        const allAdminTokenRefs = await getAdminTokenRefs();
+        const allAdminTokenRefs = await getProvisionPushAdminTokenRefs();
         const creatorUid = String(data.createdByUid ?? "").trim();
         const tokenRefs = filterOutUserTokenRefs(
           allAdminTokenRefs,
           creatorUid
         );
         if (tokenRefs.length === 0) {
-          console.log("[push][commission_new] no admin tokens");
+          console.log("[push][commission_new] no provision-push admin tokens");
         } else {
           const name = String(data.recommenderName ?? "").trim();
           const amountTxt = formatEurAmount(data.amount);

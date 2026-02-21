@@ -10,7 +10,13 @@ import UIKit
 struct ProvisionenView: View {
     @EnvironmentObject var appState: AppState
     
-    @State private var amountText: String = ""
+    private enum AmountMode {
+        case preset50
+        case custom
+    }
+
+    @State private var amountMode: AmountMode = .preset50
+    @State private var customAmountText: String = ""
     @FocusState private var amountFocused: Bool
     @State private var selectedCommission: CommissionRow? = nil
     
@@ -72,46 +78,52 @@ struct ProvisionenView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
 
-                            HStack(spacing: 10) {
-                                Image(systemName: "eurosign.circle")
-                                    .foregroundColor(.secondary)
+                            HStack(spacing: 8) {
+                                amountModeButton(title: "50 €", mode: .preset50)
+                                amountModeButton(title: "Anderer Betrag", mode: .custom)
+                            }
 
-                                TextField("z. B. 50,00", text: $amountText)
-                                    .keyboardType(.numbersAndPunctuation)
-                                    .focused($amountFocused)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled(true)
-                                    .textContentType(.none)
-                                    .submitLabel(.done)
-                                    .onSubmit {
-                                        amountFocused = false
-                                    }
-                                    .onChange(of: amountFocused) { _, focused in
-                                        if !focused {
-                                            amountText = normalizeAmountText(amountText)
+                            if amountMode == .custom {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "eurosign.circle")
+                                        .foregroundColor(.secondary)
+
+                                    TextField("z. B. 75,00", text: $customAmountText)
+                                        .keyboardType(.numbersAndPunctuation)
+                                        .focused($amountFocused)
+                                        .textInputAutocapitalization(.never)
+                                        .autocorrectionDisabled(true)
+                                        .textContentType(.none)
+                                        .submitLabel(.done)
+                                        .onSubmit {
+                                            amountFocused = false
+                                        }
+                                        .onChange(of: amountFocused) { _, focused in
+                                            if !focused {
+                                                customAmountText = normalizeAmountText(customAmountText)
+                                                amountFieldInvalid = false
+                                            }
+                                        }
+                                        .onChange(of: customAmountText) { _, _ in
                                             amountFieldInvalid = false
                                         }
-                                    }
-                                    .onChange(of: amountText) { _, _ in
-                                        amountFieldInvalid = false
-                                    }
 
-                                Text("EUR")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
+                                    Text("EUR")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(.tertiarySystemBackground))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(amountFieldInvalid ? Color.red : Color.clear, lineWidth: 1)
+                                )
                             }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(.tertiarySystemBackground))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(amountFieldInvalid ? Color.red : Color.clear, lineWidth: 1)
-                            )
-
-                            Text("Hinweis: Der Betrag wird nicht im Webformular angezeigt, sondern nur im Hintergrund gespeichert.")
+                            Text("Der Betrag wird nicht im Webformular angezeigt.")
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
                         }
@@ -383,7 +395,42 @@ struct ProvisionenView: View {
         }
     }
     
-    private var parsedAmount: Double? { parseAmountToDouble(amountText) }
+    private var selectedAmount: Double? {
+        switch amountMode {
+        case .preset50:
+            return 50.0
+        case .custom:
+            return parseAmountToDouble(customAmountText)
+        }
+    }
+
+    @ViewBuilder
+    private func amountModeButton(title: String, mode: AmountMode) -> some View {
+        let isSelected = amountMode == mode
+
+        Button {
+            amountMode = mode
+            amountFieldInvalid = false
+            if mode == .preset50 {
+                amountFocused = false
+            }
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(isSelected ? .white : .primary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(isSelected ? Color.accentColor : Color(.tertiarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(isSelected ? Color.clear : Color.secondary.opacity(0.18), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
 
     private func dismissKeyboard() {
         amountFocused = false
@@ -392,7 +439,7 @@ struct ProvisionenView: View {
     }
 
     private var canGenerateLink: Bool {
-        if let a = parsedAmount { return a > 0 }
+        if let a = selectedAmount { return a > 0 }
         return false
     }
 
@@ -425,7 +472,7 @@ struct ProvisionenView: View {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
             
-            guard let amount = parseAmountToDouble(amountText), amount > 0 else {
+            guard let amount = selectedAmount, amount > 0 else {
                 await MainActor.run {
                     showError("Bitte einen gültigen Betrag eingeben, bevor du den Link erstellst.")
                 }

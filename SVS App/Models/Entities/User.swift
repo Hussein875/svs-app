@@ -17,6 +17,8 @@ struct User: Identifiable, Hashable, Codable {
     var email: String
     var birthday: Date? = nil
     var pushNotificationsEnabled: Bool = true
+    var receiveAdminPushes: Bool = false
+    var meetingSchedulePushEnabled: Bool = true
 
     var color: Color {
         Color.svsAccentColor(from: colorName)

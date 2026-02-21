@@ -134,8 +134,6 @@ struct MeetingTopicsView: View {
                 .padding(.vertical, 4)
             } header: {
                 Label("Nächstes Meeting", systemImage: "clock")
-            } footer: {
-                Text("Dieser Termin ist für alle sichtbar. Bearbeiten kann ihn nur ein Admin.")
             }
 
             Section {
@@ -163,9 +161,7 @@ struct MeetingTopicsView: View {
                 .buttonStyle(MeetingActionPrimaryButtonStyle())
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             } header: {
-                Label("Neuer Punkt", systemImage: "plus.bubble")
-            } footer: {
-                Text("Jeder Mitarbeiter kann hier Themen für das Monatsmeeting sammeln.")
+                Label("Neuer Meeting-Punkt", systemImage: "plus.bubble")
             }
 
             if openTopics.isEmpty {
@@ -243,8 +239,6 @@ struct MeetingTopicsView: View {
                 }
             } header: {
                 Label("Archiv", systemImage: "archivebox")
-            } footer: {
-                Text("Archivierte Punkte sind schreibgeschützt und dienen als Protokoll-Historie.")
             }
 
             if isAdmin {

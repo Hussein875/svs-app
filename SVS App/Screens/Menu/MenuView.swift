@@ -16,6 +16,10 @@ struct MenuView: View {
     @State private var isSigningOut: Bool = false
     @State private var selectedColorName: String = "blue"
     @State private var isSavingColor: Bool = false
+    @State private var meetingSchedulePushEnabled: Bool = true
+    @State private var isSavingMeetingSchedulePush: Bool = false
+    @State private var receiveAdminPushes: Bool = false
+    @State private var isSavingReceiveAdminPushes: Bool = false
 
     private let availableColors = UserColor.allCases
 
@@ -32,6 +36,7 @@ struct MenuView: View {
             userSection
             if appState.currentUser != nil {
                 appearanceSection
+                notificationsSection
             }
             appInfoSection
             signOutAndFooterSection
@@ -47,6 +52,12 @@ struct MenuView: View {
         }
         .onChange(of: selectedColorName) {
             handleColorChange()
+        }
+        .onChange(of: meetingSchedulePushEnabled) {
+            handleMeetingSchedulePushChange()
+        }
+        .onChange(of: receiveAdminPushes) {
+            handleReceiveAdminPushesChange()
         }
         .alert("Wirklich ausloggen?", isPresented: $showSignOutConfirm) {
             Button("Ausloggen", role: .destructive) {
@@ -122,6 +133,34 @@ struct MenuView: View {
                 value: "SV Souleiman",
                 systemImage: "building.2"
             )
+        }
+    }
+
+    private var notificationsSection: some View {
+        Section {
+            Toggle(isOn: $meetingSchedulePushEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Meeting-Termin Push")
+                    Text("Benachrichtigung bei neuem Meeting-Termin")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .disabled(isSavingMeetingSchedulePush)
+
+            if appState.currentUser?.role == .admin {
+            Toggle(isOn: $receiveAdminPushes) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Provisions Push")
+                    Text("Benachrichtigung bei neuer Provision")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .disabled(isSavingReceiveAdminPushes)
+            }
+        } header: {
+            Text("Benachrichtigungen")
         }
     }
 
@@ -257,6 +296,8 @@ struct MenuView: View {
     private func syncStateFromCurrentUser() {
         if let user = appState.currentUser {
             selectedColorName = UserColor.from(user.colorName).rawValue
+            meetingSchedulePushEnabled = user.meetingSchedulePushEnabled
+            receiveAdminPushes = user.receiveAdminPushes
         }
     }
 
@@ -282,6 +323,39 @@ struct MenuView: View {
                 }
                 isSavingColor = false
             }
+        }
+    }
+
+    private func handleReceiveAdminPushesChange() {
+        guard let user = appState.currentUser else { return }
+        guard user.role == .admin else { return }
+        guard !isSavingReceiveAdminPushes else { return }
+        guard receiveAdminPushes != user.receiveAdminPushes else { return }
+
+        isSavingReceiveAdminPushes = true
+
+        _Concurrency.Task { @MainActor in
+            let ok = await appState.setMyReceiveAdminPushesEnabled(receiveAdminPushes)
+            if !ok {
+                receiveAdminPushes = appState.currentUser?.receiveAdminPushes ?? false
+            }
+            isSavingReceiveAdminPushes = false
+        }
+    }
+
+    private func handleMeetingSchedulePushChange() {
+        guard let user = appState.currentUser else { return }
+        guard !isSavingMeetingSchedulePush else { return }
+        guard meetingSchedulePushEnabled != user.meetingSchedulePushEnabled else { return }
+
+        isSavingMeetingSchedulePush = true
+
+        _Concurrency.Task { @MainActor in
+            let ok = await appState.setMyMeetingSchedulePushEnabled(meetingSchedulePushEnabled)
+            if !ok {
+                meetingSchedulePushEnabled = appState.currentUser?.meetingSchedulePushEnabled ?? true
+            }
+            isSavingMeetingSchedulePush = false
         }
     }
 

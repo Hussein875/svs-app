@@ -16,6 +16,8 @@ struct UserProfile: Codable {
     var email: String
     var birthday: Date?
     var pushEnabled: Bool
+    var receiveAdminPushes: Bool
+    var meetingSchedulePushEnabled: Bool
 
     init(name: String,
          roleRaw: String,
@@ -23,7 +25,9 @@ struct UserProfile: Codable {
          annualLeaveDays: Int,
          email: String,
          birthday: Date? = nil,
-         pushEnabled: Bool = true) {
+         pushEnabled: Bool = true,
+         receiveAdminPushes: Bool = false,
+         meetingSchedulePushEnabled: Bool = true) {
         self.name = name
         self.roleRaw = roleRaw
         self.colorName = colorName
@@ -31,6 +35,8 @@ struct UserProfile: Codable {
         self.email = email
         self.birthday = birthday
         self.pushEnabled = pushEnabled
+        self.receiveAdminPushes = receiveAdminPushes
+        self.meetingSchedulePushEnabled = meetingSchedulePushEnabled
     }
 
     init(from user: User) {
@@ -41,6 +47,8 @@ struct UserProfile: Codable {
         self.email = user.email
         self.birthday = user.birthday
         self.pushEnabled = user.pushNotificationsEnabled
+        self.receiveAdminPushes = user.receiveAdminPushes
+        self.meetingSchedulePushEnabled = user.meetingSchedulePushEnabled
     }
 
     init?(from data: [String: Any]) {
@@ -58,6 +66,9 @@ struct UserProfile: Codable {
         self.annualLeaveDays = annualLeaveDays
         self.email = email
         self.pushEnabled = (data["pushEnabled"] as? Bool) ?? true
+        self.receiveAdminPushes = (data["receiveAdminPushes"] as? Bool) ?? false
+        self.meetingSchedulePushEnabled =
+            (data["meetingSchedulePushEnabled"] as? Bool) ?? true
         if let ts = data["birthday"] as? Timestamp {
             self.birthday = ts.dateValue()
         } else if let d = data["birthday"] as? Date {
@@ -79,6 +90,8 @@ struct UserProfile: Codable {
             "email": email,
             "pushEnabled": pushEnabled
         ]
+        // Keep this dictionary compatible with current Firestore rules.
+        // Admin push routing preference is written by callable function.
         if let birthday {
             dict["birthday"] = Timestamp(date: birthday)
         }
@@ -94,7 +107,9 @@ struct UserProfile: Codable {
             annualLeaveDays: annualLeaveDays,
             email: email,
             birthday: birthday,
-            pushNotificationsEnabled: pushEnabled
+            pushNotificationsEnabled: pushEnabled,
+            receiveAdminPushes: receiveAdminPushes,
+            meetingSchedulePushEnabled: meetingSchedulePushEnabled
         )
     }
 }
