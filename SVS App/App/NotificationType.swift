@@ -22,6 +22,9 @@ enum NotificationType: String, Codable, CaseIterable {
     /// A leave request was rejected.
     case leaveRequestRejected = "leave_request_rejected"
 
+    /// A new on-call assignment was created directly for a user.
+    case leaveRequestOnCallAssigned = "leave_request_oncall_assigned"
+
     /// A task was assigned or reassigned.
     case taskAssigned = "task_assigned"
 

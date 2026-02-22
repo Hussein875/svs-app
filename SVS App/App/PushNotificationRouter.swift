@@ -37,7 +37,7 @@ struct PushRoute: Equatable, Codable {
 
         // Best-effort mapping: different push types carry different keys.
         switch self.type {
-        case .leaveRequestNew, .leaveRequestApproved, .leaveRequestRejected:
+        case .leaveRequestNew, .leaveRequestApproved, .leaveRequestRejected, .leaveRequestOnCallAssigned:
             self.entityId = payload.string("requestId")
             self.decision = payload.string("decision")
             self.leaveTypeRaw = payload.leaveTypeRaw

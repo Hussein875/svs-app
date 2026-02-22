@@ -14,6 +14,14 @@ struct ProvisionenView: View {
         case preset50
         case custom
     }
+    
+    private enum CommissionFilter: String, CaseIterable, Identifiable {
+        case open = "Offen"
+        case paid = "Bezahlt"
+        case all = "Alle"
+
+        var id: String { rawValue }
+    }
 
     @State private var amountMode: AmountMode = .preset50
     @State private var customAmountText: String = ""
@@ -25,9 +33,8 @@ struct ProvisionenView: View {
     @State private var commissionsError: String? = nil
     @State private var isAdmin: Bool = false
     @State private var commissionsListener: ListenerRegistration? = nil
-    
-    
-    @State private var pendingAdminAction: PendingAdminAction? = nil
+    @State private var selectedFilter: CommissionFilter = .open
+    @State private var deleteTarget: CommissionRow? = nil
     @State private var amountFieldInvalid: Bool = false
     
     // MARK: - Link Generation
@@ -225,7 +232,24 @@ struct ProvisionenView: View {
                             .listRowBackground(Color.clear)
                     }
 
-                    ForEach(commissions) { row in
+                    if !commissions.isEmpty {
+                        provisionSummaryRow
+                            .listRowInsets(EdgeInsets(top: 2, leading: 18, bottom: 4, trailing: 18))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+
+                        Picker("Filter", selection: $selectedFilter) {
+                            ForEach(CommissionFilter.allCases) { filter in
+                                Text(filter.rawValue).tag(filter)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 18, bottom: 8, trailing: 18))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
+
+                    ForEach(filteredCommissions) { row in
                         HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack(alignment: .firstTextBaseline) {
@@ -300,11 +324,12 @@ struct ProvisionenView: View {
                                 }
                                 .tint(.green)
                             }
-                        }                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             if isAdmin {
                                 Button(role: .destructive) {
                                     dismissKeyboard()
-                                    pendingAdminAction = .delete(row)
+                                    deleteTarget = row
                                 } label: {
                                     Label("Löschen", systemImage: "trash")
                                 }
@@ -342,44 +367,28 @@ struct ProvisionenView: View {
         }
         .sheet(item: $selectedCommission) { row in
             CommissionDetailSheet(row: row)
-            // When closing the sheet, also clear pendingAdminAction if set
                 .onDisappear {
                     selectedCommission = nil
-                    pendingAdminAction = nil
                 }
         }
-        .overlay(alignment: .bottom) {
-            if case .delete = pendingAdminAction {
-                let action = pendingAdminAction!   // safe, weil oben geprüft
-                AdminConfirmBar(
-                    action: action,
-                    onCancel: {
-                        withAnimation(.easeInOut) {
-                            pendingAdminAction = nil
-                        }
-                    },
-                    onConfirm: {
-                        let current = pendingAdminAction
-                        withAnimation(.easeInOut) {
-                            pendingAdminAction = nil
-                        }
-                        guard let current else { return }
-                        _Concurrency.Task {
-                            switch current {
-                            case let .delete(r):
-                                await deleteCommission(r)
-                            default:
-                                break
-                            }
-                        }
-                    }
-                )
-                .padding(.horizontal, 18)
-                .padding(.bottom, 16)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+        .alert("Provision löschen?", isPresented: deleteAlertBinding) {
+            Button("Abbrechen", role: .cancel) {
+                deleteTarget = nil
+            }
+            Button("Löschen", role: .destructive) {
+                guard let row = deleteTarget else { return }
+                deleteTarget = nil
+                _Concurrency.Task {
+                    await deleteCommission(row)
+                }
+            }
+        } message: {
+            if let row = deleteTarget {
+                Text("Möchtest du den Eintrag von \(row.recommenderName) wirklich löschen?")
+            } else {
+                Text("Dieser Eintrag wird dauerhaft gelöscht.")
             }
         }
-        .animation(.easeInOut, value: pendingAdminAction != nil)
         .navigationTitle("Provision")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -441,6 +450,74 @@ struct ProvisionenView: View {
     private var canGenerateLink: Bool {
         if let a = selectedAmount { return a > 0 }
         return false
+    }
+    
+    private var deleteAlertBinding: Binding<Bool> {
+        Binding(
+            get: { deleteTarget != nil },
+            set: { isPresented in
+                if !isPresented { deleteTarget = nil }
+            }
+        )
+    }
+
+    private var filteredCommissions: [CommissionRow] {
+        switch selectedFilter {
+        case .open:
+            return commissions.filter { $0.status != "paid" }
+        case .paid:
+            return commissions.filter { $0.status == "paid" }
+        case .all:
+            return commissions
+        }
+    }
+
+    private var openCount: Int {
+        commissions.reduce(into: 0) { partialResult, row in
+            if row.status != "paid" {
+                partialResult += 1
+            }
+        }
+    }
+
+    private var paidCount: Int {
+        commissions.count - openCount
+    }
+
+    private var provisionSummaryRow: some View {
+        HStack(spacing: 10) {
+            summaryPill(
+                title: "Offen",
+                count: openCount,
+                color: .orange
+            )
+            summaryPill(
+                title: "Bezahlt",
+                count: paidCount,
+                color: .green
+            )
+            Spacer()
+            Text("\(commissions.count) gesamt")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func summaryPill(title: String, count: Int, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text("\(title): \(count)")
+                .font(.caption.weight(.semibold))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color(.tertiarySystemBackground))
+        )
     }
 
     // header removed

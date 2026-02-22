@@ -53,15 +53,6 @@ struct WorkHomeView: View {
             .count
     }
 
-    private var myOnCallSaturdaysThisYearCount: Int {
-        guard let me = appState.currentUser else { return 0 }
-        return appState.leaveRequests
-            .filter { $0.user.id == me.id }
-            .filter { $0.type == .onCallSaturday }
-            .filter { currentYearInterval.contains($0.startDate) }
-            .count
-    }
-
     private var openMeetingTopicsCount: Int {
         appState.meetingTopics.filter { $0.status == .open }.count
     }
@@ -257,7 +248,7 @@ struct WorkHomeView: View {
                                     CompactWorkCard(
                                         title: "Bereitschaft",
                                         systemImage: "calendar.badge.clock",
-                                        badgeText: myOnCallSaturdaysThisYearCount > 0 ? "\(myOnCallSaturdaysThisYearCount)" : nil
+                                        badgeText: nil
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -314,6 +305,8 @@ struct WorkHomeView: View {
                     )
                 case .myRequests:
                     MyRequestsScreen()
+                case .myOnCallSaturdays:
+                    MyOnCallSaturdaysScreen()
                 }
             }
             .background(Color(.systemGroupedBackground))

@@ -76,7 +76,8 @@ struct DayCell: View {
     }
 
     private var dayNumberColor: Color {
-        if isToday || isHoliday || hasBirthday { return .red }
+        if isToday || isHoliday { return .red }
+        if hasBirthday { return .yellow }
         return .primary
     }
 

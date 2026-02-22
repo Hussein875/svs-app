@@ -184,10 +184,15 @@ struct MeetingArchiveRow: View {
 struct MeetingArchiveDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showDeleteArchiveConfirmation: Bool = false
+    @State private var protocolDraft: String = ""
+    @State private var isEditingProtocol: Bool = false
+    @State private var isSavingProtocol: Bool = false
 
     let archive: MeetingArchive
     let userNameForId: (String) -> String
     let canDeleteArchive: Bool
+    let canEditProtocol: Bool
+    let onSaveProtocol: (String) async -> Bool
     let onDeleteArchive: () -> Void
 
     private var sortedTopics: [MeetingTopic] {
@@ -206,6 +211,10 @@ struct MeetingArchiveDetailView: View {
         f.locale = Locale(identifier: "de_DE")
         f.dateFormat = "dd.MM.yyyy HH:mm"
         return f.string(from: archive.archivedAt)
+    }
+
+    private var hasProtocolChanges: Bool {
+        protocolDraft != archive.protocolText
     }
 
     var body: some View {
@@ -243,18 +252,72 @@ struct MeetingArchiveDetailView: View {
                     Text("Archivierte Punkte")
                 }
 
-                if !archive.protocolText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Section {
-                        Text(archive.protocolText)
+                Section {
+                    if isEditingProtocol && canEditProtocol {
+                        TextEditor(text: $protocolDraft)
                             .font(.footnote.monospaced())
-                            .textSelection(.enabled)
-                    } header: {
-                        Text("Protokoll")
+                            .frame(minHeight: 180)
+
+                        HStack(spacing: 10) {
+                            Button("Abbrechen", role: .cancel) {
+                                protocolDraft = archive.protocolText
+                                isEditingProtocol = false
+                            }
+                            .frame(maxWidth: .infinity)
+                            .buttonStyle(MeetingActionSecondaryButtonStyle())
+
+                            Button {
+                                guard !isSavingProtocol else { return }
+                                isSavingProtocol = true
+                                _Concurrency.Task {
+                                    let ok = await onSaveProtocol(protocolDraft)
+                                    await MainActor.run {
+                                        isSavingProtocol = false
+                                        if ok {
+                                            isEditingProtocol = false
+                                        }
+                                    }
+                                }
+                            } label: {
+                                if isSavingProtocol {
+                                    Text("Speichern …")
+                                } else {
+                                    Text("Speichern")
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .buttonStyle(MeetingActionPrimaryButtonStyle())
+                            .disabled(isSavingProtocol || !hasProtocolChanges)
+                        }
+                    } else {
+                        if protocolDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text("Noch kein Protokolltext vorhanden.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text(protocolDraft)
+                                .font(.footnote.monospaced())
+                                .textSelection(.enabled)
+                        }
+
+                        if canEditProtocol {
+                            Button {
+                                isEditingProtocol = true
+                            } label: {
+                                Label("Protokoll bearbeiten", systemImage: "square.and.pencil")
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     }
+                } header: {
+                    Text("Protokoll")
                 }
             }
             .navigationTitle("Meeting-Archiv")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                protocolDraft = archive.protocolText
+            }
             .toolbar {
                 if canDeleteArchive {
                     ToolbarItem(placement: .topBarLeading) {

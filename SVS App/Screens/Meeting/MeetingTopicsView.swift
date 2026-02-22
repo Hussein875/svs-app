@@ -300,6 +300,13 @@ struct MeetingTopicsView: View {
                 archive: archive,
                 userNameForId: { userId in appState.userName(for: userId) },
                 canDeleteArchive: isAdmin,
+                canEditProtocol: isAdmin,
+                onSaveProtocol: { updatedText in
+                    await appState.updateMeetingArchiveProtocol(
+                        archive,
+                        protocolText: updatedText
+                    )
+                },
                 onDeleteArchive: {
                     appState.deleteMeetingArchive(archive)
                     selectedArchive = nil

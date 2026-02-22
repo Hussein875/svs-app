@@ -155,6 +155,48 @@ extension AppState {
     }
 
     @MainActor
+    @discardableResult
+    func updateMeetingArchiveProtocol(
+        _ archive: MeetingArchive,
+        protocolText: String
+    ) async -> Bool {
+        guard canDeleteMeetingArchive(by: currentUser) else {
+            showToast(.error, "Nur Admins dürfen das Protokoll bearbeiten.")
+            return false
+        }
+
+        let cleaned = protocolText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let docId = archive.id.uuidString
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            _ = try await functions.httpsCallable("adminUpdateMeetingArchiveProtocol").call([
+                "archiveId": docId,
+                "protocolText": cleaned
+            ])
+
+            if let cacheIdx = meetingArchivesSnapshotCache.firstIndex(where: { $0.id == archive.id }) {
+                meetingArchivesSnapshotCache[cacheIdx].protocolText = cleaned
+            }
+            if let listIdx = meetingArchives.firstIndex(where: { $0.id == archive.id }) {
+                meetingArchives[listIdx].protocolText = cleaned
+            }
+
+            uiErrorMessage = nil
+            showToast(.success, "Protokoll gespeichert.")
+            return true
+        } catch {
+            let msg = meetingArchiveErrorMessage(
+                prefix: "Protokoll konnte nicht gespeichert werden",
+                error: error
+            )
+            uiErrorMessage = msg
+            showToast(.error, msg)
+            return false
+        }
+    }
+
+    @MainActor
     func archiveCurrentMeeting() async {
         guard canArchiveMeeting(by: currentUser) else {
             showToast(.error, "Nur Admins dürfen Meetings archivieren.")

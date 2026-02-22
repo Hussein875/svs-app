@@ -95,6 +95,13 @@ struct MainView: View {
                 entityId: asUUID(route.entityId)
             )
 
+        case .leaveRequestOnCallAssigned:
+            selectedTab = .home
+            homePushDestination = HomePushDestination(
+                kind: .myOnCallSaturdays,
+                entityId: asUUID(route.entityId)
+            )
+
         case .taskAssigned:
             selectedTab = .home
             homePushDestination = HomePushDestination(
@@ -167,6 +174,7 @@ struct HomePushDestination: Identifiable, Hashable {
         case tasksAssigned
         case tasksCompleted
         case myRequests
+        case myOnCallSaturdays
     }
 
     let id = UUID()

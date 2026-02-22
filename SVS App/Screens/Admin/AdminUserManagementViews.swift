@@ -103,12 +103,14 @@ struct AdminUsersScreen: View {
         private var remaining: Int { appState.remainingLeaveDays(for: user) }
         private var warning: Bool { remaining <= 5 }
 
-        private var sickCount: Int {
+        private var sickDays: Int {
             appState.leaveRequests
                 .filter { $0.user.id == user.id }
                 .filter { $0.type == .sick }
                 .filter { $0.status == .approved }
-                .count
+                .reduce(into: 0) { partialResult, request in
+                    partialResult += max(workingDays(from: request.startDate, to: request.endDate), 0)
+                }
         }
 
         private var onCallCountThisYear: Int {
@@ -163,7 +165,7 @@ struct AdminUsersScreen: View {
                         }
 
                         HStack(spacing: 10) {
-                            Text("Krank: \(sickCount)")
+                            Text("Krank: \(sickDays) Tage")
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
 

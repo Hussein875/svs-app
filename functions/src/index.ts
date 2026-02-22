@@ -1238,6 +1238,48 @@ export const adminDeleteMeetingArchive = onCall(async (request) => {
   };
 });
 
+export const adminUpdateMeetingArchiveProtocol = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  await ensureCallerIsAdmin(callerUid);
+
+  const data = (request.data ?? {}) as Record<string, unknown>;
+  const archiveId = String(data.archiveId ?? "").trim();
+  if (!archiveId) {
+    throw new HttpsError("invalid-argument", "archiveId required.");
+  }
+
+  const protocolTextRaw = data.protocolText;
+  if (typeof protocolTextRaw !== "string") {
+    throw new HttpsError("invalid-argument", "protocolText must be string.");
+  }
+
+  const protocolText = protocolTextRaw.trim();
+  if (protocolText.length > 20000) {
+    throw new HttpsError(
+      "invalid-argument",
+      "protocolText too long (max 20000 chars)."
+    );
+  }
+
+  await admin.firestore()
+    .collection("meetingArchives")
+    .doc(archiveId)
+    .set({
+      protocolText,
+      protocolUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      protocolUpdatedByUserId: callerUid,
+    }, {merge: true});
+
+  return {
+    ok: true,
+    archiveId,
+  };
+});
+
 /**
  * Sends a "meeting date set/changed" push to all users.
  *
@@ -1391,11 +1433,61 @@ export const pushOnNewLeaveRequest =
         data.userId ??
         ""
       ).trim();
+      const requestStatusRaw = String(data.statusRaw ?? "").trim();
 
       console.log(
         "[push][new] requestId=",
         String(event.params.requestId ?? "")
       );
+
+      // When an admin directly assigns an on-call entry to another user,
+      // notify that assignee on create (there is no later status change event).
+      const shouldNotifyOnCallAssignee =
+        isOnCall &&
+        !!requestUserId &&
+        !!creatorUserId &&
+        requestUserId !== creatorUserId;
+
+      if (shouldNotifyOnCallAssignee) {
+        const assigneeTokenRefs = await getUserTokenRefs(
+          requestUserId,
+          requestUserEmail
+        );
+        const assigneeTargets = filterOutUserTokenRefs(
+          assigneeTokenRefs,
+          creatorUserId
+        );
+
+        if (assigneeTargets.length === 0) {
+          console.log(
+            "[push][oncall_assigned] no user tokens for",
+            requestUserId
+          );
+        } else {
+          const assignedTitle = requestStatusRaw === "Genehmigt" ?
+            "Neue Bereitschaft" :
+            "Bereitschaft eingetragen";
+          const assignedBody = requestDate ?
+            "Du wurdest für " + requestDate + " eingetragen." :
+            "Du wurdest für eine Bereitschaft eingetragen.";
+
+          await sendBadgeCountedMulticast(
+            "oncall_assigned",
+            assigneeTargets,
+            {
+              title: assignedTitle,
+              body: assignedBody,
+            },
+            {
+              type: "leave_request_oncall_assigned",
+              requestId: String(event.params.requestId ?? ""),
+              decision: "approved",
+              leaveTypeRaw: typeRaw,
+              requestDateLabel: requestDate,
+            }
+          );
+        }
+      }
 
       const allAdminTokenRefs = await getAdminTokenRefs();
       const tokenRefs = filterOutUserTokenRefs(

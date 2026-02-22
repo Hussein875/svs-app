@@ -36,7 +36,9 @@ struct MenuView: View {
             userSection
             if appState.currentUser != nil {
                 appearanceSection
-                notificationsSection
+                if shouldShowNotificationsSection {
+                    notificationsSection
+                }
             }
             appInfoSection
             signOutAndFooterSection
@@ -138,15 +140,17 @@ struct MenuView: View {
 
     private var notificationsSection: some View {
         Section {
-            Toggle(isOn: $meetingSchedulePushEnabled) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Meeting-Termin Push")
-                    Text("Benachrichtigung bei neuem Meeting-Termin")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+            if canManageMeetingSchedulePush {
+                Toggle(isOn: $meetingSchedulePushEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Meeting-Termin")
+                        Text("Benachrichtigung bei neuem Meeting-Termin")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
+                .disabled(isSavingMeetingSchedulePush)
             }
-            .disabled(isSavingMeetingSchedulePush)
 
             if appState.currentUser?.role == .admin {
             Toggle(isOn: $receiveAdminPushes) {
@@ -453,5 +457,14 @@ struct MenuView: View {
         case .expert:
             return "Sachverständiger"
         }
+    }
+
+    private var canManageMeetingSchedulePush: Bool {
+        guard let role = appState.currentUser?.role else { return false }
+        return role == .admin || role == .expert
+    }
+
+    private var shouldShowNotificationsSection: Bool {
+        canManageMeetingSchedulePush || appState.currentUser?.role == .admin
     }
 }
