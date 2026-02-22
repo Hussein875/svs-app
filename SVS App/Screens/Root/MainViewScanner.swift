@@ -580,11 +580,6 @@ struct ScannerScreen: View {
             let error: String?
         }
 
-        if status < 200 || status >= 300 {
-            print("[Drive] uploadScanToDrive HTTP", status)
-            if !rawText.isEmpty { print("[Drive] body:", rawText) }
-        }
-
         do {
             let decoded = try JSONDecoder().decode(Payload.self, from: data)
             if decoded.ok, let id = decoded.driveFileId, !id.isEmpty {

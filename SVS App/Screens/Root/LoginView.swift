@@ -254,12 +254,8 @@ struct LoginView: View {
                 .collection("devices")
                 .document(deviceId)
                 .setData(data, merge: true)
-
-            print("Saved FCM token after login for user:", userId)
-
         } catch {
             // Do not block login if token save fails
-            print("Failed to save FCM token after login:", error)
         }
     }
 

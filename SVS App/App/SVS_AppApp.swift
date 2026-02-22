@@ -118,43 +118,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
         let content = response.notification.request.content
 
-        // Text-Inhalt der Notification
-        let title = content.title
-        let subtitle = content.subtitle
-        let body = content.body
-
-        // Meta
-        let identifier = response.notification.request.identifier
-        let actionId = response.actionIdentifier
-        let categoryId = content.categoryIdentifier
-
-        print("[PushTap] id=\(identifier) action=\(actionId) category=\(categoryId)")
-        print("[PushTap] title=\(title)")
-        if !subtitle.isEmpty { print("[PushTap] subtitle=\(subtitle)") }
-        print("[PushTap] body=\(body)")
-
         // Payload (data)
         let userInfo = content.userInfo
         // Route push taps into the app (SwiftUI can observe NotificationCenter).
         PushNotificationRouter.handlePushTap(userInfo: userInfo)
-        if userInfo.isEmpty {
-            print("[PushTap] userInfo: <empty>")
-        } else {
-            print("[PushTap] userInfo:")
-            if userInfo.isEmpty {
-                print("[PushTap] userInfo: <empty>")
-            } else {
-                print("[PushTap] userInfo:")
-                let keys = userInfo.keys
-                    .map { String(describing: $0) }
-                    .sorted()
-
-                for k in keys {
-                    let v = userInfo[k] ?? "<nil>"
-                    print("  - \(k): \(v)")
-                }
-            }
-        }
     }
 
 }

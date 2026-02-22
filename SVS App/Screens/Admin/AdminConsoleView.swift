@@ -141,12 +141,6 @@ struct AdminConsoleView: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
-            .onAppear {
-                #if DEBUG
-                print("[AdminConsole] commissions:", appState.commissions.count)
-                print("[AdminConsole] commission statuses:", appState.commissions.map { $0.status })
-                #endif
-            }
         }
     }
     
