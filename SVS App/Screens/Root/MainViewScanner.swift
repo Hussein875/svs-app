@@ -24,6 +24,7 @@ struct ScannerScreen: View {
     @State private var scannedImages: [UIImage] = []
     @State private var scannedPDFURL: URL? = nil
     @State private var gutachtenNr: String = ""
+    @State private var scanName: String = ""
     @State private var uiErrorMessage: String? = nil
     @State private var isUploadingToDrive = false
     @State private var driveUploadSuccessMessage: String? = nil
@@ -47,37 +48,87 @@ struct ScannerScreen: View {
         return String(format: "%02d", y % 100)
     }
 
-    private var formattedScanName: String {
+    private var normalizedScanNumber: String? {
         let digits = gutachtenNr.filter { $0.isNumber }
         let trimmed = String(digits.prefix(4))
-        let zeros = max(0, 4 - trimmed.count)
-        let nr = String(repeating: "0", count: zeros) + trimmed
-        return "\(nr)/\(currentYear2)"
+        guard !trimmed.isEmpty else { return nil }
+        return String(Int(trimmed) ?? 0)
     }
 
-    // Same as formattedScanName, but WITHOUT leading zeros (e.g. 0191/26 -> 191/26)
-    private var formattedScanNameNoLeadingZeros: String {
-        let digits = gutachtenNr.filter { $0.isNumber }
-        let trimmed = String(digits.prefix(4))
-        // Int(...) removes leading zeros automatically.
-        let number = Int(trimmed) ?? 0
-        return "\(number)/\(currentYear2)"
+    private func normalizedInitialsComponent(from rawValue: String?) -> String? {
+        let trimmed = (rawValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let folded = trimmed.folding(
+            options: [.diacriticInsensitive, .widthInsensitive, .caseInsensitive],
+            locale: Locale(identifier: "de_DE")
+        )
+        let words = folded
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        let initials = words.compactMap { word in
+            word.first.map { String($0).lowercased() }
+        }.joined()
+
+        return initials.isEmpty ? nil : initials
     }
 
-    // Extracts GA number from a generated file name like:
-    // 0191_26_20260130_105709.pdf -> 191/26
-    private func gaNumber(fromFileName fileName: String) -> String? {
-        // Remove extension and split by underscore
-        let base = (fileName as NSString).deletingPathExtension
-        let parts = base.split(separator: "_")
-        guard parts.count >= 2 else { return nil }
+    private func normalizedShortCodeComponent(from rawValue: String?) -> String? {
+        let trimmed = (rawValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
 
-        let first = String(parts[0])
-        let second = String(parts[1])
+        let folded = trimmed.folding(
+            options: [.diacriticInsensitive, .widthInsensitive, .caseInsensitive],
+            locale: Locale(identifier: "de_DE")
+        )
+        let replaced = folded.map { char -> Character in
+            if char.isLetter || char.isNumber {
+                return Character(String(char).lowercased())
+            }
+            if char == "_" || char == "-" {
+                return "_"
+            }
+            return "_"
+        }
 
-        // Remove leading zeros from the first part
-        let number = Int(first) ?? 0
-        return "\(number)/\(second)"
+        let collapsed = String(replaced)
+            .replacingOccurrences(
+                of: "_+",
+                with: "_",
+                options: .regularExpression
+            )
+            .trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+
+        return collapsed.isEmpty ? nil : collapsed
+    }
+
+    private var normalizedScanName: String? {
+        normalizedInitialsComponent(from: scanName)
+    }
+
+    private var normalizedScannerUserName: String? {
+        normalizedShortCodeComponent(from: appState.currentUser?.shortCode)
+            ?? normalizedInitialsComponent(from: appState.currentUser?.name)
+    }
+
+    private var scannerFileBaseName: String {
+        let numberPart = normalizedScanNumber ?? "none"
+        let namePart = normalizedScanName ?? "none"
+        let userPart = normalizedScannerUserName ?? "none"
+        return "scan__nr_\(numberPart)__jahr_\(currentYear2)__name_\(namePart)__user_\(userPart)"
+    }
+
+    private var scannerDisplayFileName: String {
+        "\(scannerFileBaseName).pdf"
+    }
+
+    private var temporaryScansDirectoryURL: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(
+            "SVS_Scans",
+            isDirectory: true
+        )
     }
 
     private let uploadScanToDriveEndpoint =
@@ -137,7 +188,12 @@ struct ScannerScreen: View {
                     .submitLabel(.done)
                     .onChange(of: gutachtenNr) { newValue in
                         let digits = newValue.filter { $0.isNumber }
-                        gutachtenNr = String(digits.prefix(4))
+                        let sanitized = String(digits.prefix(4))
+                        if newValue != sanitized {
+                            gutachtenNr = sanitized
+                            return
+                        }
+                        refreshScanPDFIfNeeded()
                     }
 
                 Text("/ \(currentYear2)")
@@ -155,9 +211,27 @@ struct ScannerScreen: View {
                     .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
             )
 
-            Text("Dateiname: \(formattedScanNameNoLeadingZeros)")
+            Text("Name")
                 .font(.caption)
                 .foregroundColor(.secondary)
+
+            TextField("Mustermann", text: $scanName)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .onChange(of: scanName) { _ in
+                    refreshScanPDFIfNeeded()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
+                )
         }
     }
 
@@ -473,7 +547,7 @@ struct ScannerScreen: View {
             }
         }
 
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("SVS_Scans", isDirectory: true)
+        let dir = temporaryScansDirectoryURL
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(fileName)
 
@@ -513,8 +587,8 @@ struct ScannerScreen: View {
         defer { isUploadingToDrive = false }
 
         do {
-            let safeBase = sanitizedFileName(formattedScanNameNoLeadingZeros)
-            let finalName = "\(safeBase)_\(timestampString()).pdf"
+            let safeBase = sanitizedFileName(scannerFileBaseName)
+            let finalName = "\(safeBase)__ts_\(timestampString()).pdf"
 
             let storagePath = "scans/\(user.uid)/\(finalName)"
             try await uploadFileToFirebaseStorage(
@@ -523,12 +597,13 @@ struct ScannerScreen: View {
             )
 
             let idToken = try await user.getIDToken()
-            let driveFileId = try await callUploadScanToDrive(
+            _ = try await callUploadScanToDrive(
                 idToken: idToken,
                 storagePath: storagePath,
                 fileName: finalName
             )
 
+            resetScannerSession(removeAllTempFiles: true)
             driveUploadSuccessMessage =
               "Datei wurde in Google Drive abgelegt."
         } catch {
@@ -611,6 +686,26 @@ struct ScannerScreen: View {
         rebuildPDFFromScannedImages()
     }
 
+    private func resetScannerSession(removeAllTempFiles: Bool) {
+        if let oldURL = scannedPDFURL {
+            try? FileManager.default.removeItem(at: oldURL)
+        }
+        if removeAllTempFiles {
+            try? FileManager.default.removeItem(at: temporaryScansDirectoryURL)
+        }
+
+        scannedImages = []
+        scannedPDFURL = nil
+        gutachtenNr = ""
+        scanName = ""
+        isPresentingShare = false
+    }
+
+    private func refreshScanPDFIfNeeded() {
+        guard !scannedImages.isEmpty else { return }
+        rebuildPDFFromScannedImages()
+    }
+
     private func rebuildPDFFromScannedImages() {
         guard !scannedImages.isEmpty else {
             if let oldURL = scannedPDFURL {
@@ -621,8 +716,8 @@ struct ScannerScreen: View {
         }
 
         do {
-            let safeBase = sanitizedFileName(formattedScanNameNoLeadingZeros)
-            let finalName = "\(safeBase)_\(timestampString()).pdf"
+            let safeBase = sanitizedFileName(scannerFileBaseName)
+            let finalName = "\(safeBase)__ts_\(timestampString()).pdf"
             let newURL = try makePDF(from: scannedImages, fileName: finalName)
 
             if let oldURL = scannedPDFURL, oldURL != newURL {

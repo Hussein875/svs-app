@@ -19,6 +19,7 @@ struct User: Identifiable, Hashable, Codable {
     var pushNotificationsEnabled: Bool = true
     var receiveAdminPushes: Bool = false
     var meetingSchedulePushEnabled: Bool = true
+    var shortCode: String? = nil
 
     var color: Color {
         Color.svsAccentColor(from: colorName)

@@ -166,6 +166,7 @@ extension AppState {
                     a.colorName != b.colorName ||
                     a.annualLeaveDays != b.annualLeaveDays ||
                     a.birthday != b.birthday ||
+                    a.shortCode != b.shortCode ||
                     a.pushNotificationsEnabled != b.pushNotificationsEnabled ||
                     a.receiveAdminPushes != b.receiveAdminPushes ||
                     a.meetingSchedulePushEnabled != b.meetingSchedulePushEnabled {

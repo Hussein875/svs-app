@@ -15,6 +15,7 @@ struct UserProfile: Codable {
     var annualLeaveDays: Int
     var email: String
     var birthday: Date?
+    var shortCode: String?
     var pushEnabled: Bool
     var receiveAdminPushes: Bool
     var meetingSchedulePushEnabled: Bool
@@ -25,6 +26,7 @@ struct UserProfile: Codable {
          annualLeaveDays: Int,
          email: String,
          birthday: Date? = nil,
+         shortCode: String? = nil,
          pushEnabled: Bool = true,
          receiveAdminPushes: Bool = false,
          meetingSchedulePushEnabled: Bool = true) {
@@ -34,6 +36,7 @@ struct UserProfile: Codable {
         self.annualLeaveDays = annualLeaveDays
         self.email = email
         self.birthday = birthday
+        self.shortCode = shortCode
         self.pushEnabled = pushEnabled
         self.receiveAdminPushes = receiveAdminPushes
         self.meetingSchedulePushEnabled = meetingSchedulePushEnabled
@@ -46,6 +49,7 @@ struct UserProfile: Codable {
         self.annualLeaveDays = user.annualLeaveDays
         self.email = user.email
         self.birthday = user.birthday
+        self.shortCode = user.shortCode
         self.pushEnabled = user.pushNotificationsEnabled
         self.receiveAdminPushes = user.receiveAdminPushes
         self.meetingSchedulePushEnabled = user.meetingSchedulePushEnabled
@@ -65,6 +69,8 @@ struct UserProfile: Codable {
         self.colorName = colorName
         self.annualLeaveDays = annualLeaveDays
         self.email = email
+        self.shortCode = (data["shortCode"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         self.pushEnabled = (data["pushEnabled"] as? Bool) ?? true
         self.receiveAdminPushes = (data["receiveAdminPushes"] as? Bool) ?? false
         self.meetingSchedulePushEnabled =
@@ -95,6 +101,9 @@ struct UserProfile: Codable {
         if let birthday {
             dict["birthday"] = Timestamp(date: birthday)
         }
+        if let shortCode, !shortCode.isEmpty {
+            dict["shortCode"] = shortCode
+        }
         return dict
     }
 
@@ -109,7 +118,8 @@ struct UserProfile: Codable {
             birthday: birthday,
             pushNotificationsEnabled: pushEnabled,
             receiveAdminPushes: receiveAdminPushes,
-            meetingSchedulePushEnabled: meetingSchedulePushEnabled
+            meetingSchedulePushEnabled: meetingSchedulePushEnabled,
+            shortCode: shortCode
         )
     }
 }

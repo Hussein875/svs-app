@@ -2067,6 +2067,14 @@ export const uploadScanToDrive = onRequest(
         return;
       }
 
+      // Storage is only a staging area for the Drive upload.
+      // Remove the temporary object after the file exists in Drive.
+      try {
+        await file.delete({ignoreNotFound: true});
+      } catch (e) {
+        console.warn("[uploadScanToDrive] temp storage cleanup failed", e);
+      }
+
       res.status(200).json({ok: true, driveFileId});
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
