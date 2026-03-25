@@ -37,6 +37,7 @@ struct AdminAutomationsScreen: View {
     @State private var ultraExpertOpenCount: Int = 1
     @State private var showUltraExpertStubAlert: Bool = false
     @State private var showMakeManualRunAlert: Bool = false
+    @State private var isResettingScannerSequence: Bool = false
 
     private var accent: Color { appState.currentUser?.color ?? .secondary }
     
@@ -204,6 +205,44 @@ struct AdminAutomationsScreen: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .padding(.horizontal, 18)
+
+                        Button {
+                            _Concurrency.Task { await resetScannerSequenceFromSheet() }
+                        } label: {
+                            AutomationActionCard(accent: accent) {
+                                HStack(spacing: 10) {
+                                    if isResettingScannerSequence {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Image(systemName: "arrow.clockwise.circle")
+                                            .font(.system(size: 16, weight: .semibold))
+                                    }
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Scanner-Nummer aus Sheet resetten")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundColor(.primary)
+
+                                        Text("Notfall-Reset der aktuellen Scanner-Nummer")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+
+                                    Spacer()
+
+                                    if !isResettingScannerSequence {
+                                        Image(systemName: "arrow.right")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isResettingScannerSequence)
+                        .opacity(isResettingScannerSequence ? 0.6 : 1.0)
+                        .padding(.horizontal, 18)
                     }
                     .padding(.top, 2)
 
@@ -358,6 +397,14 @@ struct AdminAutomationsScreen: View {
                 cont.resume()
             }
         }
+    }
+
+    @MainActor
+    private func resetScannerSequenceFromSheet() async {
+        guard !isResettingScannerSequence else { return }
+        isResettingScannerSequence = true
+        defer { isResettingScannerSequence = false }
+        _ = await appState.adminResetScannerSequenceFromSheet()
     }
 
     private var automationCard: some View {

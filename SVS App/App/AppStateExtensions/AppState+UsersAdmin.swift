@@ -4,6 +4,52 @@ import FirebaseFunctions
 
 extension AppState {
     @MainActor
+    @discardableResult
+    func adminResetScannerSequenceFromSheet() async -> Bool {
+        guard currentUser?.role == .admin else {
+            showToast(.error, "Nur Admins dürfen die Scanner-Nummer zurücksetzen.")
+            return false
+        }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            let result = try await functions
+                .httpsCallable("adminResetScannerSequenceFromSheet")
+                .call([:])
+
+            guard let data = result.data as? [String: Any],
+                  let nextNumber = data["nextNumber"] as? Int else {
+                showToast(.error, "Scanner-Nummer konnte nicht zurückgesetzt werden.")
+                return false
+            }
+
+            let year2 = (data["year2"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let ignoredReservations =
+                (data["ignoredReservations"] as? Bool) ?? false
+
+            if ignoredReservations {
+                showToast(
+                    .success,
+                    "Scanner-Nummer hart auf \(nextNumber)/\(year2) aus dem Google Sheet gesetzt. Firestore-Reservierungen wurden ignoriert."
+                )
+            } else {
+                showToast(
+                    .success,
+                    "Scanner-Nummer auf \(nextNumber)/\(year2) aus dem Google Sheet gesetzt."
+                )
+            }
+            uiErrorMessage = nil
+            return true
+        } catch {
+            let msg = "Scanner-Nummer konnte nicht aus dem Google Sheet gesetzt werden: \(error.localizedDescription)"
+            uiErrorMessage = msg
+            showToast(.error, msg)
+            return false
+        }
+    }
+
+    @MainActor
     func adminCreateUserViaFunction(name: String,
                                     email: String,
                                     role: UserRole,

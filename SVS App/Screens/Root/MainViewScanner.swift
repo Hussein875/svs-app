@@ -12,23 +12,42 @@ import VisionKit
 import UniformTypeIdentifiers
 import AVFoundation
 import FirebaseAuth
+import FirebaseFirestore
+import FirebaseFunctions
 import FirebaseStorage
 
 // MARK: - Scanner
 
+private struct ScannerSequencePreview: Equatable {
+    let nextNumber: Int
+    let year2: String
+}
+
+private struct ScannerReservationState: Equatable {
+    let reservationId: String
+    let number: Int
+    let year2: String
+    let scanName: String
+    let driveFolderName: String
+}
+
 struct ScannerScreen: View {
     @EnvironmentObject var appState: AppState
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var isPresentingScanner = false
     @State private var isPresentingShare = false
     @State private var scannedImages: [UIImage] = []
     @State private var scannedPDFURL: URL? = nil
-    @State private var gutachtenNr: String = ""
     @State private var scanName: String = ""
+    @State private var scannerSequence: ScannerSequencePreview? = nil
+    @State private var scannerSequenceListener: ListenerRegistration? = nil
     @State private var uiErrorMessage: String? = nil
     @State private var isUploadingToDrive = false
+    @State private var isLoadingScannerSequence = false
+    @State private var isReservingScanNumber = false
+    @State private var reservedScan: ScannerReservationState? = nil
     @State private var driveUploadSuccessMessage: String? = nil
-
 
     private var userAccentColor: Color {
         Color.svsAccentColor(from: appState.currentUser?.colorName)
@@ -48,11 +67,17 @@ struct ScannerScreen: View {
         return String(format: "%02d", y % 100)
     }
 
+    private var activeYear2: String {
+        reservedScan?.year2 ?? scannerSequence?.year2 ?? currentYear2
+    }
+
+    private var trimmedScanName: String {
+        scanName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var normalizedScanNumber: String? {
-        let digits = gutachtenNr.filter { $0.isNumber }
-        let trimmed = String(digits.prefix(4))
-        guard !trimmed.isEmpty else { return nil }
-        return String(Int(trimmed) ?? 0)
+        guard let number = reservedScan?.number else { return nil }
+        return String(number)
     }
 
     private func normalizedInitialsComponent(from rawValue: String?) -> String? {
@@ -117,7 +142,7 @@ struct ScannerScreen: View {
         let numberPart = normalizedScanNumber ?? "none"
         let namePart = normalizedScanName ?? "none"
         let userPart = normalizedScannerUserName ?? "none"
-        return "scan__nr_\(numberPart)__jahr_\(currentYear2)__name_\(namePart)__user_\(userPart)"
+        return "scan__nr_\(numberPart)__jahr_\(activeYear2)__name_\(namePart)__user_\(userPart)"
     }
 
     private var scannerDisplayFileName: String {
@@ -146,6 +171,29 @@ struct ScannerScreen: View {
             get: { driveUploadSuccessMessage != nil },
             set: { _ in driveUploadSuccessMessage = nil }
         )
+    }
+
+    private var currentScannerNumberText: String {
+        if let reservedScan {
+            return "\(reservedScan.number)/\(reservedScan.year2)"
+        }
+        if let scannerSequence {
+            return "\(scannerSequence.nextNumber)/\(scannerSequence.year2)"
+        }
+        return "–/\(currentYear2)"
+    }
+
+    private var previewDriveFolderName: String {
+        let namePart = trimmedScanName.isEmpty ? "Name fehlt" : trimmedScanName
+        return "\(currentScannerNumberText) Unfallgutachten \(namePart)"
+    }
+
+    private var canReserveScannerNumber: Bool {
+        reservedScan == nil &&
+        !trimmedScanName.isEmpty &&
+        scannerSequence != nil &&
+        !isLoadingScannerSequence &&
+        !isReservingScanNumber
     }
 
     @ViewBuilder
@@ -182,23 +230,27 @@ struct ScannerScreen: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            HStack(spacing: 8) {
-                TextField("0000", text: $gutachtenNr)
-                    .keyboardType(.numberPad)
-                    .submitLabel(.done)
-                    .onChange(of: gutachtenNr) { newValue in
-                        let digits = newValue.filter { $0.isNumber }
-                        let sanitized = String(digits.prefix(4))
-                        if newValue != sanitized {
-                            gutachtenNr = sanitized
-                            return
-                        }
-                        refreshScanPDFIfNeeded()
-                    }
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(reservedScan == nil ? "Aktuell verfügbar" : "Reserviert")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
 
-                Text("/ \(currentYear2)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.secondary)
+                    Text(currentScannerNumberText)
+                        .font(.title3.weight(.bold))
+                        .foregroundColor(.primary)
+                }
+
+                Spacer(minLength: 8)
+
+                if isLoadingScannerSequence || isReservingScanNumber {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if reservedScan != nil {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundColor(userAccentColor)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -215,13 +267,14 @@ struct ScannerScreen: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            TextField("Mustermann", text: $scanName)
+            TextField("...", text: $scanName)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .submitLabel(.done)
                 .onChange(of: scanName) { _ in
                     refreshScanPDFIfNeeded()
                 }
+                .disabled(reservedScan != nil)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .background(
@@ -232,6 +285,50 @@ struct ScannerScreen: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
                 )
+
+            if let reservedScan {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Drive-Ordner")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Text(reservedScan.driveFolderName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.primary)
+                }
+                .padding(.top, 4)
+            } else {
+                Text(previewDriveFolderName)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 2)
+
+                Button {
+                    _Concurrency.Task { await reserveCurrentScannerNumber() }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "number.circle.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Nummer nehmen")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(userAccentColor.opacity(0.22), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canReserveScannerNumber)
+                .opacity(canReserveScannerNumber ? 1.0 : 0.6)
+            }
         }
     }
 
@@ -263,6 +360,8 @@ struct ScannerScreen: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(reservedScan == nil)
+        .opacity(reservedScan == nil ? 0.6 : 1.0)
     }
 
     @ViewBuilder
@@ -445,6 +544,17 @@ struct ScannerScreen: View {
             .scrollDismissesKeyboard(.interactively)
             .contentShape(Rectangle())
             .onTapGesture { hideKeyboard() }
+            .onAppear {
+                startScannerSequenceListenerIfNeeded()
+                _Concurrency.Task { await refreshScannerSequencePreview() }
+            }
+            .onChange(of: scenePhase) { newPhase in
+                guard newPhase == .active else { return }
+                _Concurrency.Task { await refreshScannerSequencePreview() }
+            }
+            .onDisappear {
+                stopScannerSequenceListener()
+            }
             .navigationTitle("Scanner")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $isPresentingScanner) {
@@ -484,6 +594,11 @@ struct ScannerScreen: View {
     // MARK: - Scanner bootstrap (permissions + device support)
 
     private func startScan() {
+        guard reservedScan != nil else {
+            uiErrorMessage = "Bitte zuerst die aktuelle Gutachten-Nummer reservieren."
+            return
+        }
+
         // VisionKit scanner is not supported on Simulator and some devices.
         guard VNDocumentCameraViewController.isSupported else {
             uiErrorMessage = "Der Dokumentenscanner wird auf diesem Gerät nicht unterstützt (z. B. Simulator)."
@@ -577,6 +692,10 @@ struct ScannerScreen: View {
             uiErrorMessage = "Keine PDF vorhanden."
             return
         }
+        guard let reservedScan else {
+            uiErrorMessage = "Bitte zuerst die aktuelle Gutachten-Nummer reservieren."
+            return
+        }
 
         guard let user = Auth.auth().currentUser else {
             uiErrorMessage = "Nicht angemeldet."
@@ -590,7 +709,9 @@ struct ScannerScreen: View {
             let safeBase = sanitizedFileName(scannerFileBaseName)
             let finalName = "\(safeBase)__ts_\(timestampString()).pdf"
 
-            let storagePath = "scans/\(user.uid)/\(finalName)"
+            let storageObjectName =
+                "\(reservedScan.reservationId)__\(finalName)"
+            let storagePath = "scans/\(user.uid)/\(storageObjectName)"
             try await uploadFileToFirebaseStorage(
                 localURL: localURL,
                 storagePath: storagePath
@@ -600,6 +721,7 @@ struct ScannerScreen: View {
             _ = try await callUploadScanToDrive(
                 idToken: idToken,
                 storagePath: storagePath,
+                reservationId: reservedScan.reservationId,
                 fileName: finalName
             )
 
@@ -625,6 +747,7 @@ struct ScannerScreen: View {
     private func callUploadScanToDrive(
         idToken: String,
         storagePath: String,
+        reservationId: String?,
         fileName: String
     ) async throws -> String {
         var request = URLRequest(url: uploadScanToDriveEndpoint)
@@ -640,6 +763,7 @@ struct ScannerScreen: View {
 
         let body: [String: Any] = [
             "storagePath": storagePath,
+            "reservationId": reservationId as Any,
             "fileName": fileName,
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -696,9 +820,13 @@ struct ScannerScreen: View {
 
         scannedImages = []
         scannedPDFURL = nil
-        gutachtenNr = ""
         scanName = ""
+        reservedScan = nil
         isPresentingShare = false
+
+        _Concurrency.Task { @MainActor in
+            await refreshScannerSequencePreview()
+        }
     }
 
     private func refreshScanPDFIfNeeded() {
@@ -726,6 +854,129 @@ struct ScannerScreen: View {
             scannedPDFURL = newURL
         } catch {
             uiErrorMessage = "PDF konnte nicht aktualisiert werden: \(error.localizedDescription)"
+        }
+    }
+
+    private func startScannerSequenceListenerIfNeeded() {
+        guard scannerSequenceListener == nil else { return }
+
+        scannerSequenceListener = Firestore.firestore()
+            .collection("scannerMeta")
+            .document("current")
+            .addSnapshotListener(includeMetadataChanges: false) { snapshot, error in
+                if let error {
+                    if self.scannerSequence == nil {
+                        self.uiErrorMessage = "Aktuelle Scanner-Nummer konnte nicht geladen werden: \(error.localizedDescription)"
+                    }
+                    return
+                }
+
+                guard let data = snapshot?.data() else { return }
+                guard let nextNumber = data["nextNumber"] as? Int else { return }
+                let year2 = (data["year2"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? self.currentYear2
+
+                self.scannerSequence = ScannerSequencePreview(
+                    nextNumber: nextNumber,
+                    year2: year2
+                )
+            }
+    }
+
+    private func stopScannerSequenceListener() {
+        scannerSequenceListener?.remove()
+        scannerSequenceListener = nil
+    }
+
+    @MainActor
+    private func refreshScannerSequencePreview() async {
+        guard !isLoadingScannerSequence else { return }
+        isLoadingScannerSequence = true
+        defer { isLoadingScannerSequence = false }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            let result = try await functions
+                .httpsCallable("getScannerSequencePreview")
+                .call([:])
+
+            guard let payload = result.data as? [String: Any],
+                  let nextNumber = payload["nextNumber"] as? Int else {
+                throw NSError(
+                    domain: "Scanner",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Ungültige Server-Antwort."]
+                )
+            }
+
+            let year2 = (payload["year2"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? currentYear2
+
+            scannerSequence = ScannerSequencePreview(
+                nextNumber: nextNumber,
+                year2: year2
+            )
+            uiErrorMessage = nil
+        } catch {
+            if scannerSequence == nil {
+                uiErrorMessage = "Aktuelle Scanner-Nummer konnte nicht geladen werden: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    @MainActor
+    private func reserveCurrentScannerNumber() async {
+        guard !isReservingScanNumber else { return }
+        guard !trimmedScanName.isEmpty else {
+            uiErrorMessage = "Bitte zuerst den Namen für den Unfallgutachten-Ordner eingeben."
+            return
+        }
+
+        isReservingScanNumber = true
+        defer { isReservingScanNumber = false }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            let result = try await functions
+                .httpsCallable("reserveScannerNumber")
+                .call([
+                    "scanName": trimmedScanName
+                ])
+
+            guard let payload = result.data as? [String: Any],
+                  let reservationId = payload["reservationId"] as? String,
+                  let number = payload["number"] as? Int else {
+                throw NSError(
+                    domain: "Scanner",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Ungültige Server-Antwort."]
+                )
+            }
+
+            let year2 = (payload["year2"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? currentYear2
+            let driveFolderName = (payload["driveFolderName"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let driveFolderReady = (payload["driveFolderReady"] as? Bool) ?? false
+            let warning = (payload["warning"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            reservedScan = ScannerReservationState(
+                reservationId: reservationId,
+                number: number,
+                year2: year2,
+                scanName: trimmedScanName,
+                driveFolderName: driveFolderName
+            )
+            refreshScanPDFIfNeeded()
+
+            if !driveFolderReady, let warning, !warning.isEmpty {
+                driveUploadSuccessMessage = warning
+            }
+            uiErrorMessage = nil
+        } catch {
+            await refreshScannerSequencePreview()
+            uiErrorMessage = "Scanner-Nummer konnte nicht reserviert werden: \(error.localizedDescription)"
         }
     }
 }

@@ -13,7 +13,7 @@ import {
 } from "firebase-functions/v2/firestore";
 import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
-import {google} from "googleapis";
+import {google, drive_v3 as driveV3} from "googleapis";
 import {Readable} from "stream";
 import {
   filterTokenRefsByPreference,
@@ -1906,20 +1906,530 @@ export const automationStatusWebhook = onRequest(async (req, res) => {
   }
 });
 
+/* eslint-disable require-jsdoc */
 // ------------------------------------------------------------------
-// Scanner -> Upload Scan (PDF) to Google Drive
-// POST /uploadScanToDrive
-// Auth: Bearer <Firebase ID Token>
-// Body: { storagePath: string, fileName: string }
-// Returns: { ok: true, driveFileId }
+// Scanner sequence / reservation helpers
 // ------------------------------------------------------------------
 
 type UploadScanToDriveBody = {
   storagePath: string;
   fileName: string;
+  reservationId?: string;
 };
 
-const SCANS_DRIVE_FOLDER_ID = "19n1REUlYfwdzrj3NntMqgzoQ05jg2T9f";
+const SCANS_DRIVE_UPLOAD_FOLDER_ID = "19n1REUlYfwdzrj3NntMqgzoQ05jg2T9f";
+const SCANNER_CASE_FOLDERS_ROOT_ID = "1FVnM3Y_ktIvXMUPuAQTpJ-sMB5yI1gYf";
+const SCANNER_META_DOC_PATH = "scannerMeta/current";
+const SCANNER_RESERVATIONS_COLLECTION = "scannerReservations";
+const SCANNER_SHEET_ID = "10mfm9SVVDiWcxnfK2QuUCj3msaVFBQIQx34NnPlUEo4";
+const SCANNER_SHEET_URL =
+  `https://docs.google.com/spreadsheets/d/${SCANNER_SHEET_ID}/gviz/tq?tqx=out:json`;
+
+function getCurrentScannerYear2(now: Date = new Date()): string {
+  return String(now.getFullYear() % 100).padStart(2, "0");
+}
+
+function stripScannerControlChars(value: string): string {
+  return Array.from(value)
+    .filter((char) => char.charCodeAt(0) >= 32)
+    .join("");
+}
+
+function normalizeScannerDisplayName(rawValue: unknown): string {
+  return stripScannerControlChars(String(rawValue ?? ""))
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[<>:"\\|?*]/g, "")
+    .replace(/\//g, "-");
+}
+
+function buildScannerDriveFolderName(
+  number: number,
+  year2: string,
+  scanName: string,
+  uploaderShortCode?: string
+): string {
+  const safeName = normalizeScannerDisplayName(scanName);
+  const safeShortCode = normalizeScannerDisplayName(
+    uploaderShortCode ?? ""
+  ).toUpperCase();
+  const shortCodeSuffix = safeShortCode ? ` (${safeShortCode})` : "";
+  return `${number}/${year2} Unfallgutachten ${safeName}${shortCodeSuffix}`;
+}
+
+function parseGvizResponse(rawText: string): Record<string, unknown> {
+  const start = rawText.indexOf("{");
+  const end = rawText.lastIndexOf("}");
+  if (start === -1 || end === -1) {
+    throw new Error("GViz JSON nicht gefunden.");
+  }
+  return JSON.parse(rawText.slice(start, end + 1)) as Record<string, unknown>;
+}
+
+function extractScannerSequenceNumber(rawValue: unknown): number | null {
+  const text = String(rawValue ?? "").trim();
+  if (!text) return null;
+
+  const match = text.match(/(?:RB|KVA)?\s*(\d{1,6})(?:\s*\/\s*\d{2})?/i);
+  if (!match) return null;
+
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function fetchInitialScannerNextNumber(): Promise<number> {
+  const response = await fetch(SCANNER_SHEET_URL, {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Sheet HTTP ${response.status}`);
+  }
+
+  const rawText = await response.text();
+  const payload = parseGvizResponse(rawText);
+  const table = payload.table as {rows?: unknown[]} | undefined;
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+
+  const activeNumbers: number[] = [];
+
+  for (const row of rows) {
+    const cells = Array.isArray((row as {c?: unknown[]})?.c) ?
+      (row as {c: unknown[]}).c :
+      [];
+    const rawCase = (cells[0] as {v?: unknown} | undefined)?.v;
+    const caseText = String(rawCase ?? "").trim();
+    if (!caseText || caseText.toLowerCase() === "eingang") {
+      continue;
+    }
+
+    const rawStatus = (cells[2] as {v?: unknown} | undefined)?.v;
+    const statusText = String(rawStatus ?? "").trim().toLowerCase();
+    if (/^versendet\b/i.test(statusText)) {
+      continue;
+    }
+
+    const number = extractScannerSequenceNumber(caseText);
+    if (!number) {
+      continue;
+    }
+
+    activeNumbers.push(number);
+  }
+
+  if (activeNumbers.length === 0) {
+    return 1;
+  }
+
+  return Math.max(...activeNumbers) + 1;
+}
+
+function sanitizeScannerNextNumber(
+  rawValue: unknown,
+  fallback: number
+): number {
+  const parsed = Number(rawValue ?? fallback);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return Math.floor(parsed);
+}
+
+async function getScannerSequenceSeed(year2: string): Promise<number> {
+  try {
+    void year2;
+    return await fetchInitialScannerNextNumber();
+  } catch (e) {
+    console.warn("[scannerSequence] Sheet seed failed", e);
+    return 1;
+  }
+}
+
+async function findNextFreeScannerNumber(
+  tx: admin.firestore.Transaction,
+  year2: string,
+  startNumber: number
+): Promise<number> {
+  let candidate = Math.max(1, Math.floor(startNumber));
+
+  for (let i = 0; i < 500; i += 1) {
+    const reservationId = `${year2}_${candidate}`;
+    const reservationRef = admin
+      .firestore()
+      .collection(SCANNER_RESERVATIONS_COLLECTION)
+      .doc(reservationId);
+    const reservationSnap = await tx.get(reservationRef);
+    if (!reservationSnap.exists) {
+      return candidate;
+    }
+    candidate += 1;
+  }
+
+  throw new HttpsError(
+    "resource-exhausted",
+    "Keine freie Scanner-Nummer gefunden."
+  );
+}
+
+async function getScannerDriveClient(): Promise<driveV3.Drive> {
+  const auth = new google.auth.GoogleAuth({
+    scopes: ["https://www.googleapis.com/auth/drive"],
+  });
+  return google.drive({version: "v3", auth});
+}
+
+async function ensureDriveFolderAccessible(
+  drive: driveV3.Drive,
+  folderId: string,
+  errorPrefix: string
+): Promise<void> {
+  try {
+    await drive.files.get({
+      fileId: folderId,
+      fields: "id,name",
+      supportsAllDrives: true,
+    });
+  } catch (e: unknown) {
+    throw new Error(
+      errorPrefix +
+      " Bitte den Ordner mit dem Service Account als Bearbeiter teilen. " +
+      `FolderId=${folderId}`
+    );
+  }
+}
+
+async function createScannerDriveFolder(
+  drive: driveV3.Drive,
+  folderName: string
+): Promise<string> {
+  const createResp = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: {
+      name: folderName,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [SCANNER_CASE_FOLDERS_ROOT_ID],
+    },
+    fields: "id",
+  });
+
+  const driveFolderId = String(createResp.data.id ?? "").trim();
+  if (!driveFolderId) {
+    throw new Error("Drive-Ordner konnte nicht erstellt werden.");
+  }
+
+  return driveFolderId;
+}
+
+async function ensureScannerReservationDriveFolder(
+  reservationId: string
+): Promise<string> {
+  const reservationRef = admin
+    .firestore()
+    .collection(SCANNER_RESERVATIONS_COLLECTION)
+    .doc(reservationId);
+  const reservationSnap = await reservationRef.get();
+
+  if (!reservationSnap.exists) {
+    throw new Error("Scanner-Reservierung nicht gefunden.");
+  }
+
+  const data = reservationSnap.data() ?? {};
+  const existingDriveFolderId = String(data.driveFolderId ?? "").trim();
+  if (existingDriveFolderId) {
+    return existingDriveFolderId;
+  }
+
+  const driveFolderName = String(data.driveFolderName ?? "").trim();
+  if (!driveFolderName) {
+    throw new Error("Drive-Ordnername fehlt in der Reservierung.");
+  }
+
+  const drive = await getScannerDriveClient();
+  await ensureDriveFolderAccessible(
+    drive,
+    SCANNER_CASE_FOLDERS_ROOT_ID,
+    "Gutachten-Ordner-Root nicht gefunden/kein Zugriff."
+  );
+  const createdDriveFolderId = await createScannerDriveFolder(
+    drive,
+    driveFolderName
+  );
+
+  await reservationRef.set({
+    driveFolderId: createdDriveFolderId,
+    driveFolderReady: true,
+    driveFolderUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    status: "reserved",
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  return createdDriveFolderId;
+}
+
+async function rollbackScannerReservation(
+  reservationId: string,
+  year2: string,
+  number: number
+): Promise<void> {
+  const db = admin.firestore();
+  const metaRef = db.doc(SCANNER_META_DOC_PATH);
+  const reservationRef = db
+    .collection(SCANNER_RESERVATIONS_COLLECTION)
+    .doc(reservationId);
+
+  await db.runTransaction(async (tx) => {
+    const metaSnap = await tx.get(metaRef);
+    const reservationSnap = await tx.get(reservationRef);
+
+    if (reservationSnap.exists) {
+      tx.delete(reservationRef);
+    }
+
+    const metaData = metaSnap.data() ?? {};
+    const storedYear2 = String(metaData.year2 ?? year2).trim() || year2;
+    const currentNextNumber = sanitizeScannerNextNumber(
+      metaData.nextNumber,
+      number + 1
+    );
+
+    if (storedYear2 === year2 && currentNextNumber === number + 1) {
+      tx.set(metaRef, {
+        year2,
+        nextNumber: number,
+        lastReservedNumber: admin.firestore.FieldValue.delete(),
+        lastReservationId: admin.firestore.FieldValue.delete(),
+        lastReservedByUid: admin.firestore.FieldValue.delete(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+      return;
+    }
+
+    tx.set(metaRef, {
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+  });
+}
+
+export const getScannerSequencePreview = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  const year2 = getCurrentScannerYear2();
+  const seededNextNumber = await getScannerSequenceSeed(year2);
+  const db = admin.firestore();
+  const metaRef = db.doc(SCANNER_META_DOC_PATH);
+
+  const result = await db.runTransaction(async (tx) => {
+    const metaSnap = await tx.get(metaRef);
+
+    let nextNumber = seededNextNumber;
+    if (metaSnap.exists) {
+      const metaData = metaSnap.data() ?? {};
+      const storedYear2 =
+        String(metaData.year2 ?? year2).trim() || year2;
+      if (storedYear2 === year2) {
+        const storedNextNumber = sanitizeScannerNextNumber(
+          metaData.nextNumber,
+          seededNextNumber
+        );
+        nextNumber = Math.max(seededNextNumber, storedNextNumber);
+      }
+    }
+
+    tx.set(metaRef, {
+      year2,
+      nextNumber,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+
+    return {
+      year2,
+      nextNumber,
+    };
+  });
+
+  return {
+    ok: true,
+    ...result,
+  };
+});
+
+export const adminResetScannerSequenceFromSheet = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  await ensureCallerIsAdmin(callerUid);
+
+  const year2 = getCurrentScannerYear2();
+  const nextNumber = await getScannerSequenceSeed(year2);
+
+  await admin.firestore()
+    .doc(SCANNER_META_DOC_PATH)
+    .set({
+      year2,
+      nextNumber,
+      resetSource: "google_sheet",
+      resetByUid: callerUid,
+      resetAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastReservedNumber: admin.firestore.FieldValue.delete(),
+      lastReservationId: admin.firestore.FieldValue.delete(),
+      lastReservedByUid: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+
+  return {
+    ok: true,
+    year2,
+    nextNumber,
+  };
+});
+
+export const reserveScannerNumber = onCall(
+  {
+    region: "us-central1",
+    serviceAccount: "svs-app-864ed@appspot.gserviceaccount.com",
+  },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) {
+      throw new HttpsError("unauthenticated", "Not signed in.");
+    }
+
+    const scanName = normalizeScannerDisplayName(request.data?.scanName);
+    if (!scanName) {
+      throw new HttpsError("invalid-argument", "scanName required.");
+    }
+
+    const authEmail = normalizeEmail(request.auth?.token.email ?? "");
+    let callerEmail = authEmail;
+    if (!callerEmail) {
+      const callerRecord = await admin.auth().getUser(callerUid);
+      callerEmail = normalizeEmail(callerRecord.email ?? "");
+    }
+
+    const callerUserSnap = await admin.firestore()
+      .collection("users")
+      .doc(callerUid)
+      .get();
+    const callerUserData = callerUserSnap.data() ?? {};
+    const callerShortCode = String(
+      callerUserData.shortCode ?? ""
+    ).trim();
+
+    const year2 = getCurrentScannerYear2();
+    const seededNextNumber = await getScannerSequenceSeed(year2);
+    const db = admin.firestore();
+    const metaRef = db.doc(SCANNER_META_DOC_PATH);
+
+    const result = await db.runTransaction(async (tx) => {
+      const metaSnap = await tx.get(metaRef);
+
+      let nextNumber = seededNextNumber;
+      if (metaSnap.exists) {
+        const metaData = metaSnap.data() ?? {};
+        const storedYear2 =
+          String(metaData.year2 ?? year2).trim() || year2;
+        if (storedYear2 === year2) {
+          const storedNextNumber = sanitizeScannerNextNumber(
+            metaData.nextNumber,
+            seededNextNumber
+          );
+          nextNumber = Math.max(seededNextNumber, storedNextNumber);
+        }
+      }
+
+      const freeNumber = await findNextFreeScannerNumber(
+        tx,
+        year2,
+        nextNumber
+      );
+      const reservationId = `${year2}_${freeNumber}`;
+      const driveFolderName = buildScannerDriveFolderName(
+        freeNumber,
+        year2,
+        scanName,
+        callerShortCode
+      );
+      const reservationRef = db
+        .collection(SCANNER_RESERVATIONS_COLLECTION)
+        .doc(reservationId);
+
+      tx.set(reservationRef, {
+        number: freeNumber,
+        year2,
+        scanName,
+        reservedByUid: callerUid,
+        reservedByEmail: callerEmail,
+        driveFolderName,
+        driveFolderId: null,
+        driveFolderReady: false,
+        status: "creating_folder",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      tx.set(metaRef, {
+        year2,
+        nextNumber: freeNumber + 1,
+        lastReservedNumber: freeNumber,
+        lastReservationId: reservationId,
+        lastReservedByUid: callerUid,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+
+      return {
+        reservationId,
+        number: freeNumber,
+        year2,
+        driveFolderName,
+      };
+    });
+
+    try {
+      await ensureScannerReservationDriveFolder(result.reservationId);
+    } catch (e: unknown) {
+      console.error("[reserveScannerNumber] drive folder create failed", e);
+
+      try {
+        await rollbackScannerReservation(
+          result.reservationId,
+          result.year2,
+          result.number
+        );
+      } catch (rollbackError: unknown) {
+        console.error(
+          "[reserveScannerNumber] rollback failed",
+          rollbackError
+        );
+      }
+
+      throw new HttpsError(
+        "internal",
+        "Drive-Ordner konnte nicht erstellt werden. " +
+        "Nummer wurde nicht reserviert."
+      );
+    }
+
+    return {
+      ok: true,
+      ...result,
+      driveFolderReady: true,
+    };
+  }
+);
+
+// ------------------------------------------------------------------
+// Scanner -> Upload Scan (PDF) to Google Drive
+// POST /uploadScanToDrive
+// Auth: Bearer <Firebase ID Token>
+// Body: { storagePath: string, fileName: string, reservationId?: string }
+// Returns: { ok: true, driveFileId }
+// ------------------------------------------------------------------
 
 export const uploadScanToDrive = onRequest(
   {
@@ -1928,7 +2438,6 @@ export const uploadScanToDrive = onRequest(
   },
   async (req, res) => {
     try {
-      // CORS (mobile app typically doesn't need it, but harmless)
       res.set("Access-Control-Allow-Origin", "*");
       res.set("Access-Control-Allow-Methods", "POST,OPTIONS");
       res.set(
@@ -1946,7 +2455,6 @@ export const uploadScanToDrive = onRequest(
         return;
       }
 
-      // --- Auth: Firebase ID Token (Bearer)
       const authHeader = String(req.header("authorization") ?? "");
       if (!authHeader.startsWith("Bearer ")) {
         res.status(401).json({ok: false, error: "Unauthorized"});
@@ -1970,6 +2478,7 @@ export const uploadScanToDrive = onRequest(
 
       const body = (req.body ?? {}) as Partial<UploadScanToDriveBody>;
       const storagePath = String(body.storagePath ?? "").trim();
+      const reservationId = String(body.reservationId ?? "").trim();
       const fileName = String(body.fileName ?? "").trim();
 
       if (!storagePath) {
@@ -1980,15 +2489,11 @@ export const uploadScanToDrive = onRequest(
         res.status(400).json({ok: false, error: "fileName required"});
         return;
       }
-
-      // Basic safety: only allow uploads from the caller's own scans path.
-      // Expected: scans/<uid>/...
       if (!storagePath.startsWith(`scans/${callerUid}/`)) {
         res.status(403).json({ok: false, error: "Forbidden"});
         return;
       }
 
-      // --- Download from Firebase Storage
       const bucket = admin.storage().bucket();
       const file = bucket.file(storagePath);
 
@@ -2000,47 +2505,50 @@ export const uploadScanToDrive = onRequest(
 
       const [buf] = await file.download();
 
-      // --- Upload to Google Drive
-      // Uses Application Default Credentials
-      // (the Cloud Functions service account).
-      // Make sure Drive API is enabled and the target
-      // folder is shared with the SA (drive.file scope is too limited here).
-      const auth = new google.auth.GoogleAuth({
-        scopes: ["https://www.googleapis.com/auth/drive"],
-      });
+      const targetFolderId = SCANS_DRIVE_UPLOAD_FOLDER_ID;
+      let reservationRef: admin.firestore.DocumentReference | null = null;
 
-      // Log which identity (service account) is being used.
-      try {
-        const creds = await auth.getCredentials();
-        const clientEmail =
-          (creds as {client_email?: unknown}).client_email ?? "";
-        const email = String(clientEmail);
-        if (email) {
-          console.log("[uploadScanToDrive] ADC identity:", email);
+      if (reservationId) {
+        reservationRef = admin.firestore()
+          .collection(SCANNER_RESERVATIONS_COLLECTION)
+          .doc(reservationId);
+        const reservationSnap = await reservationRef.get();
+
+        if (!reservationSnap.exists) {
+          res.status(404).json({ok: false, error: "Reservation not found"});
+          return;
         }
-      } catch (e) {
-        console.warn(
-          "[uploadScanToDrive] Could not read ADC credentials",
-          e
-        );
+
+        const reservationData = reservationSnap.data() ?? {};
+        const reservedByUid = String(
+          reservationData.reservedByUid ?? ""
+        ).trim();
+        if (reservedByUid !== callerUid) {
+          res.status(403).json({ok: false, error: "Forbidden"});
+          return;
+        }
+
+        const reservationFolderId = String(
+          reservationData.driveFolderId ?? ""
+        ).trim();
+        if (!reservationFolderId) {
+          res.status(500).json({
+            ok: false,
+            error: "Gutachten-Ordner der Reservierung fehlt",
+          });
+          return;
+        }
       }
 
-      const drive = google.drive({version: "v3", auth});
-
-      // Preflight: ensure the target folder is accessible
-      // to this service account.
+      const drive = await getScannerDriveClient();
       try {
-        await drive.files.get({
-          fileId: SCANS_DRIVE_FOLDER_ID,
-          fields: "id,name",
-          supportsAllDrives: true,
-        });
+        await ensureDriveFolderAccessible(
+          drive,
+          targetFolderId,
+          "PDF-Upload-Ordner nicht gefunden/kein Zugriff."
+        );
       } catch (e: unknown) {
-        const msg =
-          "Drive-Ordner nicht gefunden/kein Zugriff. " +
-          "Bitte den Ordner mit dem in den Logs angezeigten Service Account " +
-          "als Bearbeiter teilen. FolderId=" +
-          SCANS_DRIVE_FOLDER_ID;
+        const msg = e instanceof Error ? e.message : String(e);
         console.error("[uploadScanToDrive] folder access FAILED", e);
         res.status(403).json({ok: false, error: msg});
         return;
@@ -2055,7 +2563,7 @@ export const uploadScanToDrive = onRequest(
         supportsAllDrives: true,
         requestBody: {
           name: fileName,
-          parents: [SCANS_DRIVE_FOLDER_ID],
+          parents: [targetFolderId],
         },
         media,
         fields: "id",
@@ -2067,8 +2575,18 @@ export const uploadScanToDrive = onRequest(
         return;
       }
 
-      // Storage is only a staging area for the Drive upload.
-      // Remove the temporary object after the file exists in Drive.
+      if (reservationRef) {
+        await reservationRef.set({
+          uploadFolderId: targetFolderId,
+          driveFolderReady: true,
+          status: "uploaded",
+          uploadedFileId: driveFileId,
+          uploadedFileName: fileName,
+          uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, {merge: true});
+      }
+
       try {
         await file.delete({ignoreNotFound: true});
       } catch (e) {
@@ -2083,6 +2601,8 @@ export const uploadScanToDrive = onRequest(
     }
   }
 );
+
+/* eslint-enable require-jsdoc */
 
 // ------------------------------------------------------------------
 // Provision: Token prüfen (für Firebase Hosting Webformular)
