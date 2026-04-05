@@ -1,0 +1,17 @@
+{
+  "name": "ultraexpert-login-bot",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "login": "UX_KEEP_OPEN=false node --env-file=.env login.mjs",
+    "login:debug": "UX_HEADLESS=false UX_KEEP_OPEN=true node --env-file=.env login.mjs",
+    "create:akte": "UX_KEEP_OPEN=false node --env-file=.env create-akte.mjs",
+    "create:akte:debug": "UX_HEADLESS=false UX_KEEP_OPEN=true node --env-file=.env create-akte.mjs",
+    "server": "UX_KEEP_OPEN=false node --env-file=.env server.mjs",
+    "server:debug": "UX_HEADLESS=false UX_KEEP_OPEN=false node --env-file=.env server.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.59.1"
+  }
+}

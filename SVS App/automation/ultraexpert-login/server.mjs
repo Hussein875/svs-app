@@ -1,0 +1,150 @@
+import fs from "node:fs/promises";
+import http from "node:http";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+import { closeSession, ensureLoggedIn, handleRunError, openSession } from "./ux-common.mjs";
+import { createAkte } from "./ux-actions.mjs";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PORT = Number(process.env.PORT || 3000);
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
+const STATE_PATH = path.join(__dirname, "processed-folders.json");
+
+if (!WEBHOOK_SECRET) {
+  throw new Error("WEBHOOK_SECRET fehlt. Bitte in .env setzen.");
+}
+
+let queue = Promise.resolve();
+
+const server = http.createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+
+    if (req.method === "GET" && url.pathname === "/health") {
+      return sendJson(res, 200, { ok: true });
+    }
+
+    if (req.method === "GET" && url.pathname === "/new-folder") {
+      return sendJson(res, 200, {
+        ok: true,
+        message: "Webhook erreichbar. Bitte per POST mit X-Webhook-Secret aufrufen."
+      });
+    }
+
+    if (req.method === "POST" && url.pathname === "/new-folder") {
+      const providedSecret = req.headers["x-webhook-secret"];
+      if (providedSecret !== WEBHOOK_SECRET) {
+        return sendJson(res, 401, { ok: false, error: "unauthorized" });
+      }
+
+      const payload = await readJsonBody(req);
+      const result = await enqueue(() => processFolder(payload));
+      return sendJson(res, 200, { ok: true, ...result });
+    }
+
+    return sendJson(res, 404, { ok: false, error: "not-found" });
+  } catch (error) {
+    console.error("Webhook-Fehler:", error instanceof Error ? error.message : String(error));
+    return sendJson(res, 500, { ok: false, error: "internal-error" });
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`UltraExpert Webhook Server laeuft auf Port ${PORT}`);
+  console.log(`Healthcheck: http://localhost:${PORT}/health`);
+});
+
+async function processFolder(payload) {
+  const folderId = String(payload?.folderId || "").trim();
+  const folderName = String(payload?.folderName || "").trim();
+  const folderUrl = String(payload?.folderUrl || "").trim();
+
+  if (!folderId) {
+    throw new Error("folderId fehlt im Webhook-Payload.");
+  }
+
+  const state = await readState();
+  if (state[folderId]) {
+    console.log(`Ordner ${folderId} wurde bereits verarbeitet.`);
+    return {
+      duplicate: true,
+      folderId,
+      folderName,
+      folderUrl,
+      dossierId: state[folderId].dossierId,
+      dossierUrl: state[folderId].dossierUrl
+    };
+  }
+
+  console.log(`Verarbeite neuen Drive-Ordner: ${folderName || folderId}`);
+
+  const session = await openSession();
+
+  try {
+    await ensureLoggedIn(session.page);
+    const dossier = await createAkte(session.page);
+
+    state[folderId] = {
+      folderId,
+      folderName,
+      folderUrl,
+      dossierId: dossier.id,
+      dossierUrl: dossier.url,
+      processedAt: new Date().toISOString()
+    };
+    await writeState(state);
+
+    console.log(`Akte erstellt fuer Ordner ${folderId}: ${dossier.id}`);
+    await closeSession(session);
+
+    return {
+      duplicate: false,
+      folderId,
+      folderName,
+      folderUrl,
+      dossierId: dossier.id,
+      dossierUrl: dossier.url
+    };
+  } catch (error) {
+    await handleRunError(error, session, "server-create-akte-error");
+    throw error;
+  }
+}
+
+async function enqueue(job) {
+  const next = queue.then(job, job);
+  queue = next.catch(() => {});
+  return next;
+}
+
+async function readState() {
+  try {
+    const raw = await fs.readFile(STATE_PATH, "utf8");
+    return JSON.parse(raw);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return {};
+    }
+    throw error;
+  }
+}
+
+async function writeState(state) {
+  await fs.writeFile(STATE_PATH, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(chunk);
+  }
+
+  const raw = Buffer.concat(chunks).toString("utf8");
+  return raw ? JSON.parse(raw) : {};
+}
+
+function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(payload));
+}

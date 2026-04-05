@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    container_name: ultraexpert-bot-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3000"
+      UX_HEADLESS: "true"
+      UX_KEEP_OPEN: "false"
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./processed-folders.json:/app/processed-folders.json
+      - ./storage-state.json:/app/storage-state.json
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.ultraexpert-bot.rule=Host(`69-62-113-32.sslip.io`)
+      - traefik.http.routers.ultraexpert-bot.entrypoints=websecure
+      - traefik.http.routers.ultraexpert-bot.tls.certresolver=letsencrypt
+      - traefik.http.services.ultraexpert-bot.loadbalancer.server.port=3000
