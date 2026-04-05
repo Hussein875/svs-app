@@ -2049,9 +2049,20 @@ async function getScannerSequenceSeed(year2: string): Promise<number> {
 async function findNextFreeScannerNumber(
   tx: admin.firestore.Transaction,
   year2: string,
-  startNumber: number
+  startNumber: number,
+  options?: {
+    resetFloorNumber?: number | null;
+    resetAt?: unknown;
+  }
 ): Promise<number> {
   let candidate = Math.max(1, Math.floor(startNumber));
+  const rawResetFloorNumber = options?.resetFloorNumber;
+  const resetFloorNumber =
+    typeof rawResetFloorNumber === "number" &&
+    Number.isFinite(rawResetFloorNumber) ?
+      Math.max(1, Math.floor(rawResetFloorNumber)) :
+      null;
+  const resetAtMillis = toMillisOrNull(options?.resetAt);
 
   for (let i = 0; i < 500; i += 1) {
     const reservationId = `${year2}_${candidate}`;
@@ -2063,6 +2074,22 @@ async function findNextFreeScannerNumber(
     if (!reservationSnap.exists) {
       return candidate;
     }
+
+    const reservationData = reservationSnap.data() ?? {};
+    const reservationCreatedAtMillis = toMillisOrNull(
+      reservationData.createdAt
+    );
+    const shouldIgnoreStaleReservation =
+      resetFloorNumber !== null &&
+      resetAtMillis !== null &&
+      candidate >= resetFloorNumber &&
+      reservationCreatedAtMillis !== null &&
+      reservationCreatedAtMillis < resetAtMillis;
+
+    if (shouldIgnoreStaleReservation) {
+      return candidate;
+    }
+
     candidate += 1;
   }
 
@@ -2070,6 +2097,17 @@ async function findNextFreeScannerNumber(
     "resource-exhausted",
     "Keine freie Scanner-Nummer gefunden."
   );
+}
+
+function toMillisOrNull(rawValue: unknown): number | null {
+  if (
+    typeof rawValue === "object" &&
+    rawValue !== null &&
+    typeof (rawValue as {toMillis?: unknown}).toMillis === "function"
+  ) {
+    return Number((rawValue as {toMillis: () => number}).toMillis());
+  }
+  return null;
 }
 
 async function getScannerDriveClient(): Promise<driveV3.Drive> {
@@ -2273,6 +2311,7 @@ export const adminResetScannerSequenceFromSheet = onCall(async (request) => {
     .set({
       year2,
       nextNumber,
+      resetFloorNumber: nextNumber,
       resetSource: "google_sheet",
       resetByUid: callerUid,
       resetAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2330,6 +2369,8 @@ export const reserveScannerNumber = onCall(
       const metaSnap = await tx.get(metaRef);
 
       let nextNumber = seededNextNumber;
+      let resetFloorNumber: number | null = null;
+      let resetAt: unknown = null;
       if (metaSnap.exists) {
         const metaData = metaSnap.data() ?? {};
         const storedYear2 =
@@ -2340,13 +2381,24 @@ export const reserveScannerNumber = onCall(
             seededNextNumber
           );
           nextNumber = Math.max(seededNextNumber, storedNextNumber);
+          if (metaData.resetFloorNumber != null) {
+            resetFloorNumber = sanitizeScannerNextNumber(
+              metaData.resetFloorNumber,
+              nextNumber
+            );
+          }
+          resetAt = metaData.resetAt ?? null;
         }
       }
 
       const freeNumber = await findNextFreeScannerNumber(
         tx,
         year2,
-        nextNumber
+        nextNumber,
+        {
+          resetFloorNumber,
+          resetAt,
+        }
       );
       const reservationId = `${year2}_${freeNumber}`;
       const driveFolderName = buildScannerDriveFolderName(
@@ -2379,6 +2431,7 @@ export const reserveScannerNumber = onCall(
         lastReservedNumber: freeNumber,
         lastReservationId: reservationId,
         lastReservedByUid: callerUid,
+        resetFloorNumber: admin.firestore.FieldValue.delete(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, {merge: true});
 

@@ -267,7 +267,7 @@ struct ScannerScreen: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
 
-            TextField("...", text: $scanName)
+            TextField("Name", text: $scanName)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .submitLabel(.done)
@@ -309,7 +309,7 @@ struct ScannerScreen: View {
                     HStack(spacing: 10) {
                         Image(systemName: "number.circle.fill")
                             .font(.system(size: 16, weight: .semibold))
-                        Text("Nummer nehmen")
+                        Text("Nummer reservieren")
                             .font(.subheadline.weight(.semibold))
                         Spacer()
                     }
@@ -340,7 +340,7 @@ struct ScannerScreen: View {
             HStack(spacing: 10) {
                 Image(systemName: "camera.fill")
                     .font(.system(size: 16, weight: .semibold))
-                Text("Scan starten")
+                Text(scannedImages.isEmpty ? "Scan starten" : "Scan ergänzen")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Image(systemName: "arrow.right")
@@ -559,7 +559,7 @@ struct ScannerScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $isPresentingScanner) {
                 DocumentScanner { images in
-                    scannedImages = images
+                    scannedImages.append(contentsOf: images)
                     rebuildPDFFromScannedImages()
                 } onCancel: {
                     // no-op

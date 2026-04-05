@@ -145,36 +145,6 @@ struct AdminAutomationsScreen: View {
                         }
                         .padding(.horizontal, 18)
 
-                        // UltraExpert (Platzhalter)
-                        Button {
-                            showUltraExpertStubAlert = true
-                        } label: {
-                            AutomationActionCard(accent: accent) {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "doc.badge.plus")
-                                        .font(.system(size: 16, weight: .semibold))
-
-                                    Text(ultraExpertOpenCount == 1
-                                         ? "Akte in UltraExpert öffnen"
-                                         : "\(ultraExpertOpenCount) Akten in UltraExpert öffnen")
-                                        .font(.subheadline.weight(.semibold))
-
-                                    Spacer()
-
-                                    Image(systemName: "arrow.right")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 18)
-
-                        Text("Platzhalter: Die Automatisierung zum Öffnen neuer UltraExpert-Akten wird später implementiert.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 18)
-
                         // Make (Platzhalter)
                         Button {
                             showMakeManualRunAlert = true
@@ -220,13 +190,9 @@ struct AdminAutomationsScreen: View {
                                     }
 
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text("Scanner-Nummer aus Sheet resetten")
+                                        Text("Scanner-Nummer reset")
                                             .font(.subheadline.weight(.semibold))
                                             .foregroundColor(.primary)
-
-                                        Text("Notfall-Reset der aktuellen Scanner-Nummer")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
                                     }
 
                                     Spacer()
@@ -243,6 +209,11 @@ struct AdminAutomationsScreen: View {
                         .disabled(isResettingScannerSequence)
                         .opacity(isResettingScannerSequence ? 0.6 : 1.0)
                         .padding(.horizontal, 18)
+                        
+                        Text("Notfall-Reset der aktuellen Scanner-Nummer")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 18)
                     }
                     .padding(.top, 2)
 
