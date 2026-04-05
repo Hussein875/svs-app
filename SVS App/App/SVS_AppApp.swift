@@ -136,13 +136,6 @@ struct SVS_AppApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
-                .onAppear {
-                    appState.resetUnreadBadgeOnAppOpen()
-                }
-        }
-        .onChange(of: scenePhase) { phase in
-            guard phase == .active else { return }
-            appState.resetUnreadBadgeOnAppOpen()
         }
     }
 }
