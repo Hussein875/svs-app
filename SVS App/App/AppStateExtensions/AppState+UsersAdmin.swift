@@ -1,4 +1,5 @@
 import Foundation
+import FirebaseAuth
 import FirebaseFirestore
 import FirebaseFunctions
 
@@ -12,21 +13,56 @@ extension AppState {
         }
 
         do {
-            let functions = Functions.functions(region: "us-central1")
-            let result = try await functions
-                .httpsCallable("adminResetScannerSequenceFromSheet")
-                .call([:])
+            guard let user = Auth.auth().currentUser else {
+                showToast(.error, "Nicht angemeldet.")
+                return false
+            }
 
-            guard let data = result.data as? [String: Any],
-                  let nextNumber = data["nextNumber"] as? Int else {
+            let endpoint = URL(
+                string: "https://us-central1-svs-app-864ed.cloudfunctions.net/adminResetScannerSequenceFromSheetHttp"
+            )!
+            let idToken = try await user.getIDToken()
+
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [:])
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let http = response as? HTTPURLResponse
+            let status = http?.statusCode ?? -1
+            let rawText = String(data: data, encoding: .utf8) ?? ""
+
+            let jsonObject = try JSONSerialization.jsonObject(with: data)
+            guard let dataDict = jsonObject as? [String: Any] else {
+                let prefix = rawText.prefix(500)
+                throw NSError(
+                    domain: "AdminResetScanner",
+                    code: status,
+                    userInfo: [NSLocalizedDescriptionKey: "Unerwartete Server-Antwort (HTTP \(status)): \(prefix)"]
+                )
+            }
+
+            if let ok = dataDict["ok"] as? Bool, !ok {
+                let msg = String(dataDict["error"] as? String ?? "Scanner-Nummer konnte nicht zurückgesetzt werden.")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                throw NSError(
+                    domain: "AdminResetScanner",
+                    code: status,
+                    userInfo: [NSLocalizedDescriptionKey: msg.isEmpty ? "Scanner-Nummer konnte nicht zurückgesetzt werden." : msg]
+                )
+            }
+
+            guard let nextNumber = dataDict["nextNumber"] as? Int else {
                 showToast(.error, "Scanner-Nummer konnte nicht zurückgesetzt werden.")
                 return false
             }
 
-            let year2 = (data["year2"] as? String)?
+            let year2 = (dataDict["year2"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let ignoredReservations =
-                (data["ignoredReservations"] as? Bool) ?? false
+                (dataDict["ignoredReservations"] as? Bool) ?? false
 
             if ignoredReservations {
                 showToast(

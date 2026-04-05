@@ -2476,14 +2476,13 @@ export const getScannerSequencePreviewHttp = onRequest(async (req, res) => {
   }
 });
 
-export const adminResetScannerSequenceFromSheet = onCall(async (request) => {
-  const callerUid = request.auth?.uid;
-  if (!callerUid) {
-    throw new HttpsError("unauthenticated", "Not signed in.");
-  }
-
-  await ensureCallerIsAdmin(callerUid);
-
+async function performAdminResetScannerSequenceFromSheet(
+  callerUid: string
+): Promise<{
+  year2: string;
+  nextNumber: number;
+  ignoredReservations: boolean;
+}> {
   const year2 = getCurrentScannerYear2();
   const nextNumber = await getScannerSequenceSeed(year2);
 
@@ -2503,11 +2502,76 @@ export const adminResetScannerSequenceFromSheet = onCall(async (request) => {
     }, {merge: true});
 
   return {
-    ok: true,
     year2,
     nextNumber,
+    ignoredReservations: false,
+  };
+}
+
+export const adminResetScannerSequenceFromSheet = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  await ensureCallerIsAdmin(callerUid);
+  const result = await performAdminResetScannerSequenceFromSheet(callerUid);
+  return {
+    ok: true,
+    ...result,
   };
 });
+
+export const adminResetScannerSequenceFromSheetHttp = onRequest(
+  async (req, res) => {
+    try {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST,OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+      if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+      }
+
+      if (req.method !== "POST") {
+        res.status(405).json({ok: false, error: "Method not allowed"});
+        return;
+      }
+
+      const authHeader = String(req.header("authorization") ?? "");
+      if (!authHeader.startsWith("Bearer ")) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      const idToken = authHeader.slice("Bearer ".length).trim();
+      if (!idToken) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      let callerUid = "";
+      try {
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        callerUid = decoded.uid;
+      } catch {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      await ensureCallerIsAdmin(callerUid);
+      const result = await performAdminResetScannerSequenceFromSheet(
+        callerUid
+      );
+      res.status(200).json({ok: true, ...result});
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[adminResetScannerSequenceFromSheetHttp] FAILED", e);
+      res.status(500).json({ok: false, error: msg});
+    }
+  }
+);
 
 export const reserveScannerNumber = onCall(
   {
