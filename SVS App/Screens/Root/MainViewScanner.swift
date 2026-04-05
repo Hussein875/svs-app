@@ -546,11 +546,15 @@ struct ScannerScreen: View {
             .onTapGesture { hideKeyboard() }
             .onAppear {
                 startScannerSequenceListenerIfNeeded()
-                _Concurrency.Task { await refreshScannerSequencePreview() }
+                DispatchQueue.main.async {
+                    _Concurrency.Task { await refreshScannerSequencePreview() }
+                }
             }
             .onChange(of: scenePhase) { newPhase in
                 guard newPhase == .active else { return }
-                _Concurrency.Task { await refreshScannerSequencePreview() }
+                DispatchQueue.main.async {
+                    _Concurrency.Task { await refreshScannerSequencePreview() }
+                }
             }
             .onDisappear {
                 stopScannerSequenceListener()
@@ -895,13 +899,11 @@ struct ScannerScreen: View {
         defer { isLoadingScannerSequence = false }
 
         do {
-            let functions = Functions.functions(region: "us-central1")
-            let result = try await functions
-                .httpsCallable("getScannerSequencePreview")
-                .call([:])
+            let payload = try await callScannerCallable(
+                "getScannerSequencePreview"
+            )
 
-            guard let payload = result.data as? [String: Any],
-                  let nextNumber = payload["nextNumber"] as? Int else {
+            guard let nextNumber = payload["nextNumber"] as? Int else {
                 throw NSError(
                     domain: "Scanner",
                     code: -1,
@@ -936,15 +938,12 @@ struct ScannerScreen: View {
         defer { isReservingScanNumber = false }
 
         do {
-            let functions = Functions.functions(region: "us-central1")
-            let result = try await functions
-                .httpsCallable("reserveScannerNumber")
-                .call([
-                    "scanName": trimmedScanName
-                ])
+            let payload = try await callScannerCallable(
+                "reserveScannerNumber",
+                data: ["scanName": trimmedScanName]
+            )
 
-            guard let payload = result.data as? [String: Any],
-                  let reservationId = payload["reservationId"] as? String,
+            guard let reservationId = payload["reservationId"] as? String,
                   let number = payload["number"] as? Int else {
                 throw NSError(
                     domain: "Scanner",
@@ -977,6 +976,41 @@ struct ScannerScreen: View {
         } catch {
             await refreshScannerSequencePreview()
             uiErrorMessage = "Scanner-Nummer konnte nicht reserviert werden: \(error.localizedDescription)"
+        }
+    }
+
+    private func callScannerCallable(
+        _ functionName: String,
+        data: [String: Any] = [:]
+    ) async throws -> [String: Any] {
+        try await withCheckedThrowingContinuation { continuation in
+            let functions = Functions.functions(region: "us-central1")
+            functions.httpsCallable(functionName).call(data) { result, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                guard let result else {
+                    continuation.resume(throwing: NSError(
+                        domain: "Scanner",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Ungültige Server-Antwort."]
+                    ))
+                    return
+                }
+
+                guard let payload = result.data as? [String: Any] else {
+                    continuation.resume(throwing: NSError(
+                        domain: "Scanner",
+                        code: -1,
+                        userInfo: [NSLocalizedDescriptionKey: "Ungültige Server-Antwort."]
+                    ))
+                    return
+                }
+
+                continuation.resume(returning: payload)
+            }
         }
     }
 }
