@@ -13,7 +13,6 @@ import UniformTypeIdentifiers
 import AVFoundation
 import FirebaseAuth
 import FirebaseFirestore
-import FirebaseFunctions
 import FirebaseStorage
 
 // MARK: - Scanner
@@ -158,6 +157,10 @@ struct ScannerScreen: View {
 
     private let uploadScanToDriveEndpoint =
       URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/uploadScanToDrive")!
+    private let scannerSequencePreviewEndpoint =
+      URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/getScannerSequencePreviewHttp")!
+    private let reserveScannerNumberEndpoint =
+      URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/reserveScannerNumberHttp")!
 
     private var isErrorPresented: Binding<Bool> {
         Binding(
@@ -899,8 +902,15 @@ struct ScannerScreen: View {
         defer { isLoadingScannerSequence = false }
 
         do {
-            let payload = try await callScannerCallable(
-                "getScannerSequencePreview"
+            guard let user = Auth.auth().currentUser else {
+                uiErrorMessage = "Nicht angemeldet."
+                return
+            }
+
+            let idToken = try await user.getIDToken()
+            let payload = try await callScannerHttpEndpoint(
+                scannerSequencePreviewEndpoint,
+                idToken: idToken
             )
 
             guard let nextNumber = payload["nextNumber"] as? Int else {
@@ -938,9 +948,16 @@ struct ScannerScreen: View {
         defer { isReservingScanNumber = false }
 
         do {
-            let payload = try await callScannerCallable(
-                "reserveScannerNumber",
-                data: ["scanName": trimmedScanName]
+            guard let user = Auth.auth().currentUser else {
+                uiErrorMessage = "Nicht angemeldet."
+                return
+            }
+
+            let idToken = try await user.getIDToken()
+            let payload = try await callScannerHttpEndpoint(
+                reserveScannerNumberEndpoint,
+                idToken: idToken,
+                body: ["scanName": trimmedScanName]
             )
 
             guard let reservationId = payload["reservationId"] as? String,
@@ -979,38 +996,42 @@ struct ScannerScreen: View {
         }
     }
 
-    private func callScannerCallable(
-        _ functionName: String,
-        data: [String: Any] = [:]
+    private func callScannerHttpEndpoint(
+        _ endpoint: URL,
+        idToken: String,
+        body: [String: Any] = [:]
     ) async throws -> [String: Any] {
-        try await withCheckedThrowingContinuation { continuation in
-            let functions = Functions.functions(region: "us-central1")
-            functions.httpsCallable(functionName).call(data) { result, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-                guard let result else {
-                    continuation.resume(throwing: NSError(
-                        domain: "Scanner",
-                        code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "Ungültige Server-Antwort."]
-                    ))
-                    return
-                }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? -1
+        let rawText = String(data: data, encoding: .utf8) ?? ""
 
-                guard let payload = result.data as? [String: Any] else {
-                    continuation.resume(throwing: NSError(
-                        domain: "Scanner",
-                        code: -1,
-                        userInfo: [NSLocalizedDescriptionKey: "Ungültige Server-Antwort."]
-                    ))
-                    return
-                }
-
-                continuation.resume(returning: payload)
-            }
+        let jsonObject = try JSONSerialization.jsonObject(with: data)
+        guard let payload = jsonObject as? [String: Any] else {
+            let prefix = rawText.prefix(500)
+            throw NSError(
+                domain: "Scanner",
+                code: status,
+                userInfo: [NSLocalizedDescriptionKey: "Unerwartete Server-Antwort (HTTP \(status)): \(prefix)"]
+            )
         }
+
+        if let ok = payload["ok"] as? Bool, !ok {
+            let msg = String(payload["error"] as? String ?? "Scanner-Anfrage fehlgeschlagen.")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NSError(
+                domain: "Scanner",
+                code: status,
+                userInfo: [NSLocalizedDescriptionKey: msg.isEmpty ? "Scanner-Anfrage fehlgeschlagen." : msg]
+            )
+        }
+
+        return payload
     }
 }

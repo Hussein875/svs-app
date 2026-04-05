@@ -2249,18 +2249,16 @@ async function rollbackScannerReservation(
   });
 }
 
-export const getScannerSequencePreview = onCall(async (request) => {
-  const callerUid = request.auth?.uid;
-  if (!callerUid) {
-    throw new HttpsError("unauthenticated", "Not signed in.");
-  }
-
+async function readScannerSequencePreview(): Promise<{
+  year2: string;
+  nextNumber: number;
+}> {
   const year2 = getCurrentScannerYear2();
   const seededNextNumber = await getScannerSequenceSeed(year2);
   const db = admin.firestore();
   const metaRef = db.doc(SCANNER_META_DOC_PATH);
 
-  const result = await db.runTransaction(async (tx) => {
+  return db.runTransaction(async (tx) => {
     const metaSnap = await tx.get(metaRef);
 
     let nextNumber = seededNextNumber;
@@ -2288,11 +2286,194 @@ export const getScannerSequencePreview = onCall(async (request) => {
       nextNumber,
     };
   });
+}
+
+async function reserveScannerNumberForCaller(
+  callerUid: string,
+  callerEmail: string,
+  scanName: string
+): Promise<{
+  reservationId: string;
+  number: number;
+  year2: string;
+  driveFolderName: string;
+}> {
+  const callerUserSnap = await admin.firestore()
+    .collection("users")
+    .doc(callerUid)
+    .get();
+  const callerUserData = callerUserSnap.data() ?? {};
+  const callerShortCode = String(
+    callerUserData.shortCode ?? ""
+  ).trim();
+
+  const year2 = getCurrentScannerYear2();
+  const seededNextNumber = await getScannerSequenceSeed(year2);
+  const db = admin.firestore();
+  const metaRef = db.doc(SCANNER_META_DOC_PATH);
+
+  const result = await db.runTransaction(async (tx) => {
+    const metaSnap = await tx.get(metaRef);
+
+    let nextNumber = seededNextNumber;
+    let resetFloorNumber: number | null = null;
+    let resetAt: unknown = null;
+    if (metaSnap.exists) {
+      const metaData = metaSnap.data() ?? {};
+      const storedYear2 =
+        String(metaData.year2 ?? year2).trim() || year2;
+      if (storedYear2 === year2) {
+        const storedNextNumber = sanitizeScannerNextNumber(
+          metaData.nextNumber,
+          seededNextNumber
+        );
+        nextNumber = Math.max(seededNextNumber, storedNextNumber);
+        if (metaData.resetFloorNumber != null) {
+          resetFloorNumber = sanitizeScannerNextNumber(
+            metaData.resetFloorNumber,
+            nextNumber
+          );
+        }
+        resetAt = metaData.resetAt ?? null;
+      }
+    }
+
+    const freeNumber = await findNextFreeScannerNumber(
+      tx,
+      year2,
+      nextNumber,
+      {
+        resetFloorNumber,
+        resetAt,
+      }
+    );
+    const reservationId = `${year2}_${freeNumber}`;
+    const driveFolderName = buildScannerDriveFolderName(
+      freeNumber,
+      year2,
+      scanName,
+      callerShortCode
+    );
+    const reservationRef = db
+      .collection(SCANNER_RESERVATIONS_COLLECTION)
+      .doc(reservationId);
+
+    tx.set(reservationRef, {
+      number: freeNumber,
+      year2,
+      scanName,
+      reservedByUid: callerUid,
+      reservedByEmail: callerEmail,
+      driveFolderName,
+      driveFolderId: null,
+      driveFolderReady: false,
+      status: "creating_folder",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    tx.set(metaRef, {
+      year2,
+      nextNumber: freeNumber + 1,
+      lastReservedNumber: freeNumber,
+      lastReservationId: reservationId,
+      lastReservedByUid: callerUid,
+      resetFloorNumber: admin.firestore.FieldValue.delete(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+
+    return {
+      reservationId,
+      number: freeNumber,
+      year2,
+      driveFolderName,
+    };
+  });
+
+  try {
+    await ensureScannerReservationDriveFolder(result.reservationId);
+  } catch (e: unknown) {
+    console.error("[reserveScannerNumber] drive folder create failed", e);
+
+    try {
+      await rollbackScannerReservation(
+        result.reservationId,
+        result.year2,
+        result.number
+      );
+    } catch (rollbackError: unknown) {
+      console.error(
+        "[reserveScannerNumber] rollback failed",
+        rollbackError
+      );
+    }
+
+    throw new HttpsError(
+      "internal",
+      "Drive-Ordner konnte nicht erstellt werden. " +
+      "Nummer wurde nicht reserviert."
+    );
+  }
+
+  return result;
+}
+
+export const getScannerSequencePreview = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  const result = await readScannerSequencePreview();
 
   return {
     ok: true,
     ...result,
   };
+});
+
+export const getScannerSequencePreviewHttp = onRequest(async (req, res) => {
+  try {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set("Access-Control-Allow-Methods", "POST,OPTIONS");
+    res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    if (req.method !== "POST") {
+      res.status(405).json({ok: false, error: "Method not allowed"});
+      return;
+    }
+
+    const authHeader = String(req.header("authorization") ?? "");
+    if (!authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ok: false, error: "Unauthorized"});
+      return;
+    }
+
+    const idToken = authHeader.slice("Bearer ".length).trim();
+    if (!idToken) {
+      res.status(401).json({ok: false, error: "Unauthorized"});
+      return;
+    }
+
+    try {
+      await admin.auth().verifyIdToken(idToken);
+    } catch {
+      res.status(401).json({ok: false, error: "Unauthorized"});
+      return;
+    }
+
+    const result = await readScannerSequencePreview();
+    res.status(200).json({ok: true, ...result});
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[getScannerSequencePreviewHttp] FAILED", e);
+    res.status(500).json({ok: false, error: msg});
+  }
 });
 
 export const adminResetScannerSequenceFromSheet = onCall(async (request) => {
@@ -2351,128 +2532,92 @@ export const reserveScannerNumber = onCall(
       callerEmail = normalizeEmail(callerRecord.email ?? "");
     }
 
-    const callerUserSnap = await admin.firestore()
-      .collection("users")
-      .doc(callerUid)
-      .get();
-    const callerUserData = callerUserSnap.data() ?? {};
-    const callerShortCode = String(
-      callerUserData.shortCode ?? ""
-    ).trim();
-
-    const year2 = getCurrentScannerYear2();
-    const seededNextNumber = await getScannerSequenceSeed(year2);
-    const db = admin.firestore();
-    const metaRef = db.doc(SCANNER_META_DOC_PATH);
-
-    const result = await db.runTransaction(async (tx) => {
-      const metaSnap = await tx.get(metaRef);
-
-      let nextNumber = seededNextNumber;
-      let resetFloorNumber: number | null = null;
-      let resetAt: unknown = null;
-      if (metaSnap.exists) {
-        const metaData = metaSnap.data() ?? {};
-        const storedYear2 =
-          String(metaData.year2 ?? year2).trim() || year2;
-        if (storedYear2 === year2) {
-          const storedNextNumber = sanitizeScannerNextNumber(
-            metaData.nextNumber,
-            seededNextNumber
-          );
-          nextNumber = Math.max(seededNextNumber, storedNextNumber);
-          if (metaData.resetFloorNumber != null) {
-            resetFloorNumber = sanitizeScannerNextNumber(
-              metaData.resetFloorNumber,
-              nextNumber
-            );
-          }
-          resetAt = metaData.resetAt ?? null;
-        }
-      }
-
-      const freeNumber = await findNextFreeScannerNumber(
-        tx,
-        year2,
-        nextNumber,
-        {
-          resetFloorNumber,
-          resetAt,
-        }
-      );
-      const reservationId = `${year2}_${freeNumber}`;
-      const driveFolderName = buildScannerDriveFolderName(
-        freeNumber,
-        year2,
-        scanName,
-        callerShortCode
-      );
-      const reservationRef = db
-        .collection(SCANNER_RESERVATIONS_COLLECTION)
-        .doc(reservationId);
-
-      tx.set(reservationRef, {
-        number: freeNumber,
-        year2,
-        scanName,
-        reservedByUid: callerUid,
-        reservedByEmail: callerEmail,
-        driveFolderName,
-        driveFolderId: null,
-        driveFolderReady: false,
-        status: "creating_folder",
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-
-      tx.set(metaRef, {
-        year2,
-        nextNumber: freeNumber + 1,
-        lastReservedNumber: freeNumber,
-        lastReservationId: reservationId,
-        lastReservedByUid: callerUid,
-        resetFloorNumber: admin.firestore.FieldValue.delete(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, {merge: true});
-
-      return {
-        reservationId,
-        number: freeNumber,
-        year2,
-        driveFolderName,
-      };
-    });
-
-    try {
-      await ensureScannerReservationDriveFolder(result.reservationId);
-    } catch (e: unknown) {
-      console.error("[reserveScannerNumber] drive folder create failed", e);
-
-      try {
-        await rollbackScannerReservation(
-          result.reservationId,
-          result.year2,
-          result.number
-        );
-      } catch (rollbackError: unknown) {
-        console.error(
-          "[reserveScannerNumber] rollback failed",
-          rollbackError
-        );
-      }
-
-      throw new HttpsError(
-        "internal",
-        "Drive-Ordner konnte nicht erstellt werden. " +
-        "Nummer wurde nicht reserviert."
-      );
-    }
+    const result = await reserveScannerNumberForCaller(
+      callerUid,
+      callerEmail,
+      scanName
+    );
 
     return {
       ok: true,
       ...result,
       driveFolderReady: true,
     };
+  }
+);
+
+export const reserveScannerNumberHttp = onRequest(
+  {
+    region: "us-central1",
+    serviceAccount: "svs-app-864ed@appspot.gserviceaccount.com",
+  },
+  async (req, res) => {
+    try {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST,OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+      if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+      }
+
+      if (req.method !== "POST") {
+        res.status(405).json({ok: false, error: "Method not allowed"});
+        return;
+      }
+
+      const authHeader = String(req.header("authorization") ?? "");
+      if (!authHeader.startsWith("Bearer ")) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      const idToken = authHeader.slice("Bearer ".length).trim();
+      if (!idToken) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      let callerUid = "";
+      let callerEmail = "";
+      try {
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        callerUid = decoded.uid;
+        callerEmail = normalizeEmail(decoded.email ?? "");
+      } catch {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      const body = (req.body ?? {}) as Partial<{scanName: string}>;
+      const scanName = normalizeScannerDisplayName(body.scanName);
+      if (!scanName) {
+        res.status(400).json({ok: false, error: "scanName required"});
+        return;
+      }
+
+      if (!callerEmail) {
+        const callerRecord = await admin.auth().getUser(callerUid);
+        callerEmail = normalizeEmail(callerRecord.email ?? "");
+      }
+
+      const result = await reserveScannerNumberForCaller(
+        callerUid,
+        callerEmail,
+        scanName
+      );
+
+      res.status(200).json({
+        ok: true,
+        ...result,
+        driveFolderReady: true,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[reserveScannerNumberHttp] FAILED", e);
+      res.status(500).json({ok: false, error: msg});
+    }
   }
 );
 
