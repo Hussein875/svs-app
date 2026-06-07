@@ -74,6 +74,7 @@ struct CompanyDocumentDetailView: View {
                 fileURL: fileURL,
                 textFields: document.textFields,
                 inkFields: document.inkFields,
+                inkOnDrawStep: document.inkFieldsOnDrawStep,
                 defaultPlacement: document.signaturePlacement,
                 isProcessing: isSigning,
                 onCancel: { showSignatureFlow = false },
@@ -204,6 +205,7 @@ private struct CompanyDocumentSignatureFlow: View {
     let fileURL: URL
     let textFields: [CompanyDocumentTextField]
     let inkFields: [CompanyDocumentInkField]
+    let inkOnDrawStep: Bool
     let defaultPlacement: PDFSignaturePlacement
     let isProcessing: Bool
     let onCancel: () -> Void
@@ -217,7 +219,7 @@ private struct CompanyDocumentSignatureFlow: View {
     @State private var inkStates: [DocumentInkFieldState]
 
     private var hasDetailsStep: Bool {
-        !textFields.isEmpty || !inkFields.isEmpty
+        !textFields.isEmpty || (!inkFields.isEmpty && !inkOnDrawStep)
     }
 
     init(
@@ -225,6 +227,7 @@ private struct CompanyDocumentSignatureFlow: View {
         fileURL: URL,
         textFields: [CompanyDocumentTextField],
         inkFields: [CompanyDocumentInkField],
+        inkOnDrawStep: Bool = false,
         defaultPlacement: PDFSignaturePlacement,
         isProcessing: Bool,
         onCancel: @escaping () -> Void,
@@ -234,6 +237,7 @@ private struct CompanyDocumentSignatureFlow: View {
         self.fileURL = fileURL
         self.textFields = textFields
         self.inkFields = inkFields
+        self.inkOnDrawStep = inkOnDrawStep
         self.defaultPlacement = defaultPlacement
         self.isProcessing = isProcessing
         self.onCancel = onCancel
@@ -357,7 +361,7 @@ private struct CompanyDocumentSignatureFlow: View {
         case .draw:
             return "Unterschreiben"
         case .fields:
-            return inkFields.isEmpty ? "Angaben" : "Zeichnen"
+            return "Angaben"
         case .place:
             return "Position wählen"
         }
@@ -376,9 +380,27 @@ private struct CompanyDocumentSignatureFlow: View {
 
             SignaturePadView(
                 signatureImage: $signatureImage,
-                canvasHeight: 320,
+                canvasHeight: 220,
                 locksParentScrolling: true
             )
+
+            if inkOnDrawStep, !inkStates.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Optional zeichnen")
+                        .font(.subheadline.weight(.semibold))
+
+                    ForEach($inkStates) { $state in
+                        SignaturePadView(
+                            signatureImage: $state.image,
+                            canvasHeight: 160,
+                            locksParentScrolling: true,
+                            prompt: "Mit dem Finger zeichnen – z. B. auf dem Formular.",
+                            emptyLabel: "Noch leer",
+                            capturedLabel: "Erfasst"
+                        )
+                    }
+                }
+            }
 
             Spacer(minLength: 0)
         }
@@ -390,8 +412,11 @@ private struct CompanyDocumentSignatureFlow: View {
     }
 
     private var drawStepFooter: String {
+        if inkOnDrawStep {
+            return "Unterschreibe in schwarz. Optional kannst du darunter mit dem Stift zeichnen. Danach gibst du das Datum ein."
+        }
         if !inkFields.isEmpty {
-            return "Unterschreibe in schwarz. Danach kannst du die Formularfelder handschriftlich ausfüllen."
+            return "Unterschreibe in schwarz. Danach kannst du weitere Einträge handschriftlich erfassen."
         }
         return "Unterschreibe in schwarz im Feld unten. Danach trägst du die Angaben für das PDF ein."
     }
@@ -399,7 +424,7 @@ private struct CompanyDocumentSignatureFlow: View {
     private var fieldsStep: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                if !inkStates.isEmpty {
+                if !inkOnDrawStep, !inkStates.isEmpty {
                     VStack(alignment: .leading, spacing: 16) {
                         Text("Handschriftliche Einträge")
                             .font(.headline)
@@ -411,7 +436,7 @@ private struct CompanyDocumentSignatureFlow: View {
 
                                 SignaturePadView(
                                     signatureImage: $state.image,
-                                    canvasHeight: state.field.id == "form-ink" ? 220 : 140,
+                                    canvasHeight: 140,
                                     locksParentScrolling: true,
                                     prompt: "Mit dem Finger schreiben oder zeichnen.",
                                     emptyLabel: "Noch leer",
@@ -489,6 +514,9 @@ private struct CompanyDocumentSignatureFlow: View {
     }
 
     private var fieldsStepFooter: String {
+        if inkOnDrawStep {
+            return "Das Datum wird im Format TT.MM.JJJJ auf das Dokument gesetzt. Im nächsten Schritt legst du alles auf dem PDF fest."
+        }
         if !inkFields.isEmpty {
             return "Leere Zeichenfelder werden übersprungen. Im nächsten Schritt legst du alles auf dem PDF fest."
         }

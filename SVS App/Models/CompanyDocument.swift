@@ -140,7 +140,7 @@ struct CompanyDocument: Identifiable, Hashable {
             )
         }
 
-        if id != "ae" && id != "bd" {
+        if id != "bd" {
             fields.append(
                 CompanyDocumentTextField(
                     id: "signing-date",
@@ -154,14 +154,14 @@ struct CompanyDocument: Identifiable, Hashable {
         return fields
     }
 
-    /// Handschriftliche Einträge (AE/BD) – statt getippter Texte.
+    /// Optionale Freihand-Zeichnung (AE) – erscheint beim Unterschreiben, nicht im Angaben-Schritt.
     var inkFields: [CompanyDocumentInkField] {
         switch id {
         case "ae":
             return [
                 CompanyDocumentInkField(
-                    id: "form-ink",
-                    label: "Formular ausfüllen",
+                    id: "freehand-ink",
+                    label: "Zeichnen",
                     defaultPlacement: PDFSignaturePlacement(
                         pageIndex: 0,
                         x: 0.38,
@@ -170,21 +170,15 @@ struct CompanyDocument: Identifiable, Hashable {
                         height: 0.40
                     )
                 ),
-                CompanyDocumentInkField(
-                    id: "date-ink",
-                    label: "Ort / Datum",
-                    defaultPlacement: PDFSignaturePlacement(
-                        pageIndex: 0,
-                        x: 0.06,
-                        y: 0.88,
-                        width: 0.38,
-                        height: 0.06
-                    )
-                ),
             ]
         default:
             return []
         }
+    }
+
+    /// Freihand-Felder direkt neben der Unterschrift (statt im Angaben-Schritt).
+    var inkFieldsOnDrawStep: Bool {
+        id == "ae"
     }
 
     /// Unterschriftsfeld auf Seite 1 (UIKit-Koordinaten, Anteile 0…1).
