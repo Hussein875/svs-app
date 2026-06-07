@@ -140,7 +140,7 @@ struct ProvisionenView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Gutachten-Nr. (optional)")
+                            Text("Gutachten-Nr.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
 
@@ -165,7 +165,7 @@ struct ProvisionenView: View {
                                     .fill(Color(.tertiarySystemBackground))
                             )
 
-                            Text("Nur intern gespeichert – erscheint nicht im Webformular.")
+                            Text("Nur intern gespeichert.")
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
                         }
