@@ -168,7 +168,7 @@ struct CompanyDocumentsView: View {
             Text("Noch keine Dokumente")
                 .font(.headline)
 
-            Text("Die PDF-Dateien wurden noch nicht im App-Bundle gefunden. Bitte in Xcode unter CompanyDocuments prüfen und die App neu bauen.")
+            Text("Die PDF-Dateien wurden im App-Bundle nicht gefunden. Bitte die App neu bauen und installieren (Xcode oder TestFlight).")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

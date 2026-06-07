@@ -35,8 +35,8 @@ struct CompanyDocument: Identifiable, Hashable {
     let title: String
     let subtitle: String?
     let section: CompanyDocumentSection
-    /// Exakter PDF-Dateiname ohne Endung (wie im Ordner CompanyDocuments).
-    let fileName: String
+    /// PDF-Basisname ohne Endung (ASCII, z. B. "ae").
+    let resourceName: String
     let accentSymbol: String
 }
 
@@ -49,7 +49,7 @@ enum CompanyDocumentsCatalog {
             title: "Abtretungserklärung",
             subtitle: "AE",
             section: .internalDocuments,
-            fileName: "Abtretungserklärung (AE)",
+            resourceName: "ae",
             accentSymbol: "doc.text.fill"
         ),
         CompanyDocument(
@@ -57,7 +57,7 @@ enum CompanyDocumentsCatalog {
             title: "Begleitdokument",
             subtitle: "BD · Bearbeitungsdokument",
             section: .internalDocuments,
-            fileName: "Bearbeitungsdokument (BD)",
+            resourceName: "bd",
             accentSymbol: "doc.append.fill"
         ),
         CompanyDocument(
@@ -65,7 +65,7 @@ enum CompanyDocumentsCatalog {
             title: "Wessels",
             subtitle: "Anwaltskanzlei",
             section: .lawyerPowers,
-            fileName: "Anwaltskanzlei Wessels Vollmacht",
+            resourceName: "av-wessels",
             accentSymbol: "building.columns.fill"
         ),
         CompanyDocument(
@@ -73,7 +73,7 @@ enum CompanyDocumentsCatalog {
             title: "Göcmen",
             subtitle: "Anwaltskanzlei",
             section: .lawyerPowers,
-            fileName: "Anwaltskanzlei Göcmen Vollmacht",
+            resourceName: "av-goecmen",
             accentSymbol: "building.columns.fill"
         ),
         CompanyDocument(
@@ -81,7 +81,7 @@ enum CompanyDocumentsCatalog {
             title: "Kaya",
             subtitle: "Anwaltskanzlei",
             section: .lawyerPowers,
-            fileName: "Anwaltskanzlei Kaya Vollmacht",
+            resourceName: "av-kaya",
             accentSymbol: "building.columns.fill"
         ),
         CompanyDocument(
@@ -89,7 +89,7 @@ enum CompanyDocumentsCatalog {
             title: "Hijazi",
             subtitle: "Anwaltskanzlei",
             section: .lawyerPowers,
-            fileName: "Anwaltskanzlei Hijazi Vollmacht",
+            resourceName: "av-hijazi",
             accentSymbol: "building.columns.fill"
         ),
         CompanyDocument(
@@ -97,7 +97,7 @@ enum CompanyDocumentsCatalog {
             title: "Zeppelin",
             subtitle: "Anwaltskanzlei",
             section: .lawyerPowers,
-            fileName: "Anwaltskanzlei Zeppelin Vollmacht",
+            resourceName: "av-zeppelin",
             accentSymbol: "building.columns.fill"
         ),
     ]
@@ -111,29 +111,57 @@ enum CompanyDocumentsCatalog {
     }
 
     static func bundleURL(for document: CompanyDocument) -> URL? {
-        if let direct = Bundle.main.url(
-            forResource: document.fileName,
-            withExtension: "pdf",
-            subdirectory: folderName
-        ) {
-            return direct
+        let searchDirectories: [String?] = [folderName, nil]
+
+        for directory in searchDirectories {
+            if let url = Bundle.main.url(
+                forResource: document.resourceName,
+                withExtension: "pdf",
+                subdirectory: directory
+            ) {
+                return url
+            }
         }
 
-        let candidates = Bundle.main.urls(
-            forResourcesWithExtension: "pdf",
-            subdirectory: folderName
-        ) ?? []
-
-        let target = normalizedFileName(document.fileName)
-        return candidates.first {
-            normalizedFileName($0.deletingPathExtension().lastPathComponent) == target
-        }
+        return bundledPDFIndex()[document.resourceName]
     }
 
-    private static func normalizedFileName(_ value: String) -> String {
-        value
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .replacingOccurrences(of: " ", with: "")
-            .lowercased()
+    private static var cachedPDFIndex: [String: URL]?
+    private static let pdfIndexLock = NSLock()
+
+    private static func bundledPDFIndex() -> [String: URL] {
+        pdfIndexLock.lock()
+        defer { pdfIndexLock.unlock() }
+
+        if let cachedPDFIndex {
+            return cachedPDFIndex
+        }
+
+        var index: [String: URL] = [:]
+
+        func ingest(_ urls: [URL]) {
+            for url in urls {
+                let key = url.deletingPathExtension().lastPathComponent.lowercased()
+                index[key] = url
+            }
+        }
+
+        ingest(Bundle.main.urls(forResourcesWithExtension: "pdf", subdirectory: folderName) ?? [])
+        ingest(Bundle.main.urls(forResourcesWithExtension: "pdf", subdirectory: nil) ?? [])
+
+        if let resourceURL = Bundle.main.resourceURL,
+           let enumerator = FileManager.default.enumerator(
+            at: resourceURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+           ) {
+            for case let fileURL as URL in enumerator where fileURL.pathExtension.lowercased() == "pdf" {
+                let key = fileURL.deletingPathExtension().lastPathComponent.lowercased()
+                index[key] = fileURL
+            }
+        }
+
+        cachedPDFIndex = index
+        return index
     }
 }
