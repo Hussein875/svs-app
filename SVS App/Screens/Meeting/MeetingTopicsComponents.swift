@@ -77,6 +77,55 @@ struct MeetingActionDangerButtonStyle: ButtonStyle {
     }
 }
 
+struct MeetingTopicDetailsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let topic: MeetingTopic
+    let creatorName: String
+
+    private var createdText: String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "de_DE")
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f.string(from: topic.createdAt)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(topic.title)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+
+                    Text(topic.details)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text("Von \(creatorName) · \(createdText)")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 16)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Fertig") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+}
+
 struct MeetingTopicRow: View {
     let topic: MeetingTopic
     let creatorName: String
@@ -85,12 +134,22 @@ struct MeetingTopicRow: View {
     let onToggle: () -> Void
     let onDelete: () -> Void
 
+    @State private var showFullDetails = false
+
     private var createdText: String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "de_DE")
         f.dateStyle = .medium
         f.timeStyle = .short
         return f.string(from: topic.createdAt)
+    }
+
+    private var hasDetails: Bool {
+        !topic.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var detailsLikelyTruncated: Bool {
+        topic.details.count > 90 || topic.details.contains("\n")
     }
 
     var body: some View {
@@ -110,11 +169,26 @@ struct MeetingTopicRow: View {
                     .font(.body.weight(.semibold))
                     .strikethrough(topic.status == .done, color: .secondary)
 
-                if !topic.details.isEmpty {
-                    Text(topic.details)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .lineLimit(3)
+                if hasDetails {
+                    Button {
+                        showFullDetails = true
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(topic.details)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .lineLimit(3)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if detailsLikelyTruncated {
+                                Text("Antippen für vollständigen Text")
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.tint)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 Text("Von \(creatorName) · \(createdText)")
@@ -125,6 +199,9 @@ struct MeetingTopicRow: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 4)
+        .sheet(isPresented: $showFullDetails) {
+            MeetingTopicDetailsSheet(topic: topic, creatorName: creatorName)
+        }
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             if canDelete {
                 Button(role: .destructive) { onDelete() } label: {
@@ -352,12 +429,22 @@ struct ArchivedMeetingTopicRow: View {
     let topic: MeetingTopic
     let creatorName: String
 
+    @State private var showFullDetails = false
+
     private var createdText: String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "de_DE")
         f.dateStyle = .medium
         f.timeStyle = .short
         return f.string(from: topic.createdAt)
+    }
+
+    private var hasDetails: Bool {
+        !topic.details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var detailsLikelyTruncated: Bool {
+        topic.details.count > 90 || topic.details.contains("\n")
     }
 
     var body: some View {
@@ -371,10 +458,26 @@ struct ArchivedMeetingTopicRow: View {
                 Text(topic.title)
                     .font(.body.weight(.semibold))
 
-                if !topic.details.isEmpty {
-                    Text(topic.details)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                if hasDetails {
+                    Button {
+                        showFullDetails = true
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(topic.details)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            if detailsLikelyTruncated {
+                                Text("Antippen für vollständigen Text")
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.tint)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 Text("Von \(creatorName) · \(createdText)")
@@ -385,5 +488,8 @@ struct ArchivedMeetingTopicRow: View {
             Spacer(minLength: 0)
         }
         .padding(.vertical, 3)
+        .sheet(isPresented: $showFullDetails) {
+            MeetingTopicDetailsSheet(topic: topic, creatorName: creatorName)
+        }
     }
 }

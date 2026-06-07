@@ -171,151 +171,12 @@ struct WorkHomeView: View {
                         .padding(.horizontal, 18)
                     }
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(isEmployeeRole ? "Fokus" : "Start")
-                            .font(.caption.weight(.semibold))
-                            .foregroundColor(.secondary)
-                            .textCase(.uppercase)
-                            .padding(.horizontal, 2)
+                    frequentSection
+                        .padding(.horizontal, 18)
 
-                        VStack(spacing: 12) {
-                            if isEmployeeRole {
-                                NavigationLink {
-                                    TasksView()
-                                } label: {
-                                    WorkCard(
-                                        title: "Aufgaben",
-                                        subtitle: "Dein Tagesfokus",
-                                        systemImage: "checklist",
-                                        trailingValue: myOpenTasksCount
-                                    )
-                                }
-                                .buttonStyle(.plain)
-
-                                NavigationLink {
-                                    MyRequestsScreen()
-                                } label: {
-                                    WorkCard(
-                                        title: "Abwesenheiten",
-                                        subtitle: "Urlaub und Krankheit verwalten",
-                                        systemImage: "doc.text",
-                                        trailingValue: myActiveRequestsCount
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            } else {
-                                NavigationLink {
-                                    MyRequestsScreen()
-                                } label: {
-                                    WorkCard(
-                                        title: "Abwesenheiten",
-                                        subtitle: "Urlaub, Krankheit, Bereitschaft",
-                                        systemImage: "doc.text",
-                                        trailingValue: myActiveRequestsCount
-                                    )
-                                }
-                                .buttonStyle(.plain)
-
-                                NavigationLink {
-                                    TasksView()
-                                } label: {
-                                    WorkCard(
-                                        title: "Aufgaben",
-                                        subtitle: "Offene To-dos",
-                                        systemImage: "checklist",
-                                        trailingValue: myOpenTasksCount
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-
-                            NavigationLink {
-                                CompanyDocumentsView()
-                            } label: {
-                                WorkCard(
-                                    title: "Dokumente",
-                                    subtitle: "Wichtige Unterlagen für das Team",
-                                    systemImage: "folder.fill",
-                                    trailingValue: 0
-                                )
-                            }
-                            .buttonStyle(.plain)
-
-                            NavigationLink {
-                                StargutachterView()
-                            } label: {
-                                WorkCard(
-                                    title: "Stargutachter",
-                                    subtitle: "Schadenaufnahme durch Kunden vorbereiten",
-                                    systemImage: "link.circle.fill",
-                                    trailingValue: 0
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, isEmployeeRole ? 18 : 0)
-
-                    if !isEmployeeRole {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Weitere Bereiche")
-                                .font(.caption.weight(.semibold))
-                                .foregroundColor(.secondary)
-                                .textCase(.uppercase)
-                                .padding(.horizontal, 2)
-
-                            HStack(spacing: 12) {
-                                NavigationLink {
-                                    MyOnCallSaturdaysScreen()
-                                } label: {
-                                    CompactWorkCard(
-                                        title: "Bereitschaft",
-                                        systemImage: "calendar.badge.clock",
-                                        badgeText: nil
-                                    )
-                                }
-                                .buttonStyle(.plain)
-
-                                NavigationLink {
-                                    MeetingTopicsView()
-                                } label: {
-                                    CompactWorkCard(
-                                        title: "Meeting",
-                                        systemImage: "person.3.fill",
-                                        badgeText: openMeetingTopicsCount > 0 ? "\(openMeetingTopicsCount)" : nil
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-
-                            HStack(spacing: 12) {
-                                NavigationLink {
-                                    ProvisionenView()
-                                } label: {
-                                    CompactWorkCard(
-                                        title: "Prämie",
-                                        systemImage: "eurosign.circle",
-                                        badgeText: nil
-                                    )
-                                }
-                                .buttonStyle(.plain)
-
-                                NavigationLink {
-                                    DashboardView()
-                                } label: {
-                                    CompactWorkCard(
-                                        title: "Dashboard",
-                                        systemImage: "chart.bar.xaxis",
-                                        badgeText: nil
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
+                    quickAccessSection
                         .padding(.horizontal, 18)
                         .padding(.bottom, 18)
-                    }
                 }
             }
             .navigationDestination(item: $pushDestination) { destination in
@@ -338,5 +199,148 @@ struct WorkHomeView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    // MARK: - Home sections
+
+    private func homeSectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundColor(.secondary)
+            .textCase(.uppercase)
+            .padding(.horizontal, 2)
+    }
+
+    @ViewBuilder
+    private var frequentSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            homeSectionHeader("Häufig genutzt")
+
+            VStack(spacing: 12) {
+                NavigationLink {
+                    MyRequestsScreen()
+                } label: {
+                    WorkCard(
+                        title: "Abwesenheiten",
+                        subtitle: isEmployeeRole
+                            ? "Urlaub und Krankheit verwalten"
+                            : "Urlaub, Krankheit",
+                        systemImage: "doc.text",
+                        trailingValue: myActiveRequestsCount
+                    )
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink {
+                    CompanyDocumentsView()
+                } label: {
+                    WorkCard(
+                        title: "Dokumente",
+                        subtitle: "Unterlagen und Vollmachten",
+                        systemImage: "folder.fill",
+                        trailingValue: 0
+                    )
+                }
+                .buttonStyle(.plain)
+
+                if !isEmployeeRole {
+                    NavigationLink {
+                        ProvisionenView()
+                    } label: {
+                        WorkCard(
+                            title: "Prämie",
+                            subtitle: "Vermittlungsprämie und Links",
+                            systemImage: "eurosign.circle",
+                            trailingValue: 0
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var quickAccessSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            homeSectionHeader("Schnellzugriff")
+
+            VStack(spacing: 12) {
+                HStack(spacing: 12) {
+                    NavigationLink {
+                        TasksView()
+                    } label: {
+                        CompactWorkCard(
+                            title: "Aufgaben",
+                            systemImage: "checklist",
+                            badgeText: myOpenTasksCount > 0 ? "\(myOpenTasksCount)" : nil
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    if isEmployeeRole {
+                        NavigationLink {
+                            StargutachterView()
+                        } label: {
+                            CompactWorkCard(
+                                title: "Stargutachter",
+                                systemImage: "star.fill",
+                                badgeText: nil
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        NavigationLink {
+                            MeetingTopicsView()
+                        } label: {
+                            CompactWorkCard(
+                                title: "Meeting",
+                                systemImage: "person.3.fill",
+                                badgeText: openMeetingTopicsCount > 0 ? "\(openMeetingTopicsCount)" : nil
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                if !isEmployeeRole {
+                    HStack(spacing: 12) {
+                        NavigationLink {
+                            StargutachterView()
+                        } label: {
+                            CompactWorkCard(
+                                title: "Stargutachter",
+                                systemImage: "star.fill",
+                                badgeText: nil
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            MyOnCallSaturdaysScreen()
+                        } label: {
+                            CompactWorkCard(
+                                title: "Bereitschaft",
+                                systemImage: "calendar.badge.clock",
+                                badgeText: nil
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    NavigationLink {
+                        DashboardView()
+                    } label: {
+                        CompactWorkCard(
+                            title: "Dashboard",
+                            systemImage: "chart.bar.xaxis",
+                            badgeText: nil
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.top, 6)
     }
 }

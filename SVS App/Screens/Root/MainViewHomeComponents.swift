@@ -448,7 +448,7 @@ struct CompactWorkCard: View {
                 .minimumScaleFactor(0.9)
                 .allowsTightening(true)
         }
-        .frame(maxWidth: .infinity, minHeight: 94, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 82, alignment: .topLeading)
         .padding(.vertical, 12)
         .padding(.horizontal, 12)
         .background(

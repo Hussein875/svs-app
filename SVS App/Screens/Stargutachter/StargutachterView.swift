@@ -22,14 +22,14 @@ struct StargutachterView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Label("Schadenaufnahme vorbereiten", systemImage: "camera.fill")
+                    Label("Schadenaufnahme vorbereiten", systemImage: "star.fill")
                         .font(.headline)
                         .foregroundStyle(.tint)
 
                     Text(
                         "Mit diesem Link bereitet der Kunde die Schadenaufnahme vor – er stellt Bilder "
                             + "und Informationen zum Unfall bereit. Schicke den Link an den Kunden; "
-                            + "er landet bei unserer Partnerfirma Stargutachter."
+                            + "er landet bei Stargutachter."
                     )
                     .font(.subheadline)
                     .foregroundColor(.secondary)
