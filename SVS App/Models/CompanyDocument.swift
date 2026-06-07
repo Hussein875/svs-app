@@ -30,7 +30,77 @@ enum CompanyDocumentSection: String, CaseIterable, Identifiable {
     }
 }
 
+enum CompanyDocumentTextFieldKind: Hashable {
+    case signingDate
+    case accidentDate(prefix: String)
+    case freeText(placeholder: String? = nil)
+    case partyPair(separator: String)
+}
+
+struct CompanyDocumentInkField: Identifiable, Hashable {
+    let id: String
+    let label: String
+    let defaultPlacement: PDFSignaturePlacement
+}
+
+struct CompanyDocumentTextField: Identifiable, Hashable {
+    let id: String
+    let label: String
+    let kind: CompanyDocumentTextFieldKind
+    let defaultPlacement: PDFSignaturePlacement
+
+    var isDateField: Bool {
+        switch kind {
+        case .signingDate, .accidentDate:
+            return true
+        case .freeText, .partyPair:
+            return false
+        }
+    }
+
+    var isPartyPair: Bool {
+        if case .partyPair = kind { return true }
+        return false
+    }
+
+    var freeTextPlaceholder: String? {
+        switch kind {
+        case .freeText(let placeholder):
+            return placeholder
+        default:
+            return nil
+        }
+    }
+
+    func renderedText(date: Date, customText: String, secondaryText: String = "") -> String {
+        switch kind {
+        case .signingDate:
+            return Self.germanDateFormatter.string(from: date)
+        case .accidentDate(let prefix):
+            return prefix + Self.germanDateFormatter.string(from: date)
+        case .freeText:
+            return customText.trimmingCharacters(in: .whitespacesAndNewlines)
+        case .partyPair(let separator):
+            let client = customText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let opponent = secondaryText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !client.isEmpty || !opponent.isEmpty else { return "" }
+            if client.isEmpty { return opponent }
+            if opponent.isEmpty { return client }
+            return client + separator + opponent
+        }
+    }
+
+    private static let germanDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "de_DE")
+        formatter.dateFormat = "dd.MM.yyyy"
+        return formatter
+    }()
+}
+
 struct CompanyDocument: Identifiable, Hashable {
+    private static let accidentDatePrefix = "Verkehrsunfall vom "
+
     let id: String
     let title: String
     let subtitle: String?
@@ -38,6 +108,151 @@ struct CompanyDocument: Identifiable, Hashable {
     /// PDF-Basisname ohne Endung (ASCII, z. B. "ae").
     let resourceName: String
     let accentSymbol: String
+
+    /// Direkt auf der PDF zeichnen (wie Markup auf dem iPad) – statt Unterschrift/Formular-Pads.
+    var usesDirectPDFDrawing: Bool {
+        id == "bd"
+    }
+
+    /// Textfelder, die beim Signieren auf das PDF gesetzt werden (Datum immer enthalten).
+    var textFields: [CompanyDocumentTextField] {
+        var fields: [CompanyDocumentTextField] = []
+
+        if id == "av-goecmen" {
+            fields.append(
+                CompanyDocumentTextField(
+                    id: "case-matter",
+                    label: "In Sachen",
+                    kind: .partyPair(separator: " ./. "),
+                    defaultPlacement: caseMatterPlacement
+                )
+            )
+        }
+
+        if section == .lawyerPowers {
+            fields.append(
+                CompanyDocumentTextField(
+                    id: "accident-date",
+                    label: "Unfalldatum",
+                    kind: .accidentDate(prefix: Self.accidentDatePrefix),
+                    defaultPlacement: accidentDatePlacement
+                )
+            )
+        }
+
+        if id != "ae" && id != "bd" {
+            fields.append(
+                CompanyDocumentTextField(
+                    id: "signing-date",
+                    label: "Datum",
+                    kind: .signingDate,
+                    defaultPlacement: signingDatePlacement
+                )
+            )
+        }
+
+        return fields
+    }
+
+    /// Handschriftliche Einträge (AE/BD) – statt getippter Texte.
+    var inkFields: [CompanyDocumentInkField] {
+        switch id {
+        case "ae":
+            return [
+                CompanyDocumentInkField(
+                    id: "form-ink",
+                    label: "Formular ausfüllen",
+                    defaultPlacement: PDFSignaturePlacement(
+                        pageIndex: 0,
+                        x: 0.38,
+                        y: 0.07,
+                        width: 0.58,
+                        height: 0.40
+                    )
+                ),
+                CompanyDocumentInkField(
+                    id: "date-ink",
+                    label: "Ort / Datum",
+                    defaultPlacement: PDFSignaturePlacement(
+                        pageIndex: 0,
+                        x: 0.06,
+                        y: 0.88,
+                        width: 0.38,
+                        height: 0.06
+                    )
+                ),
+            ]
+        default:
+            return []
+        }
+    }
+
+    /// Unterschriftsfeld auf Seite 1 (UIKit-Koordinaten, Anteile 0…1).
+    var signaturePlacement: PDFSignaturePlacement {
+        switch id {
+        case "ae":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.68, width: 0.52, height: 0.14)
+        case "bd":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.74, width: 0.48, height: 0.12)
+        case "av-wessels":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.78, width: 0.40, height: 0.10)
+        case "av-goecmen":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.52, y: 0.84, width: 0.38, height: 0.10)
+        case "av-kaya":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.32, y: 0.93, width: 0.35, height: 0.08)
+        case "av-hijazi":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.48, y: 0.86, width: 0.38, height: 0.10)
+        case "av-zeppelin":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.55, y: 0.90, width: 0.35, height: 0.08)
+        default:
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.08, y: 0.72, width: 0.44, height: 0.12)
+        }
+    }
+
+    private var signingDatePlacement: PDFSignaturePlacement {
+        switch id {
+        case "ae":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.60, width: 0.28, height: 0.045)
+        case "bd":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.66, width: 0.28, height: 0.045)
+        case "av-wessels":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.58, y: 0.80, width: 0.28, height: 0.045)
+        case "av-goecmen":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.88, width: 0.38, height: 0.045)
+        case "av-kaya":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.08, y: 0.90, width: 0.48, height: 0.045)
+        case "av-hijazi":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.10, y: 0.88, width: 0.30, height: 0.045)
+        case "av-zeppelin":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.10, y: 0.92, width: 0.38, height: 0.04)
+        default:
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.62, width: 0.28, height: 0.045)
+        }
+    }
+
+    /// Göcmen: „Name ./. Name“ bei „in Sachen:“ (über „wegen:“ / Unfalldatum).
+    private var caseMatterPlacement: PDFSignaturePlacement {
+        PDFSignaturePlacement(pageIndex: 0, x: 0.22, y: 0.15, width: 0.55, height: 0.04)
+    }
+
+    /// „Verkehrsunfall vom …“ – gleicher Text, Startposition je Kanzlei-PDF unterschiedlich.
+    private var accidentDatePlacement: PDFSignaturePlacement {
+        switch id {
+        case "av-wessels":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.28, y: 0.13, width: 0.55, height: 0.045)
+        case "av-goecmen":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.22, y: 0.20, width: 0.55, height: 0.04)
+        case "av-kaya":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.44, y: 0.25, width: 0.52, height: 0.04)
+        case "av-hijazi":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.08, y: 0.155, width: 0.55, height: 0.04)
+        case "av-zeppelin":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.38, y: 0.29, width: 0.52, height: 0.035)
+        default:
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.08, y: 0.12, width: 0.58, height: 0.045)
+        }
+    }
+
 }
 
 enum CompanyDocumentsCatalog {

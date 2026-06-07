@@ -178,25 +178,6 @@ struct CompanyDocumentsView: View {
     }
 }
 
-struct CompanyDocumentDetailView: View {
-    let document: CompanyDocument
-    let fileURL: URL
-
-    var body: some View {
-        PDFPreview(url: fileURL)
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle(document.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    ShareLink(item: fileURL) {
-                        Label("Teilen", systemImage: "square.and.arrow.up")
-                    }
-                }
-            }
-    }
-}
-
 #Preview {
     NavigationStack {
         CompanyDocumentsView()

@@ -240,6 +240,18 @@ struct WorkHomeView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+
+                            NavigationLink {
+                                StargutachterView()
+                            } label: {
+                                WorkCard(
+                                    title: "Stargutachter",
+                                    subtitle: "Schadenaufnahme durch Kunden vorbereiten",
+                                    systemImage: "link.circle.fill",
+                                    trailingValue: 0
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 18)
