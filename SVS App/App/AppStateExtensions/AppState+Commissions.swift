@@ -11,7 +11,7 @@ extension AppState {
 
         var query: Query = db.collection("commissions")
 
-        // Admin: alles; Nicht-Admin: nur eigene erstellte Provisionen
+        // Admin: alles; Nicht-Admin: nur eigene erstellte Prämien
         if me.role != .admin {
             query = query.whereField("createdByUid", isEqualTo: me.id)
         }
@@ -25,7 +25,7 @@ extension AppState {
             if let error {
                 DispatchQueue.main.async {
                     self.uiErrorMessage =
-                    "Provisionen konnten nicht geladen werden: \(error.localizedDescription)"
+                    "Prämien konnten nicht geladen werden: \(error.localizedDescription)"
                 }
                 return
             }
@@ -77,7 +77,7 @@ extension AppState {
                 try await self.db.collection("commissions").document(dto.id)
                     .setData(dto.toDictionary(), merge: true)
             } catch {
-                let msg = "Provision konnte nicht gespeichert werden: \(error.localizedDescription)"
+                let msg = "Prämie konnte nicht gespeichert werden: \(error.localizedDescription)"
                 await MainActor.run {
                     self.uiErrorMessage = msg
                     self.showToast(.error, msg)
@@ -93,7 +93,7 @@ extension AppState {
             do {
                 try await self.db.collection("commissions").document(docId).delete()
             } catch {
-                let msg = "Provision konnte nicht gelöscht werden: \(error.localizedDescription)"
+                let msg = "Prämie konnte nicht gelöscht werden: \(error.localizedDescription)"
                 await MainActor.run {
                     self.uiErrorMessage = msg
                     self.showToast(.error, msg)
@@ -124,11 +124,16 @@ extension AppState {
     }
     
     func reservedVacationDays(for user: User, excludingRequestId: UUID? = nil) -> Int {
-        let requestsForUser = leaveRequests.filter {
-            $0.user.id == user.id &&
-            $0.type == .vacation &&
-            $0.status != .rejected &&
-            (excludingRequestId == nil || $0.id != excludingRequestId!)
+        let requestsForUser = leaveRequests.filter { request in
+            guard request.user.id == user.id,
+                  request.type == .vacation,
+                  request.status != .rejected else {
+                return false
+            }
+            if let excludedRequestId = excludingRequestId {
+                return request.id != excludedRequestId
+            }
+            return true
         }
         
         return requestsForUser.reduce(0) { partial, req in
@@ -196,7 +201,7 @@ extension AppState {
         details += "Gemeldet von: \(creator.name)\n"
         
         createTask(
-            title: "Provision zahlen – \(entry.recipientName)",
+            title: "Prämie zahlen – \(entry.recipientName)",
             details: details,
             dueDate: nil,
             assignedUser: admin,

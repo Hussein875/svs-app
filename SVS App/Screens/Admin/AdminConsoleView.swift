@@ -52,7 +52,7 @@ struct AdminConsoleView: View {
                         )
 
                         AdminStatCard(
-                            title: "Offene Provisionen",
+                            title: "Offene Prämien",
                             value: "\(openCommissionsCount)",
                             systemImage: "eurosign.circle",
                             accent: appState.currentUser?.color ?? .secondary
@@ -103,7 +103,7 @@ struct AdminConsoleView: View {
                                     .environmentObject(appState)
                             } label: {
                                 AdminNavRow(
-                                    title: "Provisionen",
+                                    title: "Prämien",
                                     subtitle: "Offen, auszahlen und löschen",
                                     systemImage: "eurosign",
                                     accent: appState.currentUser?.color ?? .secondary
@@ -249,7 +249,7 @@ struct AdminCommissionsScreen: View {
     var body: some View {
         ProvisionenView()
             .environmentObject(appState)
-            .navigationTitle("Provisionen")
+            .navigationTitle("Prämien")
             .navigationBarTitleDisplayMode(.inline)
     }
 }

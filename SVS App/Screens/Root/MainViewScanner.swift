@@ -155,12 +155,15 @@ struct ScannerScreen: View {
         )
     }
 
-    private let uploadScanToDriveEndpoint =
-      URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/uploadScanToDrive")!
-    private let scannerSequencePreviewEndpoint =
-      URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/getScannerSequencePreviewHttp")!
-    private let reserveScannerNumberEndpoint =
-      URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/reserveScannerNumberHttp")!
+    private var uploadScanToDriveEndpoint: URL? {
+        URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/uploadScanToDrive")
+    }
+    private var scannerSequencePreviewEndpoint: URL? {
+        URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/getScannerSequencePreviewHttp")
+    }
+    private var reserveScannerNumberEndpoint: URL? {
+        URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/reserveScannerNumberHttp")
+    }
 
     private var isErrorPresented: Binding<Bool> {
         Binding(
@@ -757,6 +760,14 @@ struct ScannerScreen: View {
         reservationId: String?,
         fileName: String
     ) async throws -> String {
+        guard let uploadScanToDriveEndpoint else {
+            throw NSError(
+                domain: "Drive",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Upload-URL ist ungültig."]
+            )
+        }
+
         var request = URLRequest(url: uploadScanToDriveEndpoint)
         request.httpMethod = "POST"
         request.setValue(
@@ -908,6 +919,13 @@ struct ScannerScreen: View {
             }
 
             let idToken = try await user.getIDToken()
+            guard let scannerSequencePreviewEndpoint else {
+                throw NSError(
+                    domain: "Scanner",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Scanner-Preview-URL ist ungültig."]
+                )
+            }
             let payload = try await callScannerHttpEndpoint(
                 scannerSequencePreviewEndpoint,
                 idToken: idToken
@@ -954,6 +972,13 @@ struct ScannerScreen: View {
             }
 
             let idToken = try await user.getIDToken()
+            guard let reserveScannerNumberEndpoint else {
+                throw NSError(
+                    domain: "Scanner",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Scanner-Reservierungs-URL ist ungültig."]
+                )
+            }
             let payload = try await callScannerHttpEndpoint(
                 reserveScannerNumberEndpoint,
                 idToken: idToken,

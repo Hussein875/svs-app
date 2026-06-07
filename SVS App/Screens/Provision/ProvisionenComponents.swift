@@ -107,7 +107,7 @@ struct CommissionDetailSheet: View {
                     }
                 }
                 
-                Section("Provision") {
+                Section("Vermittlungsprämie") {
                     if let a = row.amount {
                         LabeledContent("Betrag", value: formatEUR(a))
                     } else {
@@ -172,12 +172,17 @@ struct CommissionDetailSheet: View {
                         "Veranlasst durch",
                         value: createdByLabel ?? (row.createdByUid ?? "—")
                     )
+                    if let gutachtenNumber = row.gutachtenNumber, !gutachtenNumber.isEmpty {
+                        LabeledContent("Gutachten-Nr.", value: gutachtenNumber)
+                    } else {
+                        LabeledContent("Gutachten-Nr.", value: "—")
+                    }
                 }
             }
             .onAppear {
                 resolveCreatedByLabelIfNeeded()
             }
-            .navigationTitle("Provision")
+            .navigationTitle("Prämie")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -251,6 +256,7 @@ struct CommissionRow: Identifiable {
 
     let amount: Double?
     let notes: String?
+    let gutachtenNumber: String?
     let status: String
 
     let createdAt: Date?

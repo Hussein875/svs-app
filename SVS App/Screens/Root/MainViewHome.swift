@@ -228,6 +228,18 @@ struct WorkHomeView: View {
                                 }
                                 .buttonStyle(.plain)
                             }
+
+                            NavigationLink {
+                                CompanyDocumentsView()
+                            } label: {
+                                WorkCard(
+                                    title: "Dokumente",
+                                    subtitle: "Wichtige Unterlagen für das Team",
+                                    systemImage: "folder.fill",
+                                    trailingValue: 0
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     .padding(.horizontal, 18)
@@ -270,7 +282,7 @@ struct WorkHomeView: View {
                                     ProvisionenView()
                                 } label: {
                                     CompactWorkCard(
-                                        title: "Provision",
+                                        title: "Prämie",
                                         systemImage: "eurosign.circle",
                                         badgeText: nil
                                     )

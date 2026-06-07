@@ -4,6 +4,14 @@ import FirebaseFirestore
 import FirebaseFunctions
 
 extension AppState {
+    private func birthdayDateString(from date: Date) -> String {
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        let year = comps.year ?? 2000
+        let month = comps.month ?? 1
+        let day = comps.day ?? 1
+        return String(format: "%04d-%02d-%02d", year, month, day)
+    }
+
     @MainActor
     @discardableResult
     func adminResetScannerSequenceFromSheet() async -> Bool {
@@ -18,9 +26,12 @@ extension AppState {
                 return false
             }
 
-            let endpoint = URL(
+            guard let endpoint = URL(
                 string: "https://us-central1-svs-app-864ed.cloudfunctions.net/adminResetScannerSequenceFromSheetHttp"
-            )!
+            ) else {
+                showToast(.error, "Scanner-Reset-URL ist ungültig.")
+                return false
+            }
             let idToken = try await user.getIDToken()
 
             var request = URLRequest(url: endpoint)
@@ -93,8 +104,7 @@ extension AppState {
                                     annualLeaveDays: Int,
                                     birthday: Date? = nil) async {
         let functions = Functions.functions(region: "us-central1")
-        let iso = ISO8601DateFormatter()
-        let birthdayISO = birthday.map { iso.string(from: $0) }
+        let birthdayDate = birthday.map { birthdayDateString(from: $0) }
         
         do {
             var payload: [String: Any] = [
@@ -104,8 +114,8 @@ extension AppState {
                 "colorName": colorName,
                 "annualLeaveDays": annualLeaveDays
             ]
-            if let birthdayISO {
-                payload["birthdayISO"] = birthdayISO
+            if let birthdayDate {
+                payload["birthdayISO"] = birthdayDate
             }
 
             let result = try await functions.httpsCallable("adminCreateUserInvite").call(payload)

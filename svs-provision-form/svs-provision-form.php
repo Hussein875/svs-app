@@ -73,7 +73,7 @@ final class SVS_Provision_Form {
     echo '<!doctype html><html lang="de"><head>';
     echo '<meta charset="utf-8">';
     echo '<meta name="viewport" content="width=device-width,initial-scale=1">';
-    echo '<title>Provision – SV Souleiman</title>';
+    echo '<title>Vermittlungsprämie – SV Souleiman</title>';
     wp_head();
     echo '</head><body>';
     echo '<div id="svs-provision-root"></div>';

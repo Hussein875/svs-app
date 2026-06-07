@@ -7,7 +7,7 @@
 
   root.innerHTML = `
     <div class="svs-card">
-      <h2 style="margin:0 0 6px;">Provision</h2>
+      <h2 style="margin:0 0 6px;">Vermittlungsprämie</h2>
 
       <div id="svs-badge" class="svs-badge svs-warn">Token wird geprüft …</div>
       <div style="height:1px;background:#e7e9f0;margin:18px 0;"></div>
@@ -73,7 +73,7 @@
         <label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px;">
           <input type="checkbox" required style="margin-top:3px;">
           <span style="color:#5b6476;font-size:13px;">
-            Ich bestätige die Richtigkeit meiner Angaben und stimme der Auszahlung der Vermittlungsprovision zu. *
+            Ich bestätige die Richtigkeit meiner Angaben und stimme der Auszahlung der Vermittlungsprämie zu. *
           </span>
         </label>
 

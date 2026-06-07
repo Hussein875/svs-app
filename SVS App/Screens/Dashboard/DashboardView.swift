@@ -408,9 +408,11 @@ private final class DashboardViewModel: ObservableObject {
 
     private let fetchInterval: TimeInterval = 60
     private let fetchTimeout: TimeInterval = 25
-    private let sheetURL = URL(
-        string: "https://docs.google.com/spreadsheets/d/10mfm9SVVDiWcxnfK2QuUCj3msaVFBQIQx34NnPlUEo4/gviz/tq?tqx=out:json"
-    )!
+    private var sheetURL: URL? {
+        URL(
+            string: "https://docs.google.com/spreadsheets/d/10mfm9SVVDiWcxnfK2QuUCj3msaVFBQIQx34NnPlUEo4/gviz/tq?tqx=out:json"
+        )
+    }
 
     var nextNumberText: String {
         nextNumber.map(String.init) ?? "–"
@@ -476,6 +478,11 @@ private final class DashboardViewModel: ObservableObject {
         }
 
         do {
+            guard let sheetURL else {
+                lastFetchError = "Dashboard-URL ist ungültig."
+                return
+            }
+
             var request = URLRequest(url: sheetURL)
             request.cachePolicy = .reloadIgnoringLocalCacheData
             request.timeoutInterval = fetchTimeout

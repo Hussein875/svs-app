@@ -146,7 +146,11 @@ struct CommissionDTO {
         // Prefer token if it is a UUID string (used by the new provision flow);
         // otherwise fall back to the document id.
         let token = data["token"] as? String
-        self.id = token?.isEmpty == false ? token! : id
+        if let token, !token.isEmpty {
+            self.id = token
+        } else {
+            self.id = id
+        }
 
         // --- createdAt / createdByUid (required)
         guard

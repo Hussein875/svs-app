@@ -96,7 +96,10 @@ import Foundation
         if isWeekday && !isPublicHolidayBremen(date) {
             count += 1
         }
-        date = cal.date(byAdding: .day, value: 1, to: date)!
+        guard let nextDate = cal.date(byAdding: .day, value: 1, to: date) else {
+            break
+        }
+        date = nextDate
     }
     return count
 }

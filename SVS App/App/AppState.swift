@@ -222,7 +222,7 @@ class AppState: ObservableObject {
                 if let idx = users.firstIndex(where: { $0.id == me.id }) {
                     users[idx] = me
                 }
-                uiErrorMessage = "Provisions-Push-Einstellung konnte nicht gespeichert werden: \(error.localizedDescription)"
+                uiErrorMessage = "Prämien-Push-Einstellung konnte nicht gespeichert werden: \(error.localizedDescription)"
                 return false
             }
         }

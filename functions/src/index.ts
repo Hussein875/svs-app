@@ -3124,7 +3124,7 @@ async function buildProvisionPdfBuffer(args: {
     doc
       .fontSize(16)
       .font("Helvetica-Bold")
-      .text("Bestätigung über die Vereinbarung einer Vermittlungsprovision");
+      .text("Bestätigung über die Vereinbarung einer Vermittlungsprämie");
     doc.moveDown(0.6);
 
     // Vermittler
@@ -3149,7 +3149,7 @@ async function buildProvisionPdfBuffer(args: {
     } else {
       doc.text(`IBAN: ${safeStr(data.payoutIban)}`);
     }
-    doc.text(`Provisionsbetrag: ${formatEurAmount(data.amount)}`);
+    doc.text(`Prämienbetrag: ${formatEurAmount(data.amount)}`);
 
     const notes = safeStr(data.notes);
     if (notes !== "—") {
@@ -3385,6 +3385,10 @@ export const submitProvisionForm = onRequest(async (req, res) => {
           .trim() ||
         null;
 
+      const tokenGutachtenNumber =
+        String((tokenData as Record<string, unknown>).gutachtenNumber ?? "")
+          .trim() || null;
+
       const payoutMethod = payoutMethodRaw as PayoutMethod;
 
       const commissionDoc: Record<string, unknown> = {
@@ -3423,6 +3427,7 @@ export const submitProvisionForm = onRequest(async (req, res) => {
         // Provision
         amount,
         notes: String(body.notes ?? "").trim() || null,
+        gutachtenNumber: tokenGutachtenNumber,
 
         // Unterschrift
         signaturePngBase64: signatureB64,
@@ -3474,6 +3479,7 @@ export const submitProvisionForm = onRequest(async (req, res) => {
 interface CreateProvisionLinkBody {
   ttlDays?: number;
   amount?: number;
+  gutachtenNumber?: string;
 }
 
 /**
@@ -3533,6 +3539,9 @@ export const createProvisionLink = onRequest(async (req, res) => {
         Math.max(0, amountRaw) :
         null;
 
+    const gutachtenNumber =
+      String(body.gutachtenNumber ?? "").trim() || null;
+
     // --- Token (Einmal-Link)
     const token = crypto.randomUUID();
 
@@ -3548,6 +3557,7 @@ export const createProvisionLink = onRequest(async (req, res) => {
         usedAt: null,
         createdByUid: callerUid,
         amount,
+        gutachtenNumber,
       });
 
     const url = `https://sv-souleiman.de/provision?token=${token}`;
@@ -3602,7 +3612,7 @@ export const commissionCreatedSendPdf = onDocumentCreated(
             "commission_new",
             tokenRefs,
             {
-              title: "Provision auszuzahlen",
+              title: "Prämie auszuzahlen",
               body: bodyParts.join(" · "),
             },
             {
@@ -3671,7 +3681,7 @@ export const commissionCreatedSendPdf = onDocumentCreated(
     });
 
     const subject =
-      `Provision übermittelt – ${safeStr(data.recommenderName)}`;
+      `Vermittlungsprämie übermittelt – ${safeStr(data.recommenderName)}`;
 
     const payoutMethod = String(data.payoutMethod ?? "").trim();
     let payoutLine = "";
@@ -3682,13 +3692,14 @@ export const commissionCreatedSendPdf = onDocumentCreated(
     }
 
     const bodyText =
-      "Eine Vermittlungsprovision wurde über das Webformular übermittelt.\n\n" +
+      "Eine Vermittlungsprämie wurde über das Webformular übermittelt.\n\n" +
       `Vermittler: ${safeStr(data.recommenderName)}\n` +
       `Adresse: ${safeStr(data.recommenderStreet)}, ` +
       `${safeStr(data.recommenderZip)} ` +
       `${safeStr(data.recommenderCity)}\n` +
       `Auszahlung: ${payoutLine}\n` +
       `Betrag: ${formatEurAmount(data.amount)}\n` +
+      `Gutachten-Nr.: ${safeStr(data.gutachtenNumber)}\n` +
       `Referenz/Notiz: ${safeStr(data.notes)}\n\n` +
       "PDF ist im Anhang.\n" +
       `Storage-Pfad: ${uploaded.path}` +
@@ -3702,7 +3713,7 @@ export const commissionCreatedSendPdf = onDocumentCreated(
         text: bodyText,
         attachments: [
           {
-            filename: `Provision_${commissionId}.pdf`,
+            filename: `Praemie_${commissionId}.pdf`,
             content: pdf,
             contentType: "application/pdf",
           },

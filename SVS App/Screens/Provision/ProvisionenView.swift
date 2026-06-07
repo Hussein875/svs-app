@@ -3,9 +3,9 @@ import UIKit
 @preconcurrency import FirebaseAuth
 @preconcurrency import FirebaseFirestore
 
-/// Provisionen werden nicht mehr in der App erfasst.
+/// Prämien werden nicht mehr in der App erfasst.
 /// Stattdessen erzeugt die App einen Einmal-Link, den du dem Kunden schicken kannst.
-/// Das Provisionsformular wird online ausgefüllt (inkl. Unterschrift).
+/// Das Vermittlungsprämien-Formular wird online ausgefüllt (inkl. Unterschrift).
 
 struct ProvisionenView: View {
     @EnvironmentObject var appState: AppState
@@ -36,15 +36,19 @@ struct ProvisionenView: View {
     @State private var selectedFilter: CommissionFilter = .open
     @State private var deleteTarget: CommissionRow? = nil
     @State private var amountFieldInvalid: Bool = false
+    @State private var gutachtenNumberText: String = ""
+    @FocusState private var gutachtenNumberFocused: Bool
     
     // MARK: - Link Generation
     
     /// Basis-URL deines Online-Formulars. (Server muss Token validieren / einmalig machen.)
-    private let provisionFormBaseURL = URL(string: "https://sv-souleiman.de/provision")!
+    private var provisionFormBaseURL: URL? {
+        URL(string: "https://sv-souleiman.de/provision")
+    }
     
-    private let createProvisionLinkEndpoint = URL(
-        string: "https://createprovisionlink-df5lzkocnq-uc.a.run.app"
-    )!
+    private var createProvisionLinkEndpoint: URL? {
+        URL(string: "https://createprovisionlink-df5lzkocnq-uc.a.run.app")
+    }
     
     /// Wie lange der Link gültig sein soll (Tage)
     private let defaultTTLDays: Int = 30
@@ -70,7 +74,7 @@ struct ProvisionenView: View {
 
                 SectionCard(title: "Einmal-Link", systemImage: "link") {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Erzeuge einen Einmal-Link für das Online-Provisionsformular. Den Link kannst du dem Vermittler schicken. Das Formular wird online ausgefüllt und dort unterschrieben.")
+                        Text("Erzeuge einen Einmal-Link für das Online-Formular zur Vermittlungsprämie. Den Link kannst du dem Vermittler schicken. Das Formular wird online ausgefüllt und dort unterschrieben.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
 
@@ -131,6 +135,37 @@ struct ProvisionenView: View {
                                 )
                             }
                             Text("Der Betrag wird nicht im Webformular angezeigt.")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Gutachten-Nr. (optional)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            HStack(spacing: 10) {
+                                Image(systemName: "number")
+                                    .foregroundColor(.secondary)
+
+                                TextField("z. B. 42/26", text: $gutachtenNumberText)
+                                    .focused($gutachtenNumberFocused)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled(true)
+                                    .textContentType(.none)
+                                    .submitLabel(.done)
+                                    .onSubmit {
+                                        gutachtenNumberFocused = false
+                                    }
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(.tertiarySystemBackground))
+                            )
+
+                            Text("Nur intern gespeichert – erscheint nicht im Webformular.")
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
                         }
@@ -216,7 +251,7 @@ struct ProvisionenView: View {
                     if isLoadingCommissions {
                         HStack(spacing: 10) {
                             ProgressView()
-                            Text("Lade Provisionen …")
+                            Text("Lade Prämien …")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         }
@@ -371,7 +406,7 @@ struct ProvisionenView: View {
                     selectedCommission = nil
                 }
         }
-        .alert("Provision löschen?", isPresented: deleteAlertBinding) {
+        .alert("Prämie löschen?", isPresented: deleteAlertBinding) {
             Button("Abbrechen", role: .cancel) {
                 deleteTarget = nil
             }
@@ -389,7 +424,7 @@ struct ProvisionenView: View {
                 Text("Dieser Eintrag wird dauerhaft gelöscht.")
             }
         }
-        .navigationTitle("Provision")
+        .navigationTitle("Prämien")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -443,6 +478,7 @@ struct ProvisionenView: View {
 
     private func dismissKeyboard() {
         amountFocused = false
+        gutachtenNumberFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
                                         to: nil, from: nil, for: nil)
     }
@@ -541,6 +577,13 @@ struct ProvisionenView: View {
                 }
                 return
             }
+
+            guard let createProvisionLinkEndpoint else {
+                await MainActor.run {
+                    showError("Prämien-Link-URL ist ungültig.")
+                }
+                return
+            }
             
             let idToken = try await user.getIDToken()
             
@@ -556,10 +599,14 @@ struct ProvisionenView: View {
                 return
             }
 
-            let payload: [String: Any] = [
+            var payload: [String: Any] = [
                 "ttlDays": defaultTTLDays,
                 "amount": amount
             ]
+            let gutachtenNumber = gutachtenNumberText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !gutachtenNumber.isEmpty {
+                payload["gutachtenNumber"] = gutachtenNumber
+            }
             request.httpBody = try JSONSerialization.data(withJSONObject: payload)
             
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -591,7 +638,7 @@ struct ProvisionenView: View {
             let finalURL: URL?
             if let urlString = decoded.url, let u = URL(string: urlString) {
                 finalURL = u
-            } else if let token = decoded.token {
+            } else if let token = decoded.token, let provisionFormBaseURL {
                 var comps = URLComponents(url: provisionFormBaseURL, resolvingAgainstBaseURL: false)
                 let existing = comps?.queryItems ?? []
                 comps?.queryItems = existing + [URLQueryItem(name: "token", value: token)]
@@ -693,7 +740,7 @@ struct ProvisionenView: View {
                 if let err {
                     _Concurrency.Task { @MainActor in
                         self.isLoadingCommissions = false
-                        self.commissionsError = "Provisionen konnten nicht geladen werden: \(err.localizedDescription)"
+                        self.commissionsError = "Prämien konnten nicht geladen werden: \(err.localizedDescription)"
                     }
                     return
                 }
@@ -720,6 +767,7 @@ struct ProvisionenView: View {
 
                     let amount = data["amount"] as? Double
                     let notes = clean(data["notes"] as? String)
+                    let gutachtenNumber = clean(data["gutachtenNumber"] as? String)
                     let status = (data["status"] as? String) ?? "submitted"
                     let ts = data["acceptedAtServer"] as? Timestamp
                     let createdByUid = clean(data["createdByUid"] as? String)
@@ -735,6 +783,7 @@ struct ProvisionenView: View {
                         payoutPaypal: payoutPaypal,
                         amount: amount,
                         notes: notes,
+                        gutachtenNumber: gutachtenNumber,
                         status: status,
                         createdAt: ts?.dateValue(),
                         createdByUid: createdByUid

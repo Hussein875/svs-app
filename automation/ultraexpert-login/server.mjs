@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
 const STATE_PATH = path.join(__dirname, "processed-folders.json");
+const AKTE_FOLDER_NAME_MUST_INCLUDE = parseCsv(process.env.AKTE_FOLDER_NAME_MUST_INCLUDE || "gutachten");
 
 if (!WEBHOOK_SECRET) {
   throw new Error("WEBHOOK_SECRET fehlt. Bitte in .env setzen.");
@@ -65,15 +66,42 @@ async function processFolder(payload) {
   }
 
   const state = await readState();
-  if (state[folderId]) {
+  const existing = state[folderId];
+  if (existing) {
     console.log(`Ordner ${folderId} wurde bereits verarbeitet.`);
     return {
       duplicate: true,
       folderId,
       folderName,
       folderUrl,
-      dossierId: state[folderId].dossierId,
-      dossierUrl: state[folderId].dossierUrl
+      skipped: existing.action === "skipped",
+      skippedReason: existing.skippedReason,
+      dossierId: existing.dossierId,
+      dossierUrl: existing.dossierUrl
+    };
+  }
+
+  const eligibility = classifyFolderForAkte(folderName);
+  if (!eligibility.allowed) {
+    console.log(`Ordner ${folderId} wird uebersprungen: ${eligibility.reason}`);
+
+    state[folderId] = {
+      action: "skipped",
+      folderId,
+      folderName,
+      folderUrl,
+      skippedReason: eligibility.reason,
+      processedAt: new Date().toISOString()
+    };
+    await writeState(state);
+
+    return {
+      duplicate: false,
+      skipped: true,
+      skippedReason: eligibility.reason,
+      folderId,
+      folderName,
+      folderUrl
     };
   }
 
@@ -86,6 +114,7 @@ async function processFolder(payload) {
     const dossier = await createAkte(session.page);
 
     state[folderId] = {
+      action: "created",
       folderId,
       folderName,
       folderUrl,
@@ -147,4 +176,31 @@ async function readJsonBody(req) {
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload));
+}
+
+function classifyFolderForAkte(folderName) {
+  const normalized = folderName.toLowerCase().trim();
+  if (!normalized) {
+    return {
+      allowed: false,
+      reason: "Ordnername fehlt."
+    };
+  }
+
+  const matchesRequiredText = AKTE_FOLDER_NAME_MUST_INCLUDE.some((part) => normalized.includes(part));
+  if (!matchesRequiredText) {
+    return {
+      allowed: false,
+      reason: `Kein Gutachten-Ordner. Erforderlicher Text: ${AKTE_FOLDER_NAME_MUST_INCLUDE.join(", ")}`
+    };
+  }
+
+  return { allowed: true };
+}
+
+function parseCsv(value) {
+  return String(value)
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
 }

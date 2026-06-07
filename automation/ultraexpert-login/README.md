@@ -68,6 +68,7 @@ Ergaenze in deiner `.env` noch:
 ```dotenv
 PORT=3000
 WEBHOOK_SECRET=irgendein-langer-geheimer-wert
+AKTE_FOLDER_NAME_MUST_INCLUDE=gutachten
 ```
 
 Dann startest du den Server lokal:
@@ -113,6 +114,8 @@ Wichtig:
 
 - Lokal funktioniert das nur mit einer oeffentlichen URL nach draussen, zum Beispiel ueber Cloudflare Tunnel.
 - Wenn derselbe Drive-Ordner zweimal gemeldet wird, verhindert `processed-folders.json` doppelte Akten.
+- Standardmaessig wird nur dann eine Akte angelegt, wenn der Ordnername `gutachten` enthaelt. `RB`, `KVA` und andere Ordner werden dadurch automatisch uebersprungen.
+- Falls du spaeter andere Begriffe erlauben willst, kannst du `.env` anpassen, zum Beispiel `AKTE_FOLDER_NAME_MUST_INCLUDE=gutachten,schaden`.
 
 ## Deployment Auf Einen VPS
 

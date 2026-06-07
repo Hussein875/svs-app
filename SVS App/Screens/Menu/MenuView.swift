@@ -20,6 +20,7 @@ struct MenuView: View {
     @State private var isSavingMeetingSchedulePush: Bool = false
     @State private var receiveAdminPushes: Bool = false
     @State private var isSavingReceiveAdminPushes: Bool = false
+    @State private var isSyncingNotificationToggles: Bool = false
 
     private let availableColors = UserColor.allCases
 
@@ -53,13 +54,9 @@ struct MenuView: View {
             syncStateFromCurrentUser()
         }
         .onChange(of: selectedColorName) {
-            handleColorChange()
-        }
-        .onChange(of: meetingSchedulePushEnabled) {
-            handleMeetingSchedulePushChange()
-        }
-        .onChange(of: receiveAdminPushes) {
-            handleReceiveAdminPushesChange()
+            DispatchQueue.main.async {
+                handleColorChange()
+            }
         }
         .alert("Wirklich ausloggen?", isPresented: $showSignOutConfirm) {
             Button("Ausloggen", role: .destructive) {
@@ -141,7 +138,7 @@ struct MenuView: View {
     private var notificationsSection: some View {
         Section {
             if canManageMeetingSchedulePush {
-                Toggle(isOn: $meetingSchedulePushEnabled) {
+                Toggle(isOn: meetingSchedulePushBinding) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Meeting-Termin")
                         Text("Benachrichtigung bei neuem Meeting-Termin")
@@ -153,15 +150,15 @@ struct MenuView: View {
             }
 
             if appState.currentUser?.role == .admin {
-            Toggle(isOn: $receiveAdminPushes) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Provisions Push")
-                    Text("Benachrichtigung bei neuer Provision")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                Toggle(isOn: receiveAdminPushesBinding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Prämien-Push")
+                        Text("Benachrichtigung bei neuer Prämie")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
-            }
-            .disabled(isSavingReceiveAdminPushes)
+                .disabled(isSavingReceiveAdminPushes)
             }
         } header: {
             Text("Benachrichtigungen")
@@ -298,10 +295,87 @@ struct MenuView: View {
     }
 
     private func syncStateFromCurrentUser() {
-        if let user = appState.currentUser {
-            selectedColorName = UserColor.from(user.colorName).rawValue
-            meetingSchedulePushEnabled = user.meetingSchedulePushEnabled
-            receiveAdminPushes = user.receiveAdminPushes
+        guard let user = appState.currentUser else { return }
+
+        isSyncingNotificationToggles = true
+        defer { isSyncingNotificationToggles = false }
+
+        selectedColorName = UserColor.from(user.colorName).rawValue
+        meetingSchedulePushEnabled = user.meetingSchedulePushEnabled
+        receiveAdminPushes = user.receiveAdminPushes
+    }
+
+    private var meetingSchedulePushBinding: Binding<Bool> {
+        Binding(
+            get: { meetingSchedulePushEnabled },
+            set: { newValue in
+                guard !isSyncingNotificationToggles else {
+                    meetingSchedulePushEnabled = newValue
+                    return
+                }
+                guard !isSavingMeetingSchedulePush else { return }
+                guard meetingSchedulePushEnabled != newValue else { return }
+
+                meetingSchedulePushEnabled = newValue
+                persistMeetingSchedulePushEnabled(newValue)
+            }
+        )
+    }
+
+    private var receiveAdminPushesBinding: Binding<Bool> {
+        Binding(
+            get: { receiveAdminPushes },
+            set: { newValue in
+                guard !isSyncingNotificationToggles else {
+                    receiveAdminPushes = newValue
+                    return
+                }
+                guard !isSavingReceiveAdminPushes else { return }
+                guard receiveAdminPushes != newValue else { return }
+
+                receiveAdminPushes = newValue
+                persistReceiveAdminPushesEnabled(newValue)
+            }
+        )
+    }
+
+    private func persistMeetingSchedulePushEnabled(_ enabled: Bool) {
+        guard let user = appState.currentUser else { return }
+        guard enabled != user.meetingSchedulePushEnabled else { return }
+
+        isSavingMeetingSchedulePush = true
+
+        DispatchQueue.main.async {
+            _Concurrency.Task { @MainActor in
+                let ok = await appState.setMyMeetingSchedulePushEnabled(enabled)
+                if !ok {
+                    isSyncingNotificationToggles = true
+                    meetingSchedulePushEnabled =
+                        appState.currentUser?.meetingSchedulePushEnabled ?? true
+                    isSyncingNotificationToggles = false
+                }
+                isSavingMeetingSchedulePush = false
+            }
+        }
+    }
+
+    private func persistReceiveAdminPushesEnabled(_ enabled: Bool) {
+        guard let user = appState.currentUser else { return }
+        guard user.role == .admin else { return }
+        guard enabled != user.receiveAdminPushes else { return }
+
+        isSavingReceiveAdminPushes = true
+
+        DispatchQueue.main.async {
+            _Concurrency.Task { @MainActor in
+                let ok = await appState.setMyReceiveAdminPushesEnabled(enabled)
+                if !ok {
+                    isSyncingNotificationToggles = true
+                    receiveAdminPushes = appState.currentUser?.receiveAdminPushes ?? false
+                    isSyncingNotificationToggles = false
+                }
+                isSavingReceiveAdminPushes = false
+            }
         }
     }
 
@@ -312,6 +386,9 @@ struct MenuView: View {
         var updatedUser = user
         updatedUser.colorName = selectedColorName
         appState.currentUser = updatedUser
+        if let idx = appState.users.firstIndex(where: { $0.id == user.id }) {
+            appState.users[idx] = updatedUser
+        }
 
         isSavingColor = true
 
@@ -323,43 +400,10 @@ struct MenuView: View {
             DispatchQueue.main.async {
                 if let err {
                     appState.uiErrorMessage = "Akzentfarbe konnte nicht gespeichert werden: \(err.localizedDescription)"
-                    appState.currentUser = user
+                    selectedColorName = UserColor.from(user.colorName).rawValue
                 }
                 isSavingColor = false
             }
-        }
-    }
-
-    private func handleReceiveAdminPushesChange() {
-        guard let user = appState.currentUser else { return }
-        guard user.role == .admin else { return }
-        guard !isSavingReceiveAdminPushes else { return }
-        guard receiveAdminPushes != user.receiveAdminPushes else { return }
-
-        isSavingReceiveAdminPushes = true
-
-        _Concurrency.Task { @MainActor in
-            let ok = await appState.setMyReceiveAdminPushesEnabled(receiveAdminPushes)
-            if !ok {
-                receiveAdminPushes = appState.currentUser?.receiveAdminPushes ?? false
-            }
-            isSavingReceiveAdminPushes = false
-        }
-    }
-
-    private func handleMeetingSchedulePushChange() {
-        guard let user = appState.currentUser else { return }
-        guard !isSavingMeetingSchedulePush else { return }
-        guard meetingSchedulePushEnabled != user.meetingSchedulePushEnabled else { return }
-
-        isSavingMeetingSchedulePush = true
-
-        _Concurrency.Task { @MainActor in
-            let ok = await appState.setMyMeetingSchedulePushEnabled(meetingSchedulePushEnabled)
-            if !ok {
-                meetingSchedulePushEnabled = appState.currentUser?.meetingSchedulePushEnabled ?? true
-            }
-            isSavingMeetingSchedulePush = false
         }
     }
 
