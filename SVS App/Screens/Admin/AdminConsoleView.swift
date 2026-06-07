@@ -111,6 +111,18 @@ struct AdminConsoleView: View {
                             }
 
                             NavigationLink {
+                                AdminWeeklyStatsScreen()
+                                    .environmentObject(appState)
+                            } label: {
+                                AdminNavRow(
+                                    title: "Wochenstatistik",
+                                    subtitle: "Gutachten pro Kalenderwoche",
+                                    systemImage: "chart.bar.doc.horizontal",
+                                    accent: appState.currentUser?.color ?? .secondary
+                                )
+                            }
+
+                            NavigationLink {
                                 AdminAutomationsScreen(automationId: "auto_gutachten_ablage")
                                     .environmentObject(appState)
                             } label: {

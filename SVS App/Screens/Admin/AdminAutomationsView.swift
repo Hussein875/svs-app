@@ -36,7 +36,6 @@ struct AdminAutomationsScreen: View {
     // UltraExpert: Add state for stub button and alert
     @State private var ultraExpertOpenCount: Int = 1
     @State private var showUltraExpertStubAlert: Bool = false
-    @State private var showMakeManualRunAlert: Bool = false
     @State private var isResettingScannerSequence: Bool = false
 
     private var accent: Color { appState.currentUser?.color ?? .secondary }
@@ -128,52 +127,10 @@ struct AdminAutomationsScreen: View {
                     }
                     .padding(.top, 2)
 
-                    // Aktionen (UltraExpert & Make – Platzhalter)
+                    // Aktionen
                     VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("Aktionen")
-                                .font(.headline)
-
-                            Spacer()
-
-                            Stepper(value: $ultraExpertOpenCount, in: 1...10) {
-                                Text("\(ultraExpertOpenCount)x")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundColor(.secondary)
-                            }
-                            .labelsHidden()
-                        }
-                        .padding(.horizontal, 18)
-
-                        // Make (Platzhalter)
-                        Button {
-                            showMakeManualRunAlert = true
-                        } label: {
-                            AutomationActionCard(accent: accent) {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "play.circle.fill")
-                                        .font(.system(size: 16, weight: .semibold))
-
-                                    Text("Make: Gutachtenablage starten")
-                                        .font(.subheadline.weight(.semibold))
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                        .minimumScaleFactor(0.9)
-
-                                    Spacer()
-
-                                    Image(systemName: "arrow.right")
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.horizontal, 18)
-
-                        Text("Platzhalter: Der manuelle Start der Make-Automatisierung wird später implementiert.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Text("Aktionen")
+                            .font(.headline)
                             .padding(.horizontal, 18)
 
                         Button {
@@ -261,11 +218,6 @@ struct AdminAutomationsScreen: View {
             Text(ultraExpertOpenCount == 1
                  ? "Platzhalter: Es würde jetzt 1 Akte in UltraExpert eröffnet werden."
                  : "Platzhalter: Es würden jetzt \(ultraExpertOpenCount) Akten in UltraExpert eröffnet werden.")
-        }
-        .alert("Make", isPresented: $showMakeManualRunAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text("Platzhalter: Die Make-Automatisierung „Gutachtenablage“ würde jetzt manuell gestartet werden.")
         }
     }
     
