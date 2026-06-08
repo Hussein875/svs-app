@@ -489,7 +489,10 @@ export const getDocumentSigningLink = onRequest(async (req, res) => {
         }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        console.warn("[getDocumentSigningLink] prefilled base64 read failed", msg);
+        console.warn(
+          "[getDocumentSigningLink] prefilled base64 read failed",
+          msg
+        );
       }
     }
 
