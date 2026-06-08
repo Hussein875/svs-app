@@ -74,7 +74,7 @@ struct CalendarScreen: View {
                         .preference(key: CalendarPagerWidthKey.self, value: geo.size.width)
                 }
             )
-            .onChange(of: monthPage) { newValue in
+            .onChange(of: monthPage) { _, newValue in
                 if newValue == 0 {
                     shiftMonth(by: -1)
                     monthPage = 1
@@ -225,7 +225,6 @@ struct CalendarScreen: View {
 
         // Match grid spacing in CalendarGrid
         let rowSpacing: CGFloat = 8
-        let colSpacing: CGFloat = 0 // GridItem(.flexible()) has implicit spacing handled by LazyVGrid spacing
 
         // Cell size derived from width: 7 columns
         let cell = floor((available - (rowSpacing * 6)) / 7)

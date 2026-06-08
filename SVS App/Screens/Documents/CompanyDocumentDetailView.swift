@@ -12,6 +12,7 @@ struct CompanyDocumentDetailView: View {
     @State private var signedPDFURL: URL?
     @State private var showSignatureFlow = false
     @State private var showDirectDrawing = false
+    @State private var showRemoteSigning = false
     @State private var isSigning = false
     @State private var signErrorMessage: String?
 
@@ -36,6 +37,15 @@ struct CompanyDocumentDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                if document.supportsRemoteSigning {
+                    Button {
+                        showRemoteSigning = true
+                    } label: {
+                        Label("Kundenlink", systemImage: "link")
+                    }
+                    .disabled(isSigning)
+                }
+
                 if document.usesDirectPDFDrawing {
                     Button {
                         showDirectDrawing = true
@@ -56,6 +66,9 @@ struct CompanyDocumentDetailView: View {
                     Label("Teilen", systemImage: "square.and.arrow.up")
                 }
             }
+        }
+        .sheet(isPresented: $showRemoteSigning) {
+            DocumentRemoteSigningSheet(document: document, sourcePDFURL: fileURL)
         }
         .fullScreenCover(isPresented: $showDirectDrawing) {
             CompanyDocumentDirectDrawingView(

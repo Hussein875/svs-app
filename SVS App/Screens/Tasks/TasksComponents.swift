@@ -283,7 +283,7 @@ struct NewTaskView: View {
             dismissKeyboard()
         }
         .onAppear { configureInitialState() }
-        .onChange(of: assignableUsers.count) { _ in
+        .onChange(of: assignableUsers.count) { _, _ in
             guard let current = appState.currentUser else { return }
             if assignedUserId.isEmpty || !assignableUsers.contains(where: { $0.id == assignedUserId }) {
                 assignedUserId = current.id

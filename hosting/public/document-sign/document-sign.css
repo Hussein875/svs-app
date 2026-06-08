@@ -1,0 +1,29 @@
+#svs-document-sign-root{max-width:920px;margin:28px auto;padding:0 16px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+.svs-card{background:#fff;border:1px solid #e7e9f0;border-radius:16px;padding:18px;box-shadow:0 8px 24px rgba(15,23,42,.06)}
+.svs-badge{display:inline-block;padding:8px 10px;border-radius:999px;border:1px solid #e7e9f0;background:#f8fafc;font-size:13px}
+.svs-ok{color:#0f766e;border-color:#b7f0ea;background:#ecfeff}
+.svs-err{color:#b91c1c;border-color:#fecaca;background:#fef2f2}
+.svs-warn{color:#b45309;border-color:#fed7aa;background:#fff7ed}
+.svs-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.svs-btn{border:0;border-radius:12px;padding:12px 14px;font-weight:650;cursor:pointer}
+.svs-primary{background:#111827;color:#fff}
+.svs-sigwrap{border:1px solid #d7dbea;border-radius:12px;overflow:hidden;margin-top:10px}
+#svs-sig{width:100%;height:220px;display:block}
+.svs-sigbar{display:flex;justify-content:space-between;gap:10px;padding:10px;background:#f8fafc;border-top:1px solid #e7e9f0}
+.svs-smallbtn{padding:10px 12px;border-radius:10px;background:#fff;border:1px solid #e7e9f0;font-weight:600}
+.svs-doc-details{border:1px solid #d7dbea;border-radius:14px;background:#f8fafc;padding:0 14px 14px;margin:0}
+.svs-doc-summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;padding:14px 0;font-weight:700}
+.svs-doc-summary::-webkit-details-marker{display:none}
+.svs-doc-summary-main{font-size:16px;color:#111827}
+.svs-doc-summary-sub{font-size:13px;font-weight:600;color:#5b6476}
+.svs-pdfwrap{border:1px solid #d7dbea;border-radius:12px;overflow:hidden;background:#fff}
+.svs-pdfwrap iframe,.svs-pdfwrap embed{width:100%;height:min(68vh,720px);border:0;display:block;background:#fff}
+.svs-pdf-fallback{margin:10px 0 0;font-size:13px}
+.svs-pdf-fallback a{color:#1d4ed8;font-weight:600;text-decoration:none}
+.svs-pdf-fallback a:hover{text-decoration:underline}
+.svs-pdf-missing{margin:0 0 12px}
+.svs-consent{display:flex;gap:10px;align-items:flex-start;margin-top:14px}
+.svs-consent input{margin-top:3px}
+.svs-consent span{color:#5b6476;font-size:13px;line-height:1.45}
+.svs-meta{color:#5b6476;font-size:14px;line-height:1.45}
+body{margin:0;background:#f4f6fb}

@@ -512,6 +512,15 @@ match /meetingArchives/{id} {
     }
 
     // ------------------------------------------------------------------
+    // documentSigningLinks/<token> (Remote-Unterschrift, nur via Functions)
+    // ------------------------------------------------------------------
+    match /documentSigningLinks/{token} {
+      allow read: if isAdmin()
+                  || (signedIn() && resource.data.createdByUid == myUid());
+      allow write: if false;
+    }
+
+    // ------------------------------------------------------------------
     // commissions/<id>
     // ------------------------------------------------------------------
     match /commissions/{id} {

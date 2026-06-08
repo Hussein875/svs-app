@@ -277,7 +277,7 @@ struct ScannerScreen: View {
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .submitLabel(.done)
-                .onChange(of: scanName) { _ in
+                .onChange(of: scanName) { _, _ in
                     refreshScanPDFIfNeeded()
                 }
                 .disabled(reservedScan != nil)
@@ -556,7 +556,7 @@ struct ScannerScreen: View {
                     _Concurrency.Task { await refreshScannerSequencePreview() }
                 }
             }
-            .onChange(of: scenePhase) { newPhase in
+            .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase == .active else { return }
                 DispatchQueue.main.async {
                     _Concurrency.Task { await refreshScannerSequencePreview() }

@@ -16,11 +16,11 @@ struct ContentView: View {
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: appState.toast != nil)
-            .onChange(of: appState.auth.user?.uid) { _ in
+            .onChange(of: appState.auth.user?.uid) { _, _ in
                 // Auth changed → reset timeout state
                 didTimeout = false
             }
-            .onChange(of: appState.isProfileReady) { ready in
+            .onChange(of: appState.isProfileReady) { _, ready in
                 // As soon as profile is ready, reset timeout
                 if ready { didTimeout = false }
             }

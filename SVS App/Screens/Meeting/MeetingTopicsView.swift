@@ -318,7 +318,7 @@ struct MeetingTopicsView: View {
                 meetingDateDraft = existing
             }
         }
-        .onChange(of: appState.nextMeetingAt) { next in
+        .onChange(of: appState.nextMeetingAt) { _, next in
             guard let next else { return }
             if !isEditingMeetingDate {
                 meetingDateDraft = next

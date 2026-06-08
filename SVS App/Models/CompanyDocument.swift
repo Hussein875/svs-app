@@ -114,6 +114,11 @@ struct CompanyDocument: Identifiable, Hashable {
         id == "bd"
     }
 
+    /// Einmal-Link für Kundenunterschrift (Web-Formular).
+    var supportsRemoteSigning: Bool {
+        id == "av-wessels"
+    }
+
     /// Textfelder, die beim Signieren auf das PDF gesetzt werden (Datum immer enthalten).
     var textFields: [CompanyDocumentTextField] {
         var fields: [CompanyDocumentTextField] = []
@@ -189,7 +194,7 @@ struct CompanyDocument: Identifiable, Hashable {
         case "bd":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.74, width: 0.48, height: 0.12)
         case "av-wessels":
-            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.78, width: 0.40, height: 0.10)
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.077, y: 0.762, width: 0.36, height: 0.085)
         case "av-goecmen":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.52, y: 0.84, width: 0.38, height: 0.10)
         case "av-kaya":
@@ -210,7 +215,8 @@ struct CompanyDocument: Identifiable, Hashable {
         case "bd":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.66, width: 0.28, height: 0.045)
         case "av-wessels":
-            return PDFSignaturePlacement(pageIndex: 0, x: 0.58, y: 0.80, width: 0.28, height: 0.045)
+            // Kalibriert: +5 pt rechts, −10 pt oben (A4)
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.588, y: 0.788, width: 0.28, height: 0.045)
         case "av-goecmen":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.88, width: 0.38, height: 0.045)
         case "av-kaya":
@@ -233,7 +239,7 @@ struct CompanyDocument: Identifiable, Hashable {
     private var accidentDatePlacement: PDFSignaturePlacement {
         switch id {
         case "av-wessels":
-            return PDFSignaturePlacement(pageIndex: 0, x: 0.28, y: 0.13, width: 0.55, height: 0.045)
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.232, y: 0.153, width: 0.55, height: 0.045)
         case "av-goecmen":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.22, y: 0.20, width: 0.55, height: 0.04)
         case "av-kaya":

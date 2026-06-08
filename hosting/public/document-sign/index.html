@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Dokument unterschreiben – SV Souleiman</title>
+    <link rel="stylesheet" href="/document-sign/document-sign.css">
+    <script>
+      window.SVS_DOCUMENT_SIGN_API = {
+        getDocumentSigningLink:
+          "https://us-central1-svs-app-864ed.cloudfunctions.net/getDocumentSigningLink",
+        submitDocumentSigningForm:
+          "https://us-central1-svs-app-864ed.cloudfunctions.net/submitDocumentSigningForm",
+      };
+    </script>
+  </head>
+  <body>
+    <div id="svs-document-sign-root"></div>
+    <script src="/document-sign/document-sign.js"></script>
+  </body>
+</html>

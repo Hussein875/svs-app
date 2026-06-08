@@ -64,7 +64,7 @@ struct MainView: View {
                 handlePushRoute(bufferedRoute)
             }
         }
-        .onChange(of: appState.currentUser?.role) { role in
+        .onChange(of: appState.currentUser?.role) { _, role in
             if role != .admin && selectedTab == .admin {
                 selectedTab = .calendar
             }
