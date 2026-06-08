@@ -16,7 +16,6 @@ struct DocumentSigningLinkStatus: Identifiable, Hashable {
     let signedPdfAvailable: Bool
     let accidentDateIso: String?
     let signingDateIso: String?
-    let labelPlacements: [String: PDFSignaturePlacement]
     let createdAt: Date?
     let signedAt: Date?
     let expiresAt: Date?
@@ -52,9 +51,6 @@ struct DocumentSigningLinkStatus: Identifiable, Hashable {
         return "Offen"
     }
 
-    func placement(for fieldID: String, defaultPlacement: PDFSignaturePlacement) -> PDFSignaturePlacement {
-        labelPlacements[fieldID] ?? defaultPlacement
-    }
 }
 
 @MainActor
@@ -142,14 +138,6 @@ final class DocumentSigningStatusViewModel: ObservableObject {
             }
 
             struct ListResponse: Decodable {
-                struct PlacementRow: Decodable {
-                    let pageIndex: Int?
-                    let x: Double?
-                    let y: Double?
-                    let width: Double?
-                    let height: Double?
-                }
-
                 struct Row: Decodable {
                     let token: String?
                     let documentId: String?
@@ -159,7 +147,6 @@ final class DocumentSigningStatusViewModel: ObservableObject {
                     let signedPdfAvailable: Bool?
                     let accidentDateIso: String?
                     let signingDateIso: String?
-                    let labelPlacements: [String: PlacementRow]?
                     let createdAt: String?
                     let signedAt: String?
                     let expiresAt: String?
@@ -185,30 +172,6 @@ final class DocumentSigningStatusViewModel: ObservableObject {
                 return isoParser.date(from: raw)
             }
 
-            func parsePlacements(
-                _ raw: [String: ListResponse.PlacementRow]?
-            ) -> [String: PDFSignaturePlacement] {
-                guard let raw else { return [:] }
-                var result: [String: PDFSignaturePlacement] = [:]
-                for (key, placement) in raw {
-                    guard let pageIndex = placement.pageIndex,
-                          let x = placement.x,
-                          let y = placement.y,
-                          let width = placement.width,
-                          let height = placement.height else {
-                        continue
-                    }
-                    result[key] = PDFSignaturePlacement(
-                        pageIndex: pageIndex,
-                        x: CGFloat(x),
-                        y: CGFloat(y),
-                        width: CGFloat(width),
-                        height: CGFloat(height)
-                    )
-                }
-                return result
-            }
-
             links = (decoded.links ?? []).compactMap { row in
                 guard let token = row.token, !token.isEmpty else { return nil }
                 let status = row.status ?? "unused"
@@ -223,7 +186,6 @@ final class DocumentSigningStatusViewModel: ObservableObject {
                     signedPdfAvailable: row.signedPdfAvailable ?? isSignedRow,
                     accidentDateIso: row.accidentDateIso,
                     signingDateIso: row.signingDateIso,
-                    labelPlacements: parsePlacements(row.labelPlacements),
                     createdAt: parseDate(row.createdAt),
                     signedAt: signedAt,
                     expiresAt: parseDate(row.expiresAt)

@@ -199,10 +199,6 @@ struct ProvisionenView: View {
                         .foregroundColor(.white)
                         .disabled(isGenerating || !canGenerateLink)
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        dismissKeyboard()
-                    }
 
                     if let generatedURL {
                         Divider().opacity(0.18)

@@ -31,17 +31,6 @@ struct PDFTextOverlay: Hashable {
     let placement: PDFSignaturePlacement
 }
 
-struct PDFTextRelocation: Hashable {
-    let text: String
-    let erasePlacement: PDFSignaturePlacement
-    let drawPlacement: PDFSignaturePlacement
-}
-
-struct PDFSignatureRelocation: Hashable {
-    let erasePlacement: PDFSignaturePlacement
-    let drawPlacement: PDFSignaturePlacement
-}
-
 struct PDFInkOverlay {
     let image: UIImage
     let placement: PDFSignaturePlacement
@@ -153,34 +142,6 @@ enum PDFSignatureService {
         )
 
         return page.thumbnail(of: targetSize, for: .mediaBox)
-    }
-
-    static func relocateTextOverlaysOnSignedPDF(
-        signedPDFURL: URL,
-        relocations: [PDFTextRelocation],
-        signatureRelocation: PDFSignatureRelocation? = nil,
-        outputBaseName: String
-    ) throws -> URL {
-        guard let document = PDFDocument(url: signedPDFURL) else {
-            throw SignError.unreadablePDF
-        }
-
-        let data = try relocatedSignedPDFData(
-            document: document,
-            sourceURL: signedPDFURL,
-            textRelocations: relocations,
-            signatureRelocation: signatureRelocation
-        )
-
-        let safeBase = outputBaseName
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "/", with: "-")
-        let fileName = "\(safeBase)-korrigiert-\(UUID().uuidString.prefix(8)).pdf"
-        let outputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(fileName)
-
-        try data.write(to: outputURL, options: .atomic)
-        return outputURL
     }
 
     static func textStampedPDFURL(
@@ -316,132 +277,6 @@ enum PDFSignatureService {
         }
 
         return data
-    }
-
-    static func cropPageRegion(
-        sourceURL: URL,
-        pageIndex: Int,
-        placement: PDFSignaturePlacement
-    ) -> UIImage? {
-        guard let document = PDFDocument(url: sourceURL),
-              let page = document.page(at: pageIndex) else {
-            return nil
-        }
-
-        let pageBounds = page.bounds(for: .mediaBox)
-        guard let pageImage = renderPageImage(
-            sourceURL: sourceURL,
-            pageIndex: pageIndex,
-            targetWidth: 1800
-        ) else {
-            return nil
-        }
-
-        return cropRegion(from: pageImage, placement: placement, pageBounds: pageBounds)
-    }
-
-    private static func relocatedSignedPDFData(
-        document: PDFDocument,
-        sourceURL: URL,
-        textRelocations: [PDFTextRelocation],
-        signatureRelocation: PDFSignatureRelocation?
-    ) throws -> Data {
-        guard document.pageCount > 0 else {
-            throw SignError.unreadablePDF
-        }
-
-        guard let firstPage = document.page(at: 0) else {
-            throw SignError.missingPage(0)
-        }
-
-        let firstBounds = firstPage.bounds(for: .mediaBox)
-        let renderer = UIGraphicsPDFRenderer(bounds: firstBounds)
-
-        let data = renderer.pdfData { context in
-            for pageIndex in 0..<document.pageCount {
-                guard let page = document.page(at: pageIndex) else { continue }
-
-                let pageBounds = page.bounds(for: .mediaBox)
-                var signatureImage: UIImage?
-                if let signatureRelocation,
-                   signatureRelocation.erasePlacement.pageIndex == pageIndex {
-                    signatureImage = cropPageRegion(
-                        sourceURL: sourceURL,
-                        pageIndex: pageIndex,
-                        placement: signatureRelocation.erasePlacement
-                    )
-                }
-
-                context.beginPage(withBounds: pageBounds, pageInfo: [:])
-
-                let cgContext = context.cgContext
-                cgContext.saveGState()
-                cgContext.translateBy(x: 0, y: pageBounds.height)
-                cgContext.scaleBy(x: 1, y: -1)
-                page.draw(with: .mediaBox, to: cgContext)
-                cgContext.restoreGState()
-
-                for relocation in textRelocations where relocation.erasePlacement.pageIndex == pageIndex {
-                    eraseTextArea(at: relocation.erasePlacement, in: pageBounds)
-                }
-
-                if let signatureRelocation,
-                   signatureRelocation.erasePlacement.pageIndex == pageIndex {
-                    eraseTextArea(at: signatureRelocation.erasePlacement, in: pageBounds)
-                }
-
-                for relocation in textRelocations where relocation.drawPlacement.pageIndex == pageIndex {
-                    let textRect = relocation.drawPlacement.rect(in: pageBounds)
-                    drawText(relocation.text, in: textRect)
-                }
-
-                if let signatureRelocation,
-                   signatureRelocation.drawPlacement.pageIndex == pageIndex,
-                   let signatureImage {
-                    let signatureRect = signatureRelocation.drawPlacement.rect(in: pageBounds)
-                    drawSignature(signatureImage, in: signatureRect)
-                }
-            }
-        }
-
-        guard !data.isEmpty else {
-            throw SignError.renderFailed
-        }
-
-        return data
-    }
-
-    private static func cropRegion(
-        from image: UIImage,
-        placement: PDFSignaturePlacement,
-        pageBounds: CGRect
-    ) -> UIImage? {
-        let rect = placement.rect(in: pageBounds)
-        guard rect.width > 0, rect.height > 0, image.size.width > 0, image.size.height > 0 else {
-            return nil
-        }
-
-        let scaleX = image.size.width / pageBounds.width
-        let scaleY = image.size.height / pageBounds.height
-        let cropRect = CGRect(
-            x: rect.minX * scaleX,
-            y: rect.minY * scaleY,
-            width: rect.width * scaleX,
-            height: rect.height * scaleY
-        ).integral
-
-        guard let cgImage = image.cgImage?.cropping(to: cropRect) else {
-            return nil
-        }
-
-        return UIImage(cgImage: cgImage)
-    }
-
-    private static func eraseTextArea(at placement: PDFSignaturePlacement, in pageBounds: CGRect) {
-        var rect = placement.rect(in: pageBounds)
-        rect = rect.insetBy(dx: -6, dy: -4)
-        UIColor.white.setFill()
-        UIRectFill(rect)
     }
 
     private static func textStampedPDFData(

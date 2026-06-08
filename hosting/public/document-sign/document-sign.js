@@ -16,13 +16,27 @@
       <form id="svs-form" style="display:none;">
         <p class="svs-meta" id="svs-accident-meta" style="margin:0 0 14px;"></p>
 
-        <details class="svs-doc-details" id="svs-doc-details" open>
+        <div style="margin-top:4px;">
+          <div style="font-weight:700;margin-bottom:6px;">Digitale Unterschrift *</div>
+          <div class="svs-sigwrap">
+            <canvas id="svs-sig" width="1200" height="440"></canvas>
+            <div class="svs-sigbar">
+              <button type="button" class="svs-smallbtn" id="svs-clearSig">Unterschrift löschen</button>
+              <span style="color:#5b6476;font-size:13px;" id="svs-sigHint">Bitte unterschreiben.</span>
+            </div>
+          </div>
+        </div>
+
+        <details class="svs-doc-details" id="svs-doc-details">
           <summary class="svs-doc-summary">
             <span class="svs-doc-summary-main">Vollmacht anzeigen</span>
-            <span class="svs-doc-summary-sub">Bitte vor der Unterschrift lesen</span>
+            <span class="svs-doc-summary-sub">Zum Lesen aufklappen</span>
           </summary>
           <div class="svs-pdfwrap">
-            <iframe id="svs-pdf" title="Dokumentvorschau"></iframe>
+            <div id="svs-pdf-loading" class="svs-pdf-loading" style="display:none;">
+              PDF wird geladen …
+            </div>
+            <div id="svs-pdf-pages"></div>
           </div>
           <p class="svs-pdf-fallback">
             <a id="svs-pdf-open" href="#" target="_blank" rel="noopener noreferrer">
@@ -34,17 +48,6 @@
         <div id="svs-pdf-missing" class="svs-badge svs-warn svs-pdf-missing" style="display:none;">
           Dokumentvorschau konnte nicht geladen werden. Bitte neuen Link anfordern
           oder die Vollmacht beim Team erhalten, bevor du unterschreibst.
-        </div>
-
-        <div style="margin-top:18px;">
-          <div style="font-weight:700;margin-bottom:6px;">Digitale Unterschrift *</div>
-          <div class="svs-sigwrap">
-            <canvas id="svs-sig" width="1200" height="440"></canvas>
-            <div class="svs-sigbar">
-              <button type="button" class="svs-smallbtn" id="svs-clearSig">Unterschrift löschen</button>
-              <span style="color:#5b6476;font-size:13px;" id="svs-sigHint">Bitte unterschreiben.</span>
-            </div>
-          </div>
         </div>
 
         <label class="svs-consent">
@@ -78,10 +81,16 @@
   const accidentMeta = document.getElementById("svs-accident-meta");
   const docDetails = document.getElementById("svs-doc-details");
   const pdfMissing = document.getElementById("svs-pdf-missing");
-  const pdfFrame = document.getElementById("svs-pdf");
+  const pdfPages = document.getElementById("svs-pdf-pages");
+  const pdfLoading = document.getElementById("svs-pdf-loading");
   const pdfOpenLink = document.getElementById("svs-pdf-open");
 
+  const PDFJS_VERSION = "3.11.174";
   let pdfObjectUrl = null;
+  let pdfBytesForRender = null;
+  let pdfRenderToken = 0;
+  let pdfJsLoadPromise = null;
+  let resizeTimer = null;
 
   function setBadge(kind, text) {
     badge.className = `svs-badge ${kind}`;
@@ -102,40 +111,153 @@
     }
   }
 
-  function setPdfPreview(pdfUrl, prefilledPdfBase64) {
+  function base64ToBytes(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  function loadPdfJs() {
+    if (window.pdfjsLib) {
+      return Promise.resolve(window.pdfjsLib);
+    }
+    if (!pdfJsLoadPromise) {
+      pdfJsLoadPromise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src =
+          `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.min.js`;
+        script.onload = () => {
+          const lib = window.pdfjsLib;
+          if (!lib) {
+            reject(new Error("pdf.js missing"));
+            return;
+          }
+          lib.GlobalWorkerOptions.workerSrc =
+            `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`;
+          resolve(lib);
+        };
+        script.onerror = () => reject(new Error("pdf.js load failed"));
+        document.head.appendChild(script);
+      });
+    }
+    return pdfJsLoadPromise;
+  }
+
+  function pdfContainerWidth() {
+    const width = pdfPages.clientWidth;
+    return width > 0 ? width : Math.min(880, window.innerWidth - 72);
+  }
+
+  async function renderPdfPages(bytes) {
+    const renderToken = pdfRenderToken;
+    pdfLoading.style.display = "block";
+    pdfPages.innerHTML = "";
+
+    try {
+      const pdfjs = await loadPdfJs();
+      if (renderToken !== pdfRenderToken) return;
+
+      const pdf = await pdfjs.getDocument({ data: bytes.slice(0) }).promise;
+      if (renderToken !== pdfRenderToken) return;
+
+      pdfLoading.style.display = "none";
+      const width = pdfContainerWidth();
+
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+        const page = await pdf.getPage(pageNum);
+        if (renderToken !== pdfRenderToken) return;
+
+        const baseViewport = page.getViewport({ scale: 1 });
+        const scale = width / baseViewport.width;
+        const viewport = page.getViewport({ scale });
+
+        const pageWrap = document.createElement("div");
+        pageWrap.className = "svs-pdf-page";
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        pageWrap.appendChild(canvas);
+        pdfPages.appendChild(pageWrap);
+
+        await page.render({
+          canvasContext: canvas.getContext("2d"),
+          viewport,
+        }).promise;
+      }
+    } catch (e) {
+      if (renderToken !== pdfRenderToken) return;
+      console.warn("PDF render failed", e);
+      pdfLoading.style.display = "none";
+      pdfPages.innerHTML = "";
+      throw e;
+    }
+  }
+
+  function schedulePdfRerender() {
+    if (!pdfBytesForRender || !docDetails.open) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      renderPdfPages(pdfBytesForRender).catch(() => {});
+    }, 150);
+  }
+
+  async function setPdfPreview(pdfUrl, prefilledPdfBase64) {
     revokePdfObjectUrl();
-    pdfFrame.removeAttribute("src");
+    pdfBytesForRender = null;
+    pdfRenderToken += 1;
+    pdfPages.innerHTML = "";
     pdfOpenLink.removeAttribute("href");
     pdfMissing.style.display = "none";
     docDetails.style.display = "block";
 
-    if (pdfUrl) {
-      pdfFrame.src = pdfUrl;
-      pdfOpenLink.href = pdfUrl;
-      return true;
-    }
+    let bytes = null;
 
     if (prefilledPdfBase64) {
       try {
-        const binary = atob(prefilledPdfBase64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i += 1) {
-          bytes[i] = binary.charCodeAt(i);
-        }
-        const blob = new Blob([bytes], { type: "application/pdf" });
-        pdfObjectUrl = URL.createObjectURL(blob);
-        pdfFrame.src = pdfObjectUrl;
-        pdfOpenLink.href = pdfObjectUrl;
-        return true;
+        bytes = base64ToBytes(prefilledPdfBase64);
       } catch (e) {
         console.warn("PDF base64 decode failed", e);
       }
+    } else if (pdfUrl) {
+      try {
+        const response = await fetch(pdfUrl);
+        if (response.ok) {
+          bytes = new Uint8Array(await response.arrayBuffer());
+        }
+      } catch (e) {
+        console.warn("PDF fetch failed", e);
+      }
     }
 
-    docDetails.style.display = "none";
-    pdfMissing.style.display = "inline-block";
-    return false;
+    if (!bytes || !bytes.length) {
+      docDetails.style.display = "none";
+      pdfMissing.style.display = "inline-block";
+      return false;
+    }
+
+    try {
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      pdfObjectUrl = URL.createObjectURL(blob);
+      pdfOpenLink.href = pdfObjectUrl;
+      pdfBytesForRender = bytes;
+      await renderPdfPages(bytes);
+      return true;
+    } catch (e) {
+      docDetails.style.display = "none";
+      pdfMissing.style.display = "inline-block";
+      return false;
+    }
   }
+
+  docDetails.addEventListener("toggle", () => {
+    if (docDetails.open) {
+      schedulePdfRerender();
+    }
+  });
+  window.addEventListener("resize", schedulePdfRerender);
 
   const canvas = document.getElementById("svs-sig");
   const ctx = canvas.getContext("2d");
@@ -231,10 +353,10 @@
           accidentMeta.textContent = `Unfalldatum: ${formatGermanDate(j.accidentDateIso)}`;
         } else {
           accidentMeta.textContent =
-            "Lies die Vollmacht unten, bevor du unterschreibst.";
+            "Bitte unterschreiben. Die Vollmacht kannst du darunter aufklappen und lesen.";
         }
 
-        setPdfPreview(j.pdfUrl, j.prefilledPdfBase64);
+        await setPdfPreview(j.pdfUrl, j.prefilledPdfBase64);
         form.style.display = "block";
         return;
       }

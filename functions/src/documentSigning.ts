@@ -480,7 +480,7 @@ export const getDocumentSigningLink = onRequest(async (req, res) => {
       null;
 
     let prefilledPdfBase64: string | null = null;
-    if (prefilledStoragePath && !pdfUrl) {
+    if (prefilledStoragePath) {
       try {
         const bucket = admin.storage().bucket();
         const [pdfBytes] = await bucket.file(prefilledStoragePath).download();
@@ -489,7 +489,7 @@ export const getDocumentSigningLink = onRequest(async (req, res) => {
         }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
-        console.warn("[getDocumentSigningLink] prefilled base64 fallback", msg);
+        console.warn("[getDocumentSigningLink] prefilled base64 read failed", msg);
       }
     }
 

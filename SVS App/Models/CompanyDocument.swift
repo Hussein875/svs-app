@@ -239,7 +239,7 @@ struct CompanyDocument: Identifiable, Hashable {
     private var accidentDatePlacement: PDFSignaturePlacement {
         switch id {
         case "av-wessels":
-            return PDFSignaturePlacement(pageIndex: 0, x: 0.232, y: 0.153, width: 0.55, height: 0.045)
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.198, y: 0.159, width: 0.55, height: 0.045)
         case "av-goecmen":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.22, y: 0.20, width: 0.55, height: 0.04)
         case "av-kaya":

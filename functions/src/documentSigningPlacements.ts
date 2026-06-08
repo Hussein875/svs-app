@@ -34,7 +34,7 @@ Record<string, DocumentSigningTemplate> = {
       pageIndex: 0, x: 0.588, y: 0.788, width: 0.28, height: 0.045,
     },
     accidentDate: {
-      pageIndex: 0, x: 0.232, y: 0.153, width: 0.55, height: 0.045,
+      pageIndex: 0, x: 0.198, y: 0.159, width: 0.55, height: 0.045,
     },
   },
 };

@@ -59,10 +59,6 @@ enum DocumentSigningLinkService {
         URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/deleteDocumentSigningLink")
     }
 
-    private static var updateSignedEndpoint: URL? {
-        URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/updateDocumentSigningSignedPdf")
-    }
-
     static func publicSigningURL(forToken token: String) -> URL? {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -242,67 +238,6 @@ enum DocumentSigningLinkService {
         }
 
         clearCachedSignedPDF(linkToken: trimmed)
-    }
-
-    static func uploadAdjustedSignedPDF(
-        linkToken: String,
-        pdfURL: URL,
-        labelPlacements: [String: PDFSignaturePlacement]
-    ) async throws {
-        guard let user = Auth.auth().currentUser else {
-            throw DocumentSigningLinkError.notSignedIn
-        }
-
-        guard let updateSignedEndpoint else {
-            throw DocumentSigningLinkError.invalidEndpoint
-        }
-
-        let trimmed = linkToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw DocumentSigningLinkError.invalidResponse
-        }
-
-        let pdfData = try Data(contentsOf: pdfURL)
-        guard !pdfData.isEmpty else {
-            throw DocumentSigningLinkError.serverError("PDF-Datei ist leer.")
-        }
-
-        var placementsPayload: [String: [String: Any]] = [:]
-        for (key, placement) in labelPlacements {
-            placementsPayload[key] = [
-                "pageIndex": placement.pageIndex,
-                "x": placement.x,
-                "y": placement.y,
-                "width": placement.width,
-                "height": placement.height,
-            ]
-        }
-
-        let idToken = try await user.getIDToken()
-        var request = URLRequest(url: updateSignedEndpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "token": trimmed,
-            "signedPdfBase64": pdfData.base64EncodedString(),
-            "labelPlacements": placementsPayload,
-        ])
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw DocumentSigningLinkError.invalidResponse
-        }
-
-        guard (200...299).contains(http.statusCode) else {
-            let serverText = String(data: data, encoding: .utf8) ?? ""
-            throw DocumentSigningLinkError.serverError(
-                "PDF konnte nicht gespeichert werden (\(http.statusCode)). \(serverText)"
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-            )
-        }
-
-        try replaceCachedSignedPDF(linkToken: trimmed, sourceURL: pdfURL)
     }
 
     /// Lädt das signierte PDF vom Server und speichert es lokal im Cache.
