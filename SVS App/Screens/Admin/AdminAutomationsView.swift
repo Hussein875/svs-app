@@ -33,9 +33,6 @@ struct AdminAutomationsScreen: View {
     @State private var listener: ListenerRegistration?
     @State private var eventsListener: ListenerRegistration?
     @State private var showRuns: Bool = false
-    // UltraExpert: Add state for stub button and alert
-    @State private var ultraExpertOpenCount: Int = 1
-    @State private var showUltraExpertStubAlert: Bool = false
     @State private var isResettingScannerSequence: Bool = false
 
     private var accent: Color { appState.currentUser?.color ?? .secondary }
@@ -211,13 +208,6 @@ struct AdminAutomationsScreen: View {
         }
         .refreshable {
             await refreshNow()
-        }
-        .alert("UltraExpert", isPresented: $showUltraExpertStubAlert) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(ultraExpertOpenCount == 1
-                 ? "Platzhalter: Es würde jetzt 1 Akte in UltraExpert eröffnet werden."
-                 : "Platzhalter: Es würden jetzt \(ultraExpertOpenCount) Akten in UltraExpert eröffnet werden.")
         }
     }
     

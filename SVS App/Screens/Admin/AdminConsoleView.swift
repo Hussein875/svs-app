@@ -22,6 +22,7 @@ struct AdminPushDestination: Identifiable, Hashable {
 
 struct AdminConsoleView: View {
     @EnvironmentObject var appState: AppState
+    @StateObject private var weeklyStats = WeeklyStatsViewModel()
     @Binding private var pushDestination: AdminPushDestination?
 
     init(pushDestination: Binding<AdminPushDestination?> = .constant(nil)) {
@@ -42,7 +43,6 @@ struct AdminConsoleView: View {
                     .padding(.horizontal, 18)
                     .padding(.top, 8)
 
-                    // KPI Cards (2)
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                         AdminStatCard(
                             title: "Offene Anträge",
@@ -57,6 +57,19 @@ struct AdminConsoleView: View {
                             systemImage: "eurosign.circle",
                             accent: appState.currentUser?.color ?? .secondary
                         )
+
+                        NavigationLink {
+                            AdminWeeklyStatsScreen()
+                                .environmentObject(appState)
+                        } label: {
+                            AdminStatCard(
+                                title: weeklyStatsKpiTitle,
+                                value: weeklyStatsKpiValue,
+                                systemImage: "chart.bar.doc.horizontal",
+                                accent: appState.currentUser?.color ?? .secondary
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
                     .padding(.horizontal, 18)
 
@@ -153,7 +166,30 @@ struct AdminConsoleView: View {
                 }
             }
             .background(Color(.systemGroupedBackground))
+            .task {
+                await weeklyStats.refresh(force: true)
+            }
+            .refreshable {
+                await weeklyStats.refresh(force: true)
+            }
         }
+    }
+
+    private var weeklyStatsKpiTitle: String {
+        if let latest = weeklyStats.latestWeek {
+            return "KW \(latest.calendarWeek) Gutachten"
+        }
+        return "KW Gutachten"
+    }
+
+    private var weeklyStatsKpiValue: String {
+        if weeklyStats.isLoading, weeklyStats.latestWeek == nil {
+            return "…"
+        }
+        if let latest = weeklyStats.latestWeek {
+            return "\(latest.count)"
+        }
+        return "–"
     }
     
     private struct AdminStatCard: View {

@@ -8,6 +8,26 @@ import SwiftUI
 
 enum StargutachterLink {
     static let url = URL(string: "https://stargutachter.de/dsjhl238jd230")!
+
+    static var customerShareMessage: String {
+        """
+        Hallo,
+
+        Wir melden uns bezüglich Ihres Schadenfalls und der Erstellung eines Schadengutachtens.
+
+        Für die Schadenaufnahme bitten wir Sie, den folgenden Link zu öffnen:
+
+        \(url.absoluteString)/
+
+        Dort finden Sie ein einfaches Formular, über das Sie uns die Bilder Ihres Fahrzeugs sowie die erforderlichen Informationen bequem übermitteln können.
+
+        Sobald uns die Unterlagen vorliegen, werden wir die Schadenaufnahme prüfen und das Gutachten für Sie erstellen.
+
+        Bei Fragen stehen wir Ihnen selbstverständlich jederzeit gerne zur Verfügung.
+
+        Mit freundlichen Grüßen
+        """
+    }
 }
 
 struct StargutachterView: View {
@@ -71,15 +91,15 @@ struct StargutachterView: View {
 
                 HStack(spacing: 12) {
                     Button {
-                        UIPasteboard.general.string = StargutachterLink.url.absoluteString
-                        appState.showToast(.success, "Link kopiert")
+                        UIPasteboard.general.string = StargutachterLink.customerShareMessage
+                        appState.showToast(.success, "Nachricht kopiert")
                     } label: {
                         Label("Kopieren", systemImage: "doc.on.doc")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
 
-                    ShareLink(item: StargutachterLink.url) {
+                    ShareLink(item: StargutachterLink.customerShareMessage) {
                         Label("Teilen", systemImage: "square.and.arrow.up")
                             .frame(maxWidth: .infinity)
                     }
