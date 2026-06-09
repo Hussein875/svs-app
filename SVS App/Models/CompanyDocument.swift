@@ -159,31 +159,12 @@ struct CompanyDocument: Identifiable, Hashable {
         return fields
     }
 
-    /// Optionale Freihand-Zeichnung (AE) – erscheint beim Unterschreiben, nicht im Angaben-Schritt.
     var inkFields: [CompanyDocumentInkField] {
-        switch id {
-        case "ae":
-            return [
-                CompanyDocumentInkField(
-                    id: "freehand-ink",
-                    label: "Zeichnen",
-                    defaultPlacement: PDFSignaturePlacement(
-                        pageIndex: 0,
-                        x: 0.38,
-                        y: 0.07,
-                        width: 0.58,
-                        height: 0.40
-                    )
-                ),
-            ]
-        default:
-            return []
-        }
+        []
     }
 
-    /// Freihand-Felder direkt neben der Unterschrift (statt im Angaben-Schritt).
     var inkFieldsOnDrawStep: Bool {
-        id == "ae"
+        false
     }
 
     /// Unterschriftsfeld auf Seite 1 (UIKit-Koordinaten, Anteile 0…1).
