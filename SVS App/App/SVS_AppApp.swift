@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
         UIApplication.shared.applicationIconBadgeNumber = 0
         requestPushAuthorization()
+        WatchScannerNumberSync.shared.activate()
 
         return true
     }

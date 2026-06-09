@@ -43,24 +43,40 @@ struct GutachtenNumberProvider: TimelineProvider {
 }
 
 struct GutachtenNumberWidget: Widget {
-    let kind = "GutachtenNumberWidget"
+    let kind = ScannerWidgetSnapshot.widgetKind
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: GutachtenNumberProvider()) { entry in
             GutachtenNumberWidgetView(snapshot: entry.snapshot)
                 .widgetURL(URL(string: "svsapp://dashboard"))
-                .containerBackground(for: .widget) {
-                    Color(.systemBackground)
-                }
+                .widgetBackground()
         }
         .configurationDisplayName("Gutachten-Nr.")
         .description("Zeigt die aktuelle Gutachten-Nummer aus SVS Office.")
-        .supportedFamilies([
-            .systemSmall,
-            .systemMedium,
-            .accessoryRectangular,
-            .accessoryInline,
-        ])
+        .supportedFamilies(supportedFamilies)
+    }
+
+    private var supportedFamilies: [WidgetFamily] {
+        #if os(watchOS)
+        return [.accessoryCircular, .accessoryRectangular, .accessoryCorner, .accessoryInline]
+        #else
+        return [.systemSmall, .systemMedium, .accessoryRectangular, .accessoryInline]
+        #endif
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func widgetBackground() -> some View {
+        #if os(watchOS)
+        containerBackground(for: .widget) {
+            AccessoryWidgetBackground()
+        }
+        #else
+        containerBackground(for: .widget) {
+            Color(.systemBackground)
+        }
+        #endif
     }
 }
 
@@ -71,6 +87,23 @@ struct GutachtenNumberWidgetView: View {
 
     var body: some View {
         switch family {
+        case .accessoryCircular:
+            ZStack {
+                AccessoryWidgetBackground()
+                Text(snapshot.numberText)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+            }
+
+        case .accessoryCorner:
+            Text(snapshot.numberText)
+                .font(.system(.body, design: .rounded).weight(.bold))
+                .widgetCurvesContent()
+                .widgetLabel {
+                    Text("Gutachten")
+                }
+
         case .accessoryInline:
             Text(snapshot.numberText)
                 .fontWeight(.semibold)
@@ -144,6 +177,7 @@ struct GutachtenNumberWidgetView: View {
     }
 }
 
+#if os(iOS)
 #Preview(as: .systemSmall) {
     GutachtenNumberWidget()
 } timeline: {
@@ -156,3 +190,4 @@ struct GutachtenNumberWidgetView: View {
         )
     )
 }
+#endif

@@ -35,6 +35,20 @@
                ReferencedContainer = "container:SVS App.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "16WKTGT2EE86591006652EC"
+               BuildableName = "SVS Watch App.app"
+               BlueprintName = "SVS Watch App"
+               ReferencedContainer = "container:SVS App.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

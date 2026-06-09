@@ -1,12 +1,14 @@
 //
 //  ScannerWidgetSnapshot.swift
-//  Shared between app and GutachtenNumberWidget extension.
+//  Shared between app, widgets, and watch.
 //
 
 import Foundation
 
 enum ScannerWidgetSnapshot {
     static let appGroupID = "group.de.svs.SVS-App"
+    static let widgetKind = "GutachtenNumberWidget"
+    static let watchWidgetKind = "GutachtenNumberWidget"
 
     private enum Key {
         static let numberText = "scanner.widget.numberText"
@@ -35,6 +37,13 @@ enum ScannerWidgetSnapshot {
             statusText: status?.isEmpty == false ? status! : "Öffne SVS Office",
             updatedAt: updatedAt
         )
+    }
+
+    static func save(numberText: String, statusText: String, updatedAt: Date = Date()) {
+        guard let defaults = UserDefaults(suiteName: appGroupID) else { return }
+        defaults.set(numberText, forKey: Key.numberText)
+        defaults.set(statusText, forKey: Key.statusText)
+        defaults.set(updatedAt.timeIntervalSince1970, forKey: Key.updatedAt)
     }
 
     private static func placeholder() -> Data {

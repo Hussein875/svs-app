@@ -51,6 +51,7 @@ enum ScannerWidgetStore {
         defaults.set(isReserved, forKey: Key.isReserved)
         defaults.set(Date().timeIntervalSince1970, forKey: Key.updatedAt)
         WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
+        WatchScannerNumberSync.shared.send(numberText: numberText, statusText: statusText)
     }
 
     static func loadSnapshot() -> Snapshot {
@@ -77,6 +78,8 @@ enum ScannerWidgetStore {
         defaults.removeObject(forKey: Key.isReserved)
         defaults.removeObject(forKey: Key.updatedAt)
         WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
+        let placeholder = placeholderNumberText()
+        WatchScannerNumberSync.shared.send(numberText: placeholder, statusText: "Öffne SVS Office")
     }
 
     private static func placeholderSnapshot() -> Snapshot {
