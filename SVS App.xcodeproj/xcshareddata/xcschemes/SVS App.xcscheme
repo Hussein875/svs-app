@@ -21,6 +21,20 @@
                ReferencedContainer = "container:SVS App.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "16A1EXT2EE86591006652EC"
+               BuildableName = "GutachtenNumberWidgetExtension.appex"
+               BlueprintName = "GutachtenNumberWidgetExtension"
+               ReferencedContainer = "container:SVS App.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

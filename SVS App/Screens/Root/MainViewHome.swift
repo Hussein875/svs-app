@@ -37,26 +37,6 @@ struct WorkHomeView: View {
         return DateInterval(start: start, end: end)
     }
 
-    // Quick numbers
-    private var myOpenTasksCount: Int {
-        guard let me = appState.currentUser else { return 0 }
-        return appState.tasks.filter { $0.assignedUserId == me.id && $0.status == .open }.count
-    }
-
-    private var myActiveRequestsCount: Int {
-        guard let me = appState.currentUser else { return 0 }
-        let today = Calendar.current.startOfDay(for: Date())
-        return appState.leaveRequests
-            .filter { $0.user.id == me.id }
-            .filter { $0.endDate >= today }
-            .filter { $0.type != .onCallSaturday }
-            .count
-    }
-
-    private var openMeetingTopicsCount: Int {
-        appState.meetingTopics.filter { $0.status == .open }.count
-    }
-
     private var nextMeetingShortText: String {
         guard let next = appState.nextMeetingAt else { return "Nicht gesetzt" }
         let f = DateFormatter()
@@ -159,7 +139,7 @@ struct WorkHomeView: View {
                                 StatTextPill(
                                     title: "Nächste Bereitschaft",
                                     valueText: nextMyOnCallSaturdayText,
-                                    systemImage: "calendar.badge.clock"
+                                    systemImage: "calendar"
                                 )
                                 StatTextPill(
                                     title: "Nächstes Meeting",
@@ -192,6 +172,8 @@ struct WorkHomeView: View {
                     MyRequestsScreen()
                 case .myOnCallSaturdays:
                     MyOnCallSaturdaysScreen()
+                case .dashboard:
+                    DashboardView()
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -225,8 +207,7 @@ struct WorkHomeView: View {
                         subtitle: isEmployeeRole
                             ? "Urlaub und Krankheit verwalten"
                             : "Urlaub, Krankheit",
-                        systemImage: "doc.text",
-                        trailingValue: myActiveRequestsCount
+                        systemImage: "doc.text"
                     )
                 }
                 .buttonStyle(.plain)
@@ -237,8 +218,7 @@ struct WorkHomeView: View {
                     WorkCard(
                         title: "Dokumente",
                         subtitle: "Unterlagen und Vollmachten",
-                        systemImage: "folder.fill",
-                        trailingValue: 0
+                        systemImage: "folder.fill"
                     )
                 }
                 .buttonStyle(.plain)
@@ -250,8 +230,7 @@ struct WorkHomeView: View {
                         WorkCard(
                             title: "Prämie",
                             subtitle: "Vermittlungsprämie und Links",
-                            systemImage: "eurosign.circle",
-                            trailingValue: 0
+                            systemImage: "eurosign.circle"
                         )
                     }
                     .buttonStyle(.plain)
@@ -272,8 +251,7 @@ struct WorkHomeView: View {
                     } label: {
                         CompactWorkCard(
                             title: "Aufgaben",
-                            systemImage: "checklist",
-                            badgeText: myOpenTasksCount > 0 ? "\(myOpenTasksCount)" : nil
+                            systemImage: "checklist"
                         )
                     }
                     .buttonStyle(.plain)
@@ -284,8 +262,7 @@ struct WorkHomeView: View {
                         } label: {
                             CompactWorkCard(
                                 title: "Stargutachter",
-                                systemImage: "star.fill",
-                                badgeText: nil
+                                systemImage: "star.fill"
                             )
                         }
                         .buttonStyle(.plain)
@@ -295,8 +272,7 @@ struct WorkHomeView: View {
                         } label: {
                             CompactWorkCard(
                                 title: "Meeting",
-                                systemImage: "person.3.fill",
-                                badgeText: openMeetingTopicsCount > 0 ? "\(openMeetingTopicsCount)" : nil
+                                systemImage: "person.3.fill"
                             )
                         }
                         .buttonStyle(.plain)
@@ -310,8 +286,7 @@ struct WorkHomeView: View {
                         } label: {
                             CompactWorkCard(
                                 title: "Stargutachter",
-                                systemImage: "star.fill",
-                                badgeText: nil
+                                systemImage: "star.fill"
                             )
                         }
                         .buttonStyle(.plain)
@@ -321,8 +296,7 @@ struct WorkHomeView: View {
                         } label: {
                             CompactWorkCard(
                                 title: "Bereitschaft",
-                                systemImage: "calendar.badge.clock",
-                                badgeText: nil
+                                systemImage: "calendar"
                             )
                         }
                         .buttonStyle(.plain)
@@ -333,8 +307,7 @@ struct WorkHomeView: View {
                     } label: {
                         CompactWorkCard(
                             title: "Dashboard",
-                            systemImage: "chart.bar.xaxis",
-                            badgeText: nil
+                            systemImage: "chart.bar.xaxis"
                         )
                     }
                     .buttonStyle(.plain)

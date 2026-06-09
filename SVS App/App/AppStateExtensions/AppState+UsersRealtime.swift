@@ -230,6 +230,7 @@ extension AppState {
         startMeetingTopicsListenerIfNeeded()
         startMeetingMetaListenerIfNeeded()
         startMeetingArchivesListenerIfNeeded()
+        startScannerWidgetSyncIfNeeded()
     }
     
     private func startUsersListenersIfNeeded() {

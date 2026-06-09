@@ -63,12 +63,23 @@ struct MainView: View {
             if let bufferedRoute = PushNotificationRouter.consumeBufferedRoute() {
                 handlePushRoute(bufferedRoute)
             }
+            consumePendingHomePushDestination()
+        }
+        .onChange(of: appState.pendingHomePushDestination) { _, _ in
+            consumePendingHomePushDestination()
         }
         .onChange(of: appState.currentUser?.role) { _, role in
             if role != .admin && selectedTab == .admin {
                 selectedTab = .calendar
             }
         }
+    }
+
+    private func consumePendingHomePushDestination() {
+        guard let destination = appState.pendingHomePushDestination else { return }
+        appState.pendingHomePushDestination = nil
+        selectedTab = .home
+        homePushDestination = destination
     }
 
     private func handlePushRoute(_ route: PushRoute) {
@@ -175,6 +186,7 @@ struct HomePushDestination: Identifiable, Hashable {
         case tasksCompleted
         case myRequests
         case myOnCallSaturdays
+        case dashboard
     }
 
     let id = UUID()

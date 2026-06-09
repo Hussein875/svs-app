@@ -841,6 +841,7 @@ struct ScannerScreen: View {
         scanName = ""
         reservedScan = nil
         isPresentingShare = false
+        syncScannerWidgetDisplay()
 
         _Concurrency.Task { @MainActor in
             await refreshScannerSequencePreview()
@@ -898,6 +899,7 @@ struct ScannerScreen: View {
                     nextNumber: nextNumber,
                     year2: year2
                 )
+                self.syncScannerWidgetDisplay()
             }
     }
 
@@ -946,11 +948,30 @@ struct ScannerScreen: View {
                 nextNumber: nextNumber,
                 year2: year2
             )
+            syncScannerWidgetDisplay()
             uiErrorMessage = nil
         } catch {
             if scannerSequence == nil {
                 uiErrorMessage = "Aktuelle Scanner-Nummer konnte nicht geladen werden: \(error.localizedDescription)"
             }
+        }
+    }
+
+    private func syncScannerWidgetDisplay() {
+        if let reservedScan {
+            ScannerWidgetStore.publish(
+                number: reservedScan.number,
+                year2: reservedScan.year2,
+                isReserved: true
+            )
+            return
+        }
+
+        if let scannerSequence {
+            ScannerWidgetStore.publishAvailable(
+                number: scannerSequence.nextNumber,
+                year2: scannerSequence.year2
+            )
         }
     }
 
@@ -1009,6 +1030,7 @@ struct ScannerScreen: View {
                 scanName: trimmedScanName,
                 driveFolderName: driveFolderName
             )
+            syncScannerWidgetDisplay()
             refreshScanPDFIfNeeded()
 
             if !driveFolderReady, let warning, !warning.isEmpty {

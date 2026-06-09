@@ -16,10 +16,45 @@
 		15D3BEAA2F09DD1B009C14A4 /* FirebaseFunctionsCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 15D3BEA92F09DD1B009C14A4 /* FirebaseFunctionsCombine-Community */; };
 		15D3BEAC2F09DD1B009C14A4 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 15D3BEAB2F09DD1B009C14A4 /* FirebaseStorage */; };
 		15D3BEAE2F09DD1B009C14A4 /* FirebaseStorageCombine-Community in Frameworks */ = {isa = PBXBuildFile; productRef = 15D3BEAD2F09DD1B009C14A4 /* FirebaseStorageCombine-Community */; };
+		16A1BDB2EE86591006652EC /* GutachtenNumberWidgetBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16A1BND2EE86591006652EC /* GutachtenNumberWidgetBundle.swift */; };
+		16A1BDL2EE86591006652EC /* GutachtenNumberWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16A1FRM2EE86591006652EC /* GutachtenNumberWidget.swift */; };
+		16A1EMB2EE86591006652EC /* GutachtenNumberWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 16A1APP2EE86591006652EC /* GutachtenNumberWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		16A1SWM2EE86591006652EC /* ScannerWidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16A1SNP2EE86591006652EC /* ScannerWidgetSnapshot.swift */; };
+		16A1SWW2EE86591006652EC /* ScannerWidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16A1SNP2EE86591006652EC /* ScannerWidgetSnapshot.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		16A1PRX2EE86591006652EC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 15FBE8012EE86591006652EC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 16A1EXT2EE86591006652EC;
+			remoteInfo = GutachtenNumberWidgetExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		16A1CPY2EE86591006652EC /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				16A1EMB2EE86591006652EC /* GutachtenNumberWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		15FBE8092EE86591006652EC /* SVS App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SVS App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		16A1APP2EE86591006652EC /* GutachtenNumberWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = GutachtenNumberWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		16A1BND2EE86591006652EC /* GutachtenNumberWidgetBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GutachtenNumberWidgetBundle.swift; sourceTree = "<group>"; };
+		16A1ENT2EE86591006652EC /* GutachtenNumberWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = GutachtenNumberWidget.entitlements; sourceTree = "<group>"; };
+		16A1FRM2EE86591006652EC /* GutachtenNumberWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GutachtenNumberWidget.swift; sourceTree = "<group>"; };
+		16A1INF2EE86591006652EC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		16A1SNP2EE86591006652EC /* ScannerWidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerWidgetSnapshot.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -47,6 +82,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		16A1FRW2EE86591006652EC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -61,6 +103,8 @@
 			isa = PBXGroup;
 			children = (
 				15FBE80B2EE86591006652EC /* SVS App */,
+				16A1GRP2EE86591006652EC /* Shared */,
+				16A1WGT2EE86591006652EC /* GutachtenNumberWidget */,
 				155C7FC92F216D7500F30807 /* Frameworks */,
 				15FBE80A2EE86591006652EC /* Products */,
 			);
@@ -70,8 +114,28 @@
 			isa = PBXGroup;
 			children = (
 				15FBE8092EE86591006652EC /* SVS App.app */,
+				16A1APP2EE86591006652EC /* GutachtenNumberWidgetExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		16A1GRP2EE86591006652EC /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				16A1SNP2EE86591006652EC /* ScannerWidgetSnapshot.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		16A1WGT2EE86591006652EC /* GutachtenNumberWidget */ = {
+			isa = PBXGroup;
+			children = (
+				16A1FRM2EE86591006652EC /* GutachtenNumberWidget.swift */,
+				16A1BND2EE86591006652EC /* GutachtenNumberWidgetBundle.swift */,
+				16A1INF2EE86591006652EC /* Info.plist */,
+				16A1ENT2EE86591006652EC /* GutachtenNumberWidget.entitlements */,
+			);
+			path = GutachtenNumberWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -84,10 +148,12 @@
 				15FBE8052EE86591006652EC /* Sources */,
 				15FBE8062EE86591006652EC /* Frameworks */,
 				15FBE8072EE86591006652EC /* Resources */,
+				16A1CPY2EE86591006652EC /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				16A1DEP2EE86591006652EC /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				15FBE80B2EE86591006652EC /* SVS App */,
@@ -108,6 +174,23 @@
 			productReference = 15FBE8092EE86591006652EC /* SVS App.app */;
 			productType = "com.apple.product-type.application";
 		};
+		16A1EXT2EE86591006652EC /* GutachtenNumberWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 16A1BCL2EE86591006652EC /* Build configuration list for PBXNativeTarget "GutachtenNumberWidgetExtension" */;
+			buildPhases = (
+				16A1SRC2EE86591006652EC /* Sources */,
+				16A1FRW2EE86591006652EC /* Frameworks */,
+				16A1RSC2EE86591006652EC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = GutachtenNumberWidgetExtension;
+			productName = GutachtenNumberWidgetExtension;
+			productReference = 16A1APP2EE86591006652EC /* GutachtenNumberWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -119,6 +202,9 @@
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
 					15FBE8082EE86591006652EC = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					16A1EXT2EE86591006652EC = {
 						CreatedOnToolsVersion = 26.1.1;
 					};
 				};
@@ -141,12 +227,20 @@
 			projectRoot = "";
 			targets = (
 				15FBE8082EE86591006652EC /* SVS App */,
+				16A1EXT2EE86591006652EC /* GutachtenNumberWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		15FBE8072EE86591006652EC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		16A1RSC2EE86591006652EC /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -160,10 +254,29 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				16A1SWM2EE86591006652EC /* ScannerWidgetSnapshot.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		16A1SRC2EE86591006652EC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				16A1BDL2EE86591006652EC /* GutachtenNumberWidget.swift in Sources */,
+				16A1BDB2EE86591006652EC /* GutachtenNumberWidgetBundle.swift in Sources */,
+				16A1SWW2EE86591006652EC /* ScannerWidgetSnapshot.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		16A1DEP2EE86591006652EC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 16A1EXT2EE86591006652EC /* GutachtenNumberWidgetExtension */;
+			targetProxy = 16A1PRX2EE86591006652EC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		15FBE8172EE86593006652EC /* Debug */ = {
@@ -365,6 +478,56 @@
 			};
 			name = Release;
 		};
+		16A1DBG2EE86591006652EC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = GutachtenNumberWidget/GutachtenNumberWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 15;
+				DEVELOPMENT_TEAM = MG6BB56CA6;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = GutachtenNumberWidget/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.7.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "de.svs.SVS-App.GutachtenNumberWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		16A1RLS2EE86591006652EC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = GutachtenNumberWidget/GutachtenNumberWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 15;
+				DEVELOPMENT_TEAM = MG6BB56CA6;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = GutachtenNumberWidget/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.7.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "de.svs.SVS-App.GutachtenNumberWidget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -382,6 +545,15 @@
 			buildConfigurations = (
 				15FBE81A2EE86593006652EC /* Debug */,
 				15FBE81B2EE86593006652EC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		16A1BCL2EE86591006652EC /* Build configuration list for PBXNativeTarget "GutachtenNumberWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				16A1DBG2EE86591006652EC /* Debug */,
+				16A1RLS2EE86591006652EC /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -28,6 +28,7 @@ class AppState: ObservableObject {
     var meetingTopicsListener: ListenerRegistration?
     var meetingMetaListener: ListenerRegistration?
     var meetingArchivesListener: ListenerRegistration?
+    var scannerMetaListener: ListenerRegistration?
     
     // Run snapshot processing off the main thread
     let firestoreListenerQueue = DispatchQueue(label: "svs.firestore.listeners", qos: .userInitiated)
@@ -61,6 +62,7 @@ class AppState: ObservableObject {
     @Published var commissions: [CommissionEntry]
     
     @Published var toast: AppToast? = nil
+    @Published var pendingHomePushDestination: HomePushDestination?
 
     // Listener lifecycle
     @Published var isProfileReady: Bool = false
@@ -97,6 +99,8 @@ class AppState: ObservableObject {
                 guard let fbUser else {
                     self.currentUser = nil
                     self.stopUsersListeners()
+                    self.stopScannerWidgetSync()
+                    self.pendingHomePushDestination = nil
                     self.users = []
                     self.isProfileReady = false
                     self.didStartRealtimeListeners = false
@@ -145,6 +149,7 @@ class AppState: ObservableObject {
         }
         currentUser = nil
         stopUsersListeners()
+        stopScannerWidgetSync()
         users = []
         isProfileReady = false
         didStartRealtimeListeners = false

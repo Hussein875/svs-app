@@ -359,7 +359,6 @@ struct WorkCard: View {
     let title: String
     let subtitle: String
     let systemImage: String
-    let trailingValue: Int
 
     var body: some View {
         HStack(spacing: 14) {
@@ -385,15 +384,6 @@ struct WorkCard: View {
 
             Spacer(minLength: 0)
 
-            if trailingValue > 0 {
-                Text("\(trailingValue)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color(.secondarySystemBackground)))
-            }
-
             Image(systemName: "chevron.right")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(Color(UIColor.tertiaryLabel))
@@ -415,7 +405,6 @@ struct WorkCard: View {
 struct CompactWorkCard: View {
     let title: String
     let systemImage: String
-    let badgeText: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -430,15 +419,6 @@ struct CompactWorkCard: View {
                     )
 
                 Spacer(minLength: 0)
-
-                if let badgeText {
-                    Text(badgeText)
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color(.secondarySystemBackground)))
-                }
             }
 
             Text(title)

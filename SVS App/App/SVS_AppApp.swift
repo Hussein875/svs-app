@@ -30,16 +30,17 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         UNUserNotificationCenter.current().delegate = self
         Messaging.messaging().delegate = self
 
+        UIApplication.shared.applicationIconBadgeNumber = 0
         requestPushAuthorization()
 
         return true
     }
 
     /// Fragt den Nutzer nach Erlaubnis für Push Notifications.
-    /// - Aktiviert Alerts, Badges und Sounds
+    /// - Aktiviert Alerts und Sounds
     /// - Registriert die App bei APNs, wenn die Erlaubnis erteilt wurde
     private func requestPushAuthorization() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error = error {
                 print("Push permission error:", error)
                 return
@@ -136,6 +137,14 @@ struct SVS_AppApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
+                .onOpenURL { url in
+                    AppDeepLink.handle(url, appState: appState)
+                }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                UIApplication.shared.applicationIconBadgeNumber = 0
+            }
         }
     }
 }
