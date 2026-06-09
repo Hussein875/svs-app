@@ -611,7 +611,8 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MARKETING_VERSION = 1.7.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "de.svs.SVS-App.GutachtenNumberWidget";
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = "de.svs.SVS-App.GutachtenNumberWidget";
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=watchos*]" = "de.svs.SVS-App.watchkitapp.GutachtenNumberWidget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SKIP_INSTALL = YES;
@@ -640,7 +641,8 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MARKETING_VERSION = 1.7.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "de.svs.SVS-App.GutachtenNumberWidget";
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = "de.svs.SVS-App.GutachtenNumberWidget";
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=watchos*]" = "de.svs.SVS-App.watchkitapp.GutachtenNumberWidget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
 				SKIP_INSTALL = YES;
