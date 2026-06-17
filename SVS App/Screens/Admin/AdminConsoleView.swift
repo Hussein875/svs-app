@@ -103,7 +103,7 @@ struct AdminConsoleView: View {
                             } label: {
                                 AdminNavRow(
                                     title: "Prämien",
-                                    subtitle: "Offen, auszahlen und löschen",
+                                    subtitle: "Offen, auszahlen, Mitarbeiter-Übersicht",
                                     systemImage: "eurosign",
                                     accent: appState.currentUser?.color ?? .secondary
                                 )
@@ -258,7 +258,7 @@ struct AdminCommissionsScreen: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
-        ProvisionenView()
+        ProvisionenView(showsAdminTeamInsights: true)
             .environmentObject(appState)
             .navigationTitle("Prämien")
             .navigationBarTitleDisplayMode(.inline)

@@ -9,6 +9,7 @@ import UIKit
 
 struct ProvisionenView: View {
     @EnvironmentObject var appState: AppState
+    var showsAdminTeamInsights: Bool = false
     
     private enum AmountMode {
         case preset50
@@ -33,6 +34,10 @@ struct ProvisionenView: View {
     @State private var commissionsError: String? = nil
     @State private var isAdmin: Bool = false
     @State private var commissionsListener: ListenerRegistration? = nil
+    @State private var commissionQueryLimit: Int = 100
+    @State private var canLoadMoreCommissions: Bool = false
+    @State private var teamStats: [CommissionCreatorStats] = []
+    @State private var isLoadingTeamStats: Bool = false
     @State private var selectedFilter: CommissionFilter = .open
     @State private var deleteTarget: CommissionRow? = nil
     @State private var amountFieldInvalid: Bool = false
@@ -237,6 +242,16 @@ struct ProvisionenView: View {
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
 
+                if showsAdminTeamInsights && isAdmin {
+                    CommissionTeamInsightsSection(
+                        stats: teamStats,
+                        isLoading: isLoadingTeamStats
+                    )
+                    .listRowInsets(EdgeInsets(top: 8, leading: 18, bottom: 0, trailing: 18))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                }
+
                 Section {
                     if let commissionsError {
                         InlineErrorBanner(message: commissionsError)
@@ -370,6 +385,27 @@ struct ProvisionenView: View {
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                     }
+
+                    if canLoadMoreCommissions {
+                        Button {
+                            loadMoreCommissions()
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "arrow.down.circle")
+                                Text("Weitere Einträge laden")
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text("+\(commissionPageSize)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 18, bottom: 10, trailing: 18))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                    }
                 } header: {
                     HStack(spacing: 10) {
                         Image(systemName: "list.bullet.rectangle")
@@ -391,10 +427,20 @@ struct ProvisionenView: View {
         .scrollDismissesKeyboard(.interactively)
         .onAppear {
             startCommissionsListenerIfNeeded()
+            if showsAdminTeamInsights {
+                _Concurrency.Task {
+                    await loadAdminTeamStatsIfNeeded()
+                }
+            }
         }
         .onDisappear {
-            commissionsListener?.remove()
-            commissionsListener = nil
+            stopCommissionsListener()
+        }
+        .onChange(of: isAdmin) { _, admin in
+            guard admin, showsAdminTeamInsights else { return }
+            _Concurrency.Task {
+                await loadAdminTeamStatsIfNeeded()
+            }
         }
         .sheet(item: $selectedCommission) { row in
             CommissionDetailSheet(row: row)
@@ -484,6 +530,8 @@ struct ProvisionenView: View {
         return false
     }
     
+    private let commissionPageSize = 100
+
     private var deleteAlertBinding: Binding<Bool> {
         Binding(
             get: { deleteTarget != nil },
@@ -529,7 +577,7 @@ struct ProvisionenView: View {
                 color: .green
             )
             Spacer()
-            Text("\(commissions.count) gesamt")
+            Text("\(commissions.count) geladen")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -699,6 +747,48 @@ struct ProvisionenView: View {
     }
         
     @MainActor
+    private func stopCommissionsListener() {
+        commissionsListener?.remove()
+        commissionsListener = nil
+    }
+
+    @MainActor
+    private func restartCommissionsListener() {
+        stopCommissionsListener()
+        startCommissionsListenerIfNeeded()
+    }
+
+    @MainActor
+    private func loadMoreCommissions() {
+        commissionQueryLimit += commissionPageSize
+        restartCommissionsListener()
+    }
+
+    @MainActor
+    private func loadAdminTeamStatsIfNeeded() async {
+        guard showsAdminTeamInsights, isAdmin else { return }
+        guard !isLoadingTeamStats else { return }
+
+        isLoadingTeamStats = true
+        defer { isLoadingTeamStats = false }
+
+        do {
+            let db = Firestore.firestore()
+            let snapshot = try await db.collection("commissions")
+                .order(by: "acceptedAtServer", descending: true)
+                .limit(to: 1000)
+                .getDocuments()
+
+            teamStats = CommissionCreatorStatsBuilder.build(
+                from: snapshot.documents,
+                users: appState.users
+            )
+        } catch {
+            showError("Mitarbeiter-Übersicht konnte nicht geladen werden: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
     private func startCommissionsListenerIfNeeded() {
         guard commissionsListener == nil else { return }
         guard let user = Auth.auth().currentUser else { return }
@@ -726,7 +816,7 @@ struct ProvisionenView: View {
 
             var q: Query = db.collection("commissions")
                 .order(by: "acceptedAtServer", descending: true)
-                .limit(to: 50)
+                .limit(to: commissionQueryLimit)
 
             if !admin {
                 q = q.whereField("createdByUid", isEqualTo: user.uid)
@@ -789,6 +879,7 @@ struct ProvisionenView: View {
                 _Concurrency.Task { @MainActor in
                     self.isLoadingCommissions = false
                     self.commissions = mapped
+                    self.canLoadMoreCommissions = mapped.count >= self.commissionQueryLimit
                 }
             }
 

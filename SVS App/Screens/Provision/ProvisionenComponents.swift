@@ -263,6 +263,122 @@ struct CommissionRow: Identifiable {
     let createdByUid: String?
 }
 
+struct CommissionCreatorStats: Identifiable {
+    let userId: String
+    let displayName: String
+    let orderCount: Int
+    let totalAmount: Double
+    let openCount: Int
+    let paidCount: Int
+
+    var id: String { userId }
+}
+
+enum CommissionCreatorStatsBuilder {
+    static func build(from documents: [QueryDocumentSnapshot], users: [User]) -> [CommissionCreatorStats] {
+        var buckets: [String: (count: Int, total: Double, open: Int, paid: Int)] = [:]
+
+        for doc in documents {
+            let data = doc.data()
+            let uid = (data["createdByUid"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !uid.isEmpty else { continue }
+
+            let amount = data["amount"] as? Double ?? 0
+            let status = (data["status"] as? String) ?? ""
+            let isPaid = status == "paid"
+
+            var bucket = buckets[uid] ?? (0, 0, 0, 0)
+            bucket.count += 1
+            bucket.total += amount
+            if isPaid {
+                bucket.paid += 1
+            } else {
+                bucket.open += 1
+            }
+            buckets[uid] = bucket
+        }
+
+        return buckets.map { uid, stats in
+            CommissionCreatorStats(
+                userId: uid,
+                displayName: displayName(for: uid, users: users),
+                orderCount: stats.count,
+                totalAmount: stats.total,
+                openCount: stats.open,
+                paidCount: stats.paid
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.orderCount != rhs.orderCount {
+                return lhs.orderCount > rhs.orderCount
+            }
+            return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+        }
+    }
+
+    private static func displayName(for uid: String, users: [User]) -> String {
+        if let user = users.first(where: { $0.id == uid }) {
+            let name = user.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty { return name }
+        }
+        return uid
+    }
+}
+
+struct CommissionTeamInsightsSection: View {
+    let stats: [CommissionCreatorStats]
+    let isLoading: Bool
+
+    var body: some View {
+        SectionCard(title: "Übersicht nach Mitarbeiter", systemImage: "person.2.fill") {
+            if isLoading {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Lade Statistik …")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            } else if stats.isEmpty {
+                Text("Noch keine Prämien-Aufträge vorhanden.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(stats) { row in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(row.displayName)
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(formatEUR(row.totalAmount))
+                                    .font(.subheadline.weight(.semibold))
+                            }
+
+                            HStack(spacing: 12) {
+                                Label("\(row.orderCount) Aufträge", systemImage: "doc.text")
+                                Label("\(row.openCount) offen", systemImage: "clock")
+                                Label("\(row.paidCount) ausgezahlt", systemImage: "checkmark.circle")
+                            }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        }
+                        .padding(.vertical, 4)
+
+                        if row.id != stats.last?.id {
+                            Divider()
+                        }
+                    }
+                }
+
+                Text("Nur für Admins sichtbar · bis zu 1.000 neueste Einträge")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 4)
+            }
+        }
+    }
+}
+
 
 enum ProvisionFormatters {
     static let eur: NumberFormatter = {
