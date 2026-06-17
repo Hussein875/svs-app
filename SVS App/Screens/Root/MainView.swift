@@ -21,6 +21,11 @@ struct MainView: View {
         appState.currentUser?.role == .employee
     }
 
+    private var showsHomeTab: Bool {
+        guard isEmployeeRole else { return true }
+        return !(appState.currentUser?.scannerOnlyMode ?? true)
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
             if !isEmployeeRole {
@@ -31,11 +36,13 @@ struct MainView: View {
                     .tag(MainTab.calendar)
             }
 
-            WorkHomeView(pushDestination: $homePushDestination)
-                .tabItem {
-                    Label("Mein Bereich", systemImage: "person.crop.circle")
-                }
-                .tag(MainTab.home)
+            if showsHomeTab {
+                WorkHomeView(pushDestination: $homePushDestination)
+                    .tabItem {
+                        Label("Mein Bereich", systemImage: "person.crop.circle")
+                    }
+                    .tag(MainTab.home)
+            }
             
             // Scanner
             ScannerScreen()
@@ -84,9 +91,16 @@ struct MainView: View {
             if role == .employee {
                 if selectedTab == .calendar || selectedTab == .admin {
                     selectedTab = .scanner
+                } else if !showsHomeTab && selectedTab == .home {
+                    selectedTab = .scanner
                 }
             } else if role != .admin && selectedTab == .admin {
                 selectedTab = .calendar
+            }
+        }
+        .onChange(of: appState.currentUser?.scannerOnlyMode) { _, _ in
+            if isEmployeeRole && !showsHomeTab && selectedTab == .home {
+                selectedTab = .scanner
             }
         }
     }
@@ -94,8 +108,12 @@ struct MainView: View {
     private func consumePendingHomePushDestination() {
         guard let destination = appState.pendingHomePushDestination else { return }
         appState.pendingHomePushDestination = nil
-        selectedTab = .home
-        homePushDestination = destination
+        if showsHomeTab {
+            selectedTab = .home
+            homePushDestination = destination
+        } else {
+            selectedTab = .scanner
+        }
     }
 
     private func handlePushRoute(_ route: PushRoute) {

@@ -57,6 +57,9 @@ service cloud.firestore {
         "fcmTokens",
         "commissionAccessEnabled",
         "stargutachterAccessEnabled",
+        "documentsAccessEnabled",
+        "myUploadsAccessEnabled",
+        "scannerOnlyMode",
         "allowedLawyerPowerIds"
       ]) &&
       data.name is string &&
@@ -71,6 +74,9 @@ service cloud.firestore {
       (!("unreadNotificationUpdatedAt" in data) || data.unreadNotificationUpdatedAt is timestamp) &&
       (!("commissionAccessEnabled" in data) || data.commissionAccessEnabled is bool) &&
       (!("stargutachterAccessEnabled" in data) || data.stargutachterAccessEnabled is bool) &&
+      (!("documentsAccessEnabled" in data) || data.documentsAccessEnabled is bool) &&
+      (!("myUploadsAccessEnabled" in data) || data.myUploadsAccessEnabled is bool) &&
+      (!("scannerOnlyMode" in data) || data.scannerOnlyMode is bool) &&
       (!("allowedLawyerPowerIds" in data) || data.allowedLawyerPowerIds is list);
     }
 

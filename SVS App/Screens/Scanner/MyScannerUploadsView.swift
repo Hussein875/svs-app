@@ -16,9 +16,17 @@ struct MyScannerUploadsView: View {
         appState.scannerUploads
     }
 
+    private var canViewUploads: Bool {
+        guard let user = appState.currentUser else { return false }
+        if user.role != .employee { return true }
+        return user.myUploadsAccessEnabled
+    }
+
     var body: some View {
         Group {
-            if uploads.isEmpty {
+            if !canViewUploads {
+                accessDeniedState
+            } else if uploads.isEmpty {
                 emptyState
             } else {
                 uploadsList
@@ -106,6 +114,24 @@ struct MyScannerUploadsView: View {
                             .opacity(0.12)
                     )
             )
+    }
+
+    private var accessDeniedState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundColor(.secondary)
+
+            Text("Uploads nicht freigeschaltet")
+                .font(.headline)
+
+            Text("Dein Admin kann den Zugriff auf Meine Uploads in der Nutzerverwaltung aktivieren.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 28)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyState: some View {

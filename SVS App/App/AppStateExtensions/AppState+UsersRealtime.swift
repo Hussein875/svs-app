@@ -172,6 +172,9 @@ extension AppState {
                     a.meetingSchedulePushEnabled != b.meetingSchedulePushEnabled ||
                     a.commissionAccessEnabled != b.commissionAccessEnabled ||
                     a.stargutachterAccessEnabled != b.stargutachterAccessEnabled ||
+                    a.documentsAccessEnabled != b.documentsAccessEnabled ||
+                    a.myUploadsAccessEnabled != b.myUploadsAccessEnabled ||
+                    a.scannerOnlyMode != b.scannerOnlyMode ||
                     a.allowedLawyerPowerIds != b.allowedLawyerPowerIds {
                     same = false
                     break

@@ -21,10 +21,16 @@ struct User: Identifiable, Hashable, Codable {
     var meetingSchedulePushEnabled: Bool = true
     var shortCode: String? = nil
     /// Nur für externe Mitarbeiter relevant: Admin kann Prämie-Kachel deaktivieren.
-    var commissionAccessEnabled: Bool = true
+    var commissionAccessEnabled: Bool = false
     /// Nur für externe Mitarbeiter relevant: Admin kann Stargutachter-Kachel deaktivieren.
-    var stargutachterAccessEnabled: Bool = true
-    /// Leer = alle Anwaltsvollmachten sichtbar. Sonst nur die gelisteten IDs (z. B. „av-wessels“).
+    var stargutachterAccessEnabled: Bool = false
+    /// Kachel „Dokumente“ in Mein Bereich.
+    var documentsAccessEnabled: Bool = false
+    /// Kachel „Meine Uploads“ in Mein Bereich.
+    var myUploadsAccessEnabled: Bool = false
+    /// Versteckt „Mein Bereich“ – nur Scanner und Menü.
+    var scannerOnlyMode: Bool = true
+    /// Opt-in-Liste der sichtbaren Anwaltsvollmachten (leer = keine).
     var allowedLawyerPowerIds: [String] = []
 
     var color: Color {
@@ -33,7 +39,10 @@ struct User: Identifiable, Hashable, Codable {
 
     func canViewLawyerPower(id: String) -> Bool {
         if role == .admin || role == .expert { return true }
-        if allowedLawyerPowerIds.isEmpty { return true }
         return allowedLawyerPowerIds.contains(id)
+    }
+
+    mutating func applyDefaultEmployeeAccess() {
+        EmployeeAppAccessTemplate.allOff.apply(to: &self)
     }
 }

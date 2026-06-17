@@ -24,9 +24,16 @@ struct CompanyDocumentsView: View {
         return sectionItems.filter { user.canViewLawyerPower(id: $0.id) }
     }
 
+    private var canViewDocuments: Bool {
+        guard let user = appState.currentUser, user.role == .employee else { return true }
+        return user.documentsAccessEnabled
+    }
+
     var body: some View {
         Group {
-            if availableDocuments.isEmpty {
+            if !canViewDocuments {
+                accessDeniedState
+            } else if availableDocuments.isEmpty {
                 emptyState
             } else {
                 documentsList
@@ -165,6 +172,24 @@ struct CompanyDocumentsView: View {
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+    private var accessDeniedState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 34, weight: .semibold))
+                .foregroundColor(.secondary)
+
+            Text("Dokumente nicht freigeschaltet")
+                .font(.headline)
+
+            Text("Dein Admin kann den Zugriff auf Dokumente in der Nutzerverwaltung aktivieren.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 28)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var emptyState: some View {

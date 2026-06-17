@@ -178,6 +178,12 @@ struct AdminUsersScreen: View {
                             Spacer()
                         }
                     }
+
+                    if user.role == .employee {
+                        EmployeeAppAccessChipRow(
+                            chips: EmployeeAppAccessSummary.chips(for: user)
+                        )
+                    }
                 }
             }
             .padding(14)
@@ -219,6 +225,7 @@ struct EditUserView: View {
 
     @State private var showUnsavedConfirm: Bool = false
     @State private var initialSnapshot: UserEditSnapshot? = nil
+    @State private var selectedAccessTemplate: EmployeeAppAccessTemplate? = nil
 
     private let availableColors = UserColor.allCases
     
@@ -228,46 +235,17 @@ struct EditUserView: View {
         let annualLeaveDays: Int
         let colorName: String
         let birthday: Date?
+        let scannerOnlyMode: Bool
+        let documentsAccessEnabled: Bool
+        let myUploadsAccessEnabled: Bool
         let commissionAccessEnabled: Bool
         let stargutachterAccessEnabled: Bool
         let allowedLawyerPowerIds: [String]
     }
 
-    private var lawyerPowerDocuments: [CompanyDocument] {
-        CompanyDocumentsCatalog.lawyerPowerItems
-    }
-
     private func normalizedBirthday(_ date: Date?) -> Date? {
         guard let date else { return nil }
         return Calendar.current.startOfDay(for: date)
-    }
-
-    private func isLawyerPowerEnabled(_ id: String) -> Bool {
-        if user.allowedLawyerPowerIds.isEmpty { return true }
-        return user.allowedLawyerPowerIds.contains(id)
-    }
-
-    private func setLawyerPowerEnabled(_ id: String, enabled: Bool) {
-        var allowed = user.allowedLawyerPowerIds
-        let allIds = CompanyDocumentsCatalog.allLawyerPowerIds
-
-        if allowed.isEmpty {
-            allowed = allIds
-        }
-
-        if enabled {
-            if !allowed.contains(id) {
-                allowed.append(id)
-            }
-        } else {
-            allowed.removeAll { $0 == id }
-        }
-
-        if Set(allowed) == Set(allIds) {
-            user.allowedLawyerPowerIds = []
-        } else {
-            user.allowedLawyerPowerIds = allIds.filter { allowed.contains($0) }
-        }
     }
 
     private var hasUnsavedChanges: Bool {
@@ -278,6 +256,9 @@ struct EditUserView: View {
             annualLeaveDays: user.annualLeaveDays,
             colorName: user.colorName,
             birthday: normalizedBirthday(user.birthday),
+            scannerOnlyMode: user.scannerOnlyMode,
+            documentsAccessEnabled: user.documentsAccessEnabled,
+            myUploadsAccessEnabled: user.myUploadsAccessEnabled,
             commissionAccessEnabled: user.commissionAccessEnabled,
             stargutachterAccessEnabled: user.stargutachterAccessEnabled,
             allowedLawyerPowerIds: user.allowedLawyerPowerIds
@@ -294,6 +275,12 @@ struct EditUserView: View {
                     Text("SV").tag(UserRole.expert)
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: user.role) { oldRole, newRole in
+                    if oldRole != .employee && newRole == .employee {
+                        user.applyDefaultEmployeeAccess()
+                        selectedAccessTemplate = .allOff
+                    }
+                }
             }
 
             Section(header: Text("Login"), footer: Text("Passwörter werden über Firebase Auth verwaltet.")) {
@@ -337,29 +324,15 @@ struct EditUserView: View {
             }
 
             if user.role == .employee {
-                Section(
-                    header: Text("App-Zugang"),
-                    footer: Text("Steuert sichtbare Kacheln, Anwaltsvollmachten und Stargutachter für diesen Mitarbeiter in der App.")
-                ) {
-                    Toggle("Prämie anzeigen", isOn: binding(for: \.commissionAccessEnabled))
-                    Toggle("Stargutachter anzeigen", isOn: binding(for: \.stargutachterAccessEnabled))
-
-                    ForEach(lawyerPowerDocuments) { document in
-                        Toggle(isOn: Binding(
-                            get: { isLawyerPowerEnabled(document.id) },
-                            set: { setLawyerPowerEnabled(document.id, enabled: $0) }
-                        )) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(document.title)
-                                if let subtitle = document.subtitle {
-                                    Text(subtitle)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                    }
-                }
+                EmployeeAppAccessSettingsSection(
+                    scannerOnlyMode: binding(for: \.scannerOnlyMode),
+                    documentsAccessEnabled: binding(for: \.documentsAccessEnabled),
+                    myUploadsAccessEnabled: binding(for: \.myUploadsAccessEnabled),
+                    stargutachterAccessEnabled: binding(for: \.stargutachterAccessEnabled),
+                    commissionAccessEnabled: binding(for: \.commissionAccessEnabled),
+                    allowedLawyerPowerIds: binding(for: \.allowedLawyerPowerIds),
+                    selectedTemplate: $selectedAccessTemplate
+                )
             }
 
             Section {
@@ -381,6 +354,9 @@ struct EditUserView: View {
                         annualLeaveDays: user.annualLeaveDays,
                         colorName: user.colorName,
                         birthday: normalizedBirthday(user.birthday),
+                        scannerOnlyMode: user.scannerOnlyMode,
+                        documentsAccessEnabled: user.documentsAccessEnabled,
+                        myUploadsAccessEnabled: user.myUploadsAccessEnabled,
                         commissionAccessEnabled: user.commissionAccessEnabled,
                         stargutachterAccessEnabled: user.stargutachterAccessEnabled,
                         allowedLawyerPowerIds: user.allowedLawyerPowerIds
@@ -463,6 +439,9 @@ struct EditUserView: View {
                     annualLeaveDays: user.annualLeaveDays,
                     colorName: user.colorName,
                     birthday: normalizedBirthday(user.birthday),
+                    scannerOnlyMode: user.scannerOnlyMode,
+                    documentsAccessEnabled: user.documentsAccessEnabled,
+                    myUploadsAccessEnabled: user.myUploadsAccessEnabled,
                     commissionAccessEnabled: user.commissionAccessEnabled,
                     stargutachterAccessEnabled: user.stargutachterAccessEnabled,
                     allowedLawyerPowerIds: user.allowedLawyerPowerIds
@@ -520,6 +499,8 @@ struct AddUserView: View {
     @State private var annualLeaveDays: Int = 24
     @State private var birthday: Date? = nil
     @State private var isCreating: Bool = false
+    @State private var employeeAccess = EmployeeAccessDraft()
+    @State private var selectedAccessTemplate: EmployeeAppAccessTemplate? = .allOff
 
     private let availableColors = UserColor.allCases
     
@@ -575,6 +556,18 @@ struct AddUserView: View {
                 .datePickerStyle(.compact)
             }
 
+            if role == .employee {
+                EmployeeAppAccessSettingsSection(
+                    scannerOnlyMode: $employeeAccess.scannerOnlyMode,
+                    documentsAccessEnabled: $employeeAccess.documentsAccessEnabled,
+                    myUploadsAccessEnabled: $employeeAccess.myUploadsAccessEnabled,
+                    stargutachterAccessEnabled: $employeeAccess.stargutachterAccessEnabled,
+                    commissionAccessEnabled: $employeeAccess.commissionAccessEnabled,
+                    allowedLawyerPowerIds: $employeeAccess.allowedLawyerPowerIds,
+                    selectedTemplate: $selectedAccessTemplate
+                )
+            }
+
             Section {
                 Button {
                     dismissKeyboard()
@@ -592,7 +585,8 @@ struct AddUserView: View {
                             role: role,
                             colorName: colorName,
                             annualLeaveDays: annualLeaveDays,
-                            birthday: birthday.map { Calendar.current.startOfDay(for: $0) }
+                            birthday: birthday.map { Calendar.current.startOfDay(for: $0) },
+                            employeeAccess: role == .employee ? employeeAccess : nil
                         )
 
                         isCreating = false
@@ -648,8 +642,19 @@ struct AddUserView: View {
             }
         }
         .navigationTitle("Neuer Mitarbeiter")
+        .onAppear {
+            if selectedAccessTemplate == .allOff {
+                employeeAccess.apply(template: .allOff)
+            }
+        }
+        .onChange(of: role) { _, newRole in
+            if newRole == .employee {
+                selectedAccessTemplate = .allOff
+                employeeAccess.apply(template: .allOff)
+            }
+        }
     }
-
+    
     private func dismissKeyboard() {
         focusedField = nil
         UIApplication.shared.sendAction(

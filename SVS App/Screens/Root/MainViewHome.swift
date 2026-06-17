@@ -28,14 +28,24 @@ struct WorkHomeView: View {
         appState.currentUser?.role == .employee
     }
 
+    private var showsDocumentsTile: Bool {
+        guard isEmployeeRole else { return true }
+        return appState.currentUser?.documentsAccessEnabled ?? false
+    }
+
+    private var showsMyUploadsTile: Bool {
+        guard isEmployeeRole else { return true }
+        return appState.currentUser?.myUploadsAccessEnabled ?? false
+    }
+
     private var showsCommissionTile: Bool {
         guard isEmployeeRole else { return false }
-        return appState.currentUser?.commissionAccessEnabled ?? true
+        return appState.currentUser?.commissionAccessEnabled ?? false
     }
 
     private var showsStargutachterTile: Bool {
         guard isEmployeeRole else { return false }
-        return appState.currentUser?.stargutachterAccessEnabled ?? true
+        return appState.currentUser?.stargutachterAccessEnabled ?? false
     }
 
     private var currentYearInterval: DateInterval {
@@ -209,54 +219,79 @@ struct WorkHomeView: View {
 
     @ViewBuilder
     private var employeeToolsSection: some View {
-        VStack(spacing: 12) {
-            NavigationLink {
-                CompanyDocumentsView()
-            } label: {
-                WorkCard(
-                    title: "Dokumente",
-                    subtitle: "Unterlagen und Vollmachten",
-                    systemImage: "folder.fill"
-                )
-            }
-            .buttonStyle(.plain)
+        let hasAnyTile = showsDocumentsTile
+            || showsMyUploadsTile
+            || showsStargutachterTile
+            || showsCommissionTile
 
-            NavigationLink {
-                MyScannerUploadsView()
-            } label: {
-                WorkCard(
-                    title: "Meine Uploads",
-                    subtitle: "Gutachten-Ordner in Google Drive",
-                    systemImage: "icloud.and.arrow.up.fill"
-                )
-            }
-            .buttonStyle(.plain)
-
-            if showsStargutachterTile {
-                NavigationLink {
-                    StargutachterView()
-                } label: {
-                    WorkCard(
-                        title: "Stargutachter",
-                        subtitle: "Gutachter-Portal",
-                        systemImage: "star.fill"
-                    )
+        if hasAnyTile {
+            VStack(spacing: 12) {
+                if showsDocumentsTile {
+                    NavigationLink {
+                        CompanyDocumentsView()
+                    } label: {
+                        WorkCard(
+                            title: "Dokumente",
+                            subtitle: "Unterlagen und Vollmachten",
+                            systemImage: "folder.fill"
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-            }
 
-            if showsCommissionTile {
-                NavigationLink {
-                    ProvisionenView()
-                } label: {
-                    WorkCard(
-                        title: "Prämie",
-                        subtitle: "Vermittlungsprämie und Links",
-                        systemImage: "eurosign.circle"
-                    )
+                if showsMyUploadsTile {
+                    NavigationLink {
+                        MyScannerUploadsView()
+                    } label: {
+                        WorkCard(
+                            title: "Meine Uploads",
+                            subtitle: "Gutachten-Ordner in Google Drive",
+                            systemImage: "icloud.and.arrow.up.fill"
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+
+                if showsStargutachterTile {
+                    NavigationLink {
+                        StargutachterView()
+                    } label: {
+                        WorkCard(
+                            title: "Stargutachter",
+                            subtitle: "Gutachter-Portal",
+                            systemImage: "star.fill"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if showsCommissionTile {
+                    NavigationLink {
+                        ProvisionenView()
+                    } label: {
+                        WorkCard(
+                            title: "Prämie",
+                            subtitle: "Vermittlungsprämie und Links",
+                            systemImage: "eurosign.circle"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
             }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Keine Bereiche freigeschaltet")
+                    .font(.headline)
+                Text("Dein Admin kann dir in der Nutzerverwaltung Dokumente, Uploads und weitere Kacheln freischalten.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
         }
     }
 

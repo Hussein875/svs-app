@@ -102,7 +102,8 @@ extension AppState {
                                     role: UserRole,
                                     colorName: String,
                                     annualLeaveDays: Int,
-                                    birthday: Date? = nil) async {
+                                    birthday: Date? = nil,
+                                    employeeAccess: EmployeeAccessDraft? = nil) async {
         let functions = Functions.functions(region: "us-central1")
         let birthdayDate = birthday.map { birthdayDateString(from: $0) }
         
@@ -121,6 +122,22 @@ extension AppState {
             let result = try await functions.httpsCallable("adminCreateUserInvite").call(payload)
             
             if let data = result.data as? [String: Any], (data["ok"] as? Bool) == true {
+                if role == .employee,
+                   let uid = data["uid"] as? String,
+                   let employeeAccess {
+                    var newUser = User(
+                        id: uid,
+                        name: name,
+                        role: role,
+                        colorName: colorName,
+                        annualLeaveDays: annualLeaveDays,
+                        email: email,
+                        birthday: birthday
+                    )
+                    newUser = employeeAccess.merged(into: newUser)
+                    updateUser(newUser)
+                }
+
                 // Jetzt kann der Admin direkt Passwort-Reset senden (Firebase verschickt E-Mail)
                 sendPasswordReset(to: email)
             }

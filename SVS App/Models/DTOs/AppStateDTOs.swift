@@ -21,6 +21,9 @@ struct UserProfile: Codable {
     var meetingSchedulePushEnabled: Bool
     var commissionAccessEnabled: Bool
     var stargutachterAccessEnabled: Bool
+    var documentsAccessEnabled: Bool
+    var myUploadsAccessEnabled: Bool
+    var scannerOnlyMode: Bool
     var allowedLawyerPowerIds: [String]
 
     init(name: String,
@@ -33,8 +36,11 @@ struct UserProfile: Codable {
          pushEnabled: Bool = true,
          receiveAdminPushes: Bool = false,
          meetingSchedulePushEnabled: Bool = true,
-         commissionAccessEnabled: Bool = true,
-         stargutachterAccessEnabled: Bool = true,
+         commissionAccessEnabled: Bool = false,
+         stargutachterAccessEnabled: Bool = false,
+         documentsAccessEnabled: Bool = false,
+         myUploadsAccessEnabled: Bool = false,
+         scannerOnlyMode: Bool = true,
          allowedLawyerPowerIds: [String] = []) {
         self.name = name
         self.roleRaw = roleRaw
@@ -48,6 +54,9 @@ struct UserProfile: Codable {
         self.meetingSchedulePushEnabled = meetingSchedulePushEnabled
         self.commissionAccessEnabled = commissionAccessEnabled
         self.stargutachterAccessEnabled = stargutachterAccessEnabled
+        self.documentsAccessEnabled = documentsAccessEnabled
+        self.myUploadsAccessEnabled = myUploadsAccessEnabled
+        self.scannerOnlyMode = scannerOnlyMode
         self.allowedLawyerPowerIds = allowedLawyerPowerIds
     }
 
@@ -64,6 +73,9 @@ struct UserProfile: Codable {
         self.meetingSchedulePushEnabled = user.meetingSchedulePushEnabled
         self.commissionAccessEnabled = user.commissionAccessEnabled
         self.stargutachterAccessEnabled = user.stargutachterAccessEnabled
+        self.documentsAccessEnabled = user.documentsAccessEnabled
+        self.myUploadsAccessEnabled = user.myUploadsAccessEnabled
+        self.scannerOnlyMode = user.scannerOnlyMode
         self.allowedLawyerPowerIds = user.allowedLawyerPowerIds
     }
 
@@ -88,9 +100,15 @@ struct UserProfile: Codable {
         self.meetingSchedulePushEnabled =
             (data["meetingSchedulePushEnabled"] as? Bool) ?? true
         self.commissionAccessEnabled =
-            (data["commissionAccessEnabled"] as? Bool) ?? true
+            (data["commissionAccessEnabled"] as? Bool) ?? false
         self.stargutachterAccessEnabled =
-            (data["stargutachterAccessEnabled"] as? Bool) ?? true
+            (data["stargutachterAccessEnabled"] as? Bool) ?? false
+        self.documentsAccessEnabled =
+            (data["documentsAccessEnabled"] as? Bool) ?? false
+        self.myUploadsAccessEnabled =
+            (data["myUploadsAccessEnabled"] as? Bool) ?? false
+        self.scannerOnlyMode =
+            (data["scannerOnlyMode"] as? Bool) ?? true
         self.allowedLawyerPowerIds = (data["allowedLawyerPowerIds"] as? [String]) ?? []
         if let ts = data["birthday"] as? Timestamp {
             self.birthday = ts.dateValue()
@@ -114,6 +132,9 @@ struct UserProfile: Codable {
             "pushEnabled": pushEnabled,
             "commissionAccessEnabled": commissionAccessEnabled,
             "stargutachterAccessEnabled": stargutachterAccessEnabled,
+            "documentsAccessEnabled": documentsAccessEnabled,
+            "myUploadsAccessEnabled": myUploadsAccessEnabled,
+            "scannerOnlyMode": scannerOnlyMode,
             "allowedLawyerPowerIds": allowedLawyerPowerIds
         ]
         // Keep this dictionary compatible with current Firestore rules.
@@ -142,6 +163,9 @@ struct UserProfile: Codable {
             shortCode: shortCode,
             commissionAccessEnabled: commissionAccessEnabled,
             stargutachterAccessEnabled: stargutachterAccessEnabled,
+            documentsAccessEnabled: documentsAccessEnabled,
+            myUploadsAccessEnabled: myUploadsAccessEnabled,
+            scannerOnlyMode: scannerOnlyMode,
             allowedLawyerPowerIds: allowedLawyerPowerIds
         )
     }
