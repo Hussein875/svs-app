@@ -20,6 +20,12 @@ enum UserColor: String, CaseIterable, Identifiable {
     case teal
     case indigo
     case brown
+    case cyan
+    case coral
+    case lime
+    case gold
+    case magenta
+    case navy
 
     var id: String { rawValue }
 
@@ -37,6 +43,12 @@ enum UserColor: String, CaseIterable, Identifiable {
         case .teal: return .teal
         case .indigo: return .indigo
         case .brown: return .brown
+        case .cyan: return .cyan
+        case .coral: return Color(red: 1.0, green: 0.45, blue: 0.35)
+        case .lime: return Color(red: 0.62, green: 0.84, blue: 0.22)
+        case .gold: return Color(red: 0.92, green: 0.72, blue: 0.12)
+        case .magenta: return Color(red: 0.84, green: 0.22, blue: 0.62)
+        case .navy: return Color(red: 0.10, green: 0.20, blue: 0.52)
         }
     }
 
@@ -54,6 +66,12 @@ enum UserColor: String, CaseIterable, Identifiable {
         case .teal: return "Türkis"
         case .indigo: return "Indigo"
         case .brown: return "Braun"
+        case .cyan: return "Cyan"
+        case .coral: return "Koralle"
+        case .lime: return "Limette"
+        case .gold: return "Gold"
+        case .magenta: return "Magenta"
+        case .navy: return "Marineblau"
         }
     }
 
@@ -75,6 +93,12 @@ enum UserColor: String, CaseIterable, Identifiable {
         case "teal": return .teal
         case "indigo": return .indigo
         case "braun", "brown": return .brown
+        case "cyan": return .cyan
+        case "coral", "koralle": return .coral
+        case "lime", "limette": return .lime
+        case "gold": return .gold
+        case "magenta": return .magenta
+        case "navy", "marineblau", "marine": return .navy
         default: return .blue
         }
     }
