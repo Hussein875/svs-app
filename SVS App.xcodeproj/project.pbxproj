@@ -21,12 +21,12 @@
 		16A1EMB2EE86591006652EC /* GutachtenNumberWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 16A1APP2EE86591006652EC /* GutachtenNumberWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		16A1SWM2EE86591006652EC /* ScannerWidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16A1SNP2EE86591006652EC /* ScannerWidgetSnapshot.swift */; };
 		16A1SWW2EE86591006652EC /* ScannerWidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16A1SNP2EE86591006652EC /* ScannerWidgetSnapshot.swift */; };
+		16WKAST2EE86591006652EC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 16WKASC2EE86591006652EC /* Assets.xcassets */; };
 		16WKBA12EE86591006652EC /* SVSWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16WKSWA2EE86591006652EC /* SVSWatchApp.swift */; };
 		16WKBA22EE86591006652EC /* WatchExtensionDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16WKWED2EE86591006652EC /* WatchExtensionDelegate.swift */; };
 		16WKEMB2EE86591006652EC /* GutachtenNumberWidgetExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 16A1APP2EE86591006652EC /* GutachtenNumberWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		16WKSWS2EE86591006652EC /* ScannerWidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16A1SNP2EE86591006652EC /* ScannerWidgetSnapshot.swift */; };
 		16WKTEM2EE86591006652EC /* SVS Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 16WKAPP2EE86591006652EC /* SVS Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		16WKAST2EE86591006652EC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 16WKASC2EE86591006652EC /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -98,10 +98,10 @@
 		16A1INF2EE86591006652EC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		16A1SNP2EE86591006652EC /* ScannerWidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScannerWidgetSnapshot.swift; sourceTree = "<group>"; };
 		16WKAPP2EE86591006652EC /* SVS Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "SVS Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		16WKASC2EE86591006652EC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		16WKENT2EE86591006652EC /* SVS Watch App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "SVS Watch App.entitlements"; sourceTree = "<group>"; };
 		16WKSWA2EE86591006652EC /* SVSWatchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SVSWatchApp.swift; sourceTree = "<group>"; };
 		16WKWED2EE86591006652EC /* WatchExtensionDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WatchExtensionDelegate.swift; sourceTree = "<group>"; };
-		16WKASC2EE86591006652EC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -530,7 +530,7 @@
 				CODE_SIGN_ENTITLEMENTS = "SVS App/SVS App.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = MG6BB56CA6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -546,7 +546,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.7.0;
+				MARKETING_VERSION = 1.7.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.svs.SVS-App";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -568,7 +568,7 @@
 				CODE_SIGN_ENTITLEMENTS = "SVS App/SVS App.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = MG6BB56CA6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -584,7 +584,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.7.0;
+				MARKETING_VERSION = 1.7.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.svs.SVS-App";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -603,7 +603,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = GutachtenNumberWidget/GutachtenNumberWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = MG6BB56CA6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = GutachtenNumberWidget/Info.plist;
@@ -614,7 +614,7 @@
 					"@executable_path/../../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				MARKETING_VERSION = 1.7.0;
+				MARKETING_VERSION = 1.7.1;
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = "de.svs.SVS-App.GutachtenNumberWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=watchos*]" = "de.svs.SVS-App.watchkitapp.GutachtenNumberWidget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -633,7 +633,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = GutachtenNumberWidget/GutachtenNumberWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = MG6BB56CA6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = GutachtenNumberWidget/Info.plist;
@@ -644,7 +644,7 @@
 					"@executable_path/../../Frameworks",
 					"@executable_path/../../../../Frameworks",
 				);
-				MARKETING_VERSION = 1.7.0;
+				MARKETING_VERSION = 1.7.1;
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = "de.svs.SVS-App.GutachtenNumberWidget";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=watchos*]" = "de.svs.SVS-App.watchkitapp.GutachtenNumberWidget";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -664,7 +664,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "SVS Watch App/SVS Watch App.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = MG6BB56CA6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -675,7 +675,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.7.0;
+				MARKETING_VERSION = 1.7.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.svs.SVS-App.watchkitapp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
@@ -693,7 +693,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "SVS Watch App/SVS Watch App.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				DEVELOPMENT_TEAM = MG6BB56CA6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -704,7 +704,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.7.0;
+				MARKETING_VERSION = 1.7.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "de.svs.SVS-App.watchkitapp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
