@@ -30,6 +30,10 @@ private struct ScannerReservationState: Equatable {
     let driveFolderName: String
 }
 
+private struct DriveUploadResult: Equatable {
+    let driveFileId: String
+}
+
 struct ScannerScreen: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.scenePhase) private var scenePhase
@@ -175,7 +179,11 @@ struct ScannerScreen: View {
     private var isDriveSuccessPresented: Binding<Bool> {
         Binding(
             get: { driveUploadSuccessMessage != nil },
-            set: { _ in driveUploadSuccessMessage = nil }
+            set: { isPresented in
+                if !isPresented {
+                    driveUploadSuccessMessage = nil
+                }
+            }
         )
     }
 
@@ -736,8 +744,7 @@ struct ScannerScreen: View {
             )
 
             resetScannerSession(removeAllTempFiles: true)
-            driveUploadSuccessMessage =
-              "Datei wurde in Google Drive abgelegt."
+            driveUploadSuccessMessage = "Datei wurde in Google Drive abgelegt."
         } catch {
             uiErrorMessage = "Drive-Upload fehlgeschlagen: \(error.localizedDescription)"
         }
@@ -759,7 +766,7 @@ struct ScannerScreen: View {
         storagePath: String,
         reservationId: String?,
         fileName: String
-    ) async throws -> String {
+    ) async throws -> DriveUploadResult {
         guard let uploadScanToDriveEndpoint else {
             throw NSError(
                 domain: "Drive",
@@ -800,7 +807,7 @@ struct ScannerScreen: View {
         do {
             let decoded = try JSONDecoder().decode(Payload.self, from: data)
             if decoded.ok, let id = decoded.driveFileId, !id.isEmpty {
-                return id
+                return DriveUploadResult(driveFileId: id)
             }
 
             let msg = decoded.error ?? "HTTP \(status)"

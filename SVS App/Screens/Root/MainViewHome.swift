@@ -28,6 +28,16 @@ struct WorkHomeView: View {
         appState.currentUser?.role == .employee
     }
 
+    private var showsCommissionTile: Bool {
+        guard isEmployeeRole else { return false }
+        return appState.currentUser?.commissionAccessEnabled ?? true
+    }
+
+    private var showsStargutachterTile: Bool {
+        guard isEmployeeRole else { return false }
+        return appState.currentUser?.stargutachterAccessEnabled ?? true
+    }
+
     private var currentYearInterval: DateInterval {
         let cal = Calendar.current
         let year = cal.component(.year, from: Date())
@@ -132,7 +142,11 @@ struct WorkHomeView: View {
                     .padding(.horizontal, 18)
                     .padding(.top, 8)
 
-                    if !isEmployeeRole {
+                    if isEmployeeRole {
+                        employeeToolsSection
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 18)
+                    } else {
                         // MARK: Quick numbers
                         VStack(spacing: 12) {
                             HStack(spacing: 12) {
@@ -149,14 +163,14 @@ struct WorkHomeView: View {
                             }
                         }
                         .padding(.horizontal, 18)
+
+                        frequentSection
+                            .padding(.horizontal, 18)
+
+                        quickAccessSection
+                            .padding(.horizontal, 18)
+                            .padding(.bottom, 18)
                     }
-
-                    frequentSection
-                        .padding(.horizontal, 18)
-
-                    quickAccessSection
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, 18)
                 }
             }
             .navigationDestination(item: $pushDestination) { destination in
@@ -194,6 +208,59 @@ struct WorkHomeView: View {
     }
 
     @ViewBuilder
+    private var employeeToolsSection: some View {
+        VStack(spacing: 12) {
+            NavigationLink {
+                CompanyDocumentsView()
+            } label: {
+                WorkCard(
+                    title: "Dokumente",
+                    subtitle: "Unterlagen und Vollmachten",
+                    systemImage: "folder.fill"
+                )
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
+                MyScannerUploadsView()
+            } label: {
+                WorkCard(
+                    title: "Meine Uploads",
+                    subtitle: "Gutachten-Ordner in Google Drive",
+                    systemImage: "icloud.and.arrow.up.fill"
+                )
+            }
+            .buttonStyle(.plain)
+
+            if showsStargutachterTile {
+                NavigationLink {
+                    StargutachterView()
+                } label: {
+                    WorkCard(
+                        title: "Stargutachter",
+                        subtitle: "Gutachter-Portal",
+                        systemImage: "star.fill"
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            if showsCommissionTile {
+                NavigationLink {
+                    ProvisionenView()
+                } label: {
+                    WorkCard(
+                        title: "Prämie",
+                        subtitle: "Vermittlungsprämie und Links",
+                        systemImage: "eurosign.circle"
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
     private var frequentSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             homeSectionHeader("Häufig genutzt")
@@ -204,9 +271,7 @@ struct WorkHomeView: View {
                 } label: {
                     WorkCard(
                         title: "Abwesenheiten",
-                        subtitle: isEmployeeRole
-                            ? "Urlaub und Krankheit verwalten"
-                            : "Urlaub, Krankheit",
+                        subtitle: "Urlaub, Krankheit",
                         systemImage: "doc.text"
                     )
                 }
@@ -223,18 +288,16 @@ struct WorkHomeView: View {
                 }
                 .buttonStyle(.plain)
 
-                if !isEmployeeRole {
-                    NavigationLink {
-                        ProvisionenView()
-                    } label: {
-                        WorkCard(
-                            title: "Prämie",
-                            subtitle: "Vermittlungsprämie und Links",
-                            systemImage: "eurosign.circle"
-                        )
-                    }
-                    .buttonStyle(.plain)
+                NavigationLink {
+                    ProvisionenView()
+                } label: {
+                    WorkCard(
+                        title: "Prämie",
+                        subtitle: "Vermittlungsprämie und Links",
+                        systemImage: "eurosign.circle"
+                    )
                 }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -247,6 +310,28 @@ struct WorkHomeView: View {
             VStack(spacing: 12) {
                 HStack(spacing: 12) {
                     NavigationLink {
+                        MyScannerUploadsView()
+                    } label: {
+                        CompactWorkCard(
+                            title: "Meine Uploads",
+                            systemImage: "icloud.and.arrow.up.fill"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink {
+                        MeetingTopicsView()
+                    } label: {
+                        CompactWorkCard(
+                            title: "Meeting",
+                            systemImage: "person.3.fill"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                HStack(spacing: 12) {
+                    NavigationLink {
                         TasksView()
                     } label: {
                         CompactWorkCard(
@@ -256,51 +341,27 @@ struct WorkHomeView: View {
                     }
                     .buttonStyle(.plain)
 
-                    if isEmployeeRole {
-                        NavigationLink {
-                            StargutachterView()
-                        } label: {
-                            CompactWorkCard(
-                                title: "Stargutachter",
-                                systemImage: "star.fill"
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        NavigationLink {
-                            MeetingTopicsView()
-                        } label: {
-                            CompactWorkCard(
-                                title: "Meeting",
-                                systemImage: "person.3.fill"
-                            )
-                        }
-                        .buttonStyle(.plain)
+                    NavigationLink {
+                        StargutachterView()
+                    } label: {
+                        CompactWorkCard(
+                            title: "Stargutachter",
+                            systemImage: "star.fill"
+                        )
                     }
+                    .buttonStyle(.plain)
                 }
 
-                if !isEmployeeRole {
-                    HStack(spacing: 12) {
-                        NavigationLink {
-                            StargutachterView()
-                        } label: {
-                            CompactWorkCard(
-                                title: "Stargutachter",
-                                systemImage: "star.fill"
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        NavigationLink {
-                            MyOnCallSaturdaysScreen()
-                        } label: {
-                            CompactWorkCard(
-                                title: "Bereitschaft",
-                                systemImage: "calendar"
-                            )
-                        }
-                        .buttonStyle(.plain)
+                HStack(spacing: 12) {
+                    NavigationLink {
+                        MyOnCallSaturdaysScreen()
+                    } label: {
+                        CompactWorkCard(
+                            title: "Bereitschaft",
+                            systemImage: "calendar"
+                        )
                     }
+                    .buttonStyle(.plain)
 
                     NavigationLink {
                         DashboardView()

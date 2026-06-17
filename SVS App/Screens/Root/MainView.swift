@@ -10,20 +10,26 @@ import UIKit
 
 struct MainView: View {
     @EnvironmentObject var appState: AppState
-    @State private var selectedTab: MainTab = .calendar
+    @State private var selectedTab: MainTab = .scanner
+    @State private var didApplyInitialTab = false
     @State private var homePushDestination: HomePushDestination?
     @State private var adminPushDestination: AdminPushDestination?
     @State private var lastHandledPushRouteKey: String = ""
     @State private var lastHandledPushRouteAt: Date = .distantPast
 
+    private var isEmployeeRole: Bool {
+        appState.currentUser?.role == .employee
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
-            // Urlaub
-            CalendarScreen()
-                .tabItem {
-                    Label("Kalender", systemImage: "calendar")
-                }
-                .tag(MainTab.calendar)
+            if !isEmployeeRole {
+                CalendarScreen()
+                    .tabItem {
+                        Label("Kalender", systemImage: "calendar")
+                    }
+                    .tag(MainTab.calendar)
+            }
 
             WorkHomeView(pushDestination: $homePushDestination)
                 .tabItem {
@@ -59,6 +65,12 @@ struct MainView: View {
             handlePushRoute(route)
         }
         .onAppear {
+            if !didApplyInitialTab {
+                didApplyInitialTab = true
+                if !isEmployeeRole {
+                    selectedTab = .calendar
+                }
+            }
             customizeMoreTab(title: "Mehr")
             if let bufferedRoute = PushNotificationRouter.consumeBufferedRoute() {
                 handlePushRoute(bufferedRoute)
@@ -69,7 +81,11 @@ struct MainView: View {
             consumePendingHomePushDestination()
         }
         .onChange(of: appState.currentUser?.role) { _, role in
-            if role != .admin && selectedTab == .admin {
+            if role == .employee {
+                if selectedTab == .calendar || selectedTab == .admin {
+                    selectedTab = .scanner
+                }
+            } else if role != .admin && selectedTab == .admin {
                 selectedTab = .calendar
             }
         }
@@ -95,37 +111,55 @@ struct MainView: View {
                     kind: isOnCallRequest(route.leaveTypeRaw) ? .onCallSaturdays : .requests,
                     entityId: asUUID(route.entityId)
                 )
+            } else if isEmployeeRole {
+                selectedTab = .scanner
             } else {
                 selectedTab = .calendar
             }
 
         case .leaveRequestApproved, .leaveRequestRejected:
-            selectedTab = .home
-            homePushDestination = HomePushDestination(
-                kind: .myRequests,
-                entityId: asUUID(route.entityId)
-            )
+            if isEmployeeRole {
+                selectedTab = .scanner
+            } else {
+                selectedTab = .home
+                homePushDestination = HomePushDestination(
+                    kind: .myRequests,
+                    entityId: asUUID(route.entityId)
+                )
+            }
 
         case .leaveRequestOnCallAssigned:
-            selectedTab = .home
-            homePushDestination = HomePushDestination(
-                kind: .myOnCallSaturdays,
-                entityId: asUUID(route.entityId)
-            )
+            if isEmployeeRole {
+                selectedTab = .scanner
+            } else {
+                selectedTab = .home
+                homePushDestination = HomePushDestination(
+                    kind: .myOnCallSaturdays,
+                    entityId: asUUID(route.entityId)
+                )
+            }
 
         case .taskAssigned:
-            selectedTab = .home
-            homePushDestination = HomePushDestination(
-                kind: .tasksAssigned,
-                entityId: asUUID(route.entityId)
-            )
+            if isEmployeeRole {
+                selectedTab = .scanner
+            } else {
+                selectedTab = .home
+                homePushDestination = HomePushDestination(
+                    kind: .tasksAssigned,
+                    entityId: asUUID(route.entityId)
+                )
+            }
 
         case .taskCompleted:
-            selectedTab = .home
-            homePushDestination = HomePushDestination(
-                kind: .tasksCompleted,
-                entityId: asUUID(route.entityId)
-            )
+            if isEmployeeRole {
+                selectedTab = .scanner
+            } else {
+                selectedTab = .home
+                homePushDestination = HomePushDestination(
+                    kind: .tasksCompleted,
+                    entityId: asUUID(route.entityId)
+                )
+            }
 
         case .commissionNew:
             if appState.currentUser?.role == .admin {
@@ -134,12 +168,17 @@ struct MainView: View {
                     kind: .commissions,
                     entityId: asUUID(route.entityId)
                 )
-            } else {
+            } else if isEmployeeRole,
+                      appState.currentUser?.commissionAccessEnabled == true {
                 selectedTab = .home
+            } else if !isEmployeeRole {
+                selectedTab = .home
+            } else {
+                selectedTab = .scanner
             }
 
         case .unknown:
-            selectedTab = .home
+            selectedTab = isEmployeeRole ? .scanner : .home
         }
     }
 

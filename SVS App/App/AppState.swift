@@ -29,6 +29,7 @@ class AppState: ObservableObject {
     var meetingMetaListener: ListenerRegistration?
     var meetingArchivesListener: ListenerRegistration?
     var scannerMetaListener: ListenerRegistration?
+    var scannerUploadsListener: ListenerRegistration?
     
     // Run snapshot processing off the main thread
     let firestoreListenerQueue = DispatchQueue(label: "svs.firestore.listeners", qos: .userInitiated)
@@ -60,6 +61,7 @@ class AppState: ObservableObject {
     @Published var uiErrorMessage: String? = nil
     
     @Published var commissions: [CommissionEntry]
+    @Published var scannerUploads: [ScannerUploadEntry] = []
     
     @Published var toast: AppToast? = nil
     @Published var pendingHomePushDestination: HomePushDestination?

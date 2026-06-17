@@ -19,6 +19,9 @@ struct UserProfile: Codable {
     var pushEnabled: Bool
     var receiveAdminPushes: Bool
     var meetingSchedulePushEnabled: Bool
+    var commissionAccessEnabled: Bool
+    var stargutachterAccessEnabled: Bool
+    var allowedLawyerPowerIds: [String]
 
     init(name: String,
          roleRaw: String,
@@ -29,7 +32,10 @@ struct UserProfile: Codable {
          shortCode: String? = nil,
          pushEnabled: Bool = true,
          receiveAdminPushes: Bool = false,
-         meetingSchedulePushEnabled: Bool = true) {
+         meetingSchedulePushEnabled: Bool = true,
+         commissionAccessEnabled: Bool = true,
+         stargutachterAccessEnabled: Bool = true,
+         allowedLawyerPowerIds: [String] = []) {
         self.name = name
         self.roleRaw = roleRaw
         self.colorName = colorName
@@ -40,6 +46,9 @@ struct UserProfile: Codable {
         self.pushEnabled = pushEnabled
         self.receiveAdminPushes = receiveAdminPushes
         self.meetingSchedulePushEnabled = meetingSchedulePushEnabled
+        self.commissionAccessEnabled = commissionAccessEnabled
+        self.stargutachterAccessEnabled = stargutachterAccessEnabled
+        self.allowedLawyerPowerIds = allowedLawyerPowerIds
     }
 
     init(from user: User) {
@@ -53,6 +62,9 @@ struct UserProfile: Codable {
         self.pushEnabled = user.pushNotificationsEnabled
         self.receiveAdminPushes = user.receiveAdminPushes
         self.meetingSchedulePushEnabled = user.meetingSchedulePushEnabled
+        self.commissionAccessEnabled = user.commissionAccessEnabled
+        self.stargutachterAccessEnabled = user.stargutachterAccessEnabled
+        self.allowedLawyerPowerIds = user.allowedLawyerPowerIds
     }
 
     init?(from data: [String: Any]) {
@@ -75,6 +87,11 @@ struct UserProfile: Codable {
         self.receiveAdminPushes = (data["receiveAdminPushes"] as? Bool) ?? false
         self.meetingSchedulePushEnabled =
             (data["meetingSchedulePushEnabled"] as? Bool) ?? true
+        self.commissionAccessEnabled =
+            (data["commissionAccessEnabled"] as? Bool) ?? true
+        self.stargutachterAccessEnabled =
+            (data["stargutachterAccessEnabled"] as? Bool) ?? true
+        self.allowedLawyerPowerIds = (data["allowedLawyerPowerIds"] as? [String]) ?? []
         if let ts = data["birthday"] as? Timestamp {
             self.birthday = ts.dateValue()
         } else if let d = data["birthday"] as? Date {
@@ -94,7 +111,10 @@ struct UserProfile: Codable {
             "colorName": colorName,
             "annualLeaveDays": annualLeaveDays,
             "email": email,
-            "pushEnabled": pushEnabled
+            "pushEnabled": pushEnabled,
+            "commissionAccessEnabled": commissionAccessEnabled,
+            "stargutachterAccessEnabled": stargutachterAccessEnabled,
+            "allowedLawyerPowerIds": allowedLawyerPowerIds
         ]
         // Keep this dictionary compatible with current Firestore rules.
         // Admin push routing preference is written by callable function.
@@ -119,7 +139,10 @@ struct UserProfile: Codable {
             pushNotificationsEnabled: pushEnabled,
             receiveAdminPushes: receiveAdminPushes,
             meetingSchedulePushEnabled: meetingSchedulePushEnabled,
-            shortCode: shortCode
+            shortCode: shortCode,
+            commissionAccessEnabled: commissionAccessEnabled,
+            stargutachterAccessEnabled: stargutachterAccessEnabled,
+            allowedLawyerPowerIds: allowedLawyerPowerIds
         )
     }
 }

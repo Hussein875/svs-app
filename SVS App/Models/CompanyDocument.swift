@@ -306,6 +306,14 @@ enum CompanyDocumentsCatalog {
         availableItems.filter { $0.section == section }
     }
 
+    static var lawyerPowerItems: [CompanyDocument] {
+        availableItems(in: .lawyerPowers)
+    }
+
+    static var allLawyerPowerIds: [String] {
+        lawyerPowerItems.map(\.id)
+    }
+
     static func bundleURL(for document: CompanyDocument) -> URL? {
         let searchDirectories: [String?] = [folderName, nil]
 

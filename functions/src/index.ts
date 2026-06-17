@@ -1925,6 +1925,14 @@ const SCANNER_SHEET_ID = "10mfm9SVVDiWcxnfK2QuUCj3msaVFBQIQx34NnPlUEo4";
 const SCANNER_SHEET_URL =
   `https://docs.google.com/spreadsheets/d/${SCANNER_SHEET_ID}/gviz/tq?tqx=out:json`;
 
+function buildDriveFolderUrl(folderId: string): string {
+  const id = String(folderId ?? "").trim();
+  if (!id) {
+    return "";
+  }
+  return `https://drive.google.com/drive/folders/${id}`;
+}
+
 function getCurrentScannerYear2(now: Date = new Date()): string {
   return String(now.getFullYear() % 100).padStart(2, "0");
 }
@@ -2297,6 +2305,8 @@ async function reserveScannerNumberForCaller(
   number: number;
   year2: string;
   driveFolderName: string;
+  driveFolderId: string;
+  driveFolderUrl: string;
 }> {
   const callerUserSnap = await admin.firestore()
     .collection("users")
@@ -2391,7 +2401,14 @@ async function reserveScannerNumberForCaller(
   });
 
   try {
-    await ensureScannerReservationDriveFolder(result.reservationId);
+    const driveFolderId = await ensureScannerReservationDriveFolder(
+      result.reservationId
+    );
+    return {
+      ...result,
+      driveFolderId,
+      driveFolderUrl: buildDriveFolderUrl(driveFolderId),
+    };
   } catch (e: unknown) {
     console.error("[reserveScannerNumber] drive folder create failed", e);
 
@@ -2414,8 +2431,6 @@ async function reserveScannerNumberForCaller(
       "Nummer wurde nicht reserviert."
     );
   }
-
-  return result;
 }
 
 export const getScannerSequencePreview = onCall(async (request) => {
@@ -2690,7 +2705,7 @@ export const reserveScannerNumberHttp = onRequest(
 // POST /uploadScanToDrive
 // Auth: Bearer <Firebase ID Token>
 // Body: { storagePath: string, fileName: string, reservationId?: string }
-// Returns: { ok: true, driveFileId }
+// Returns: { ok: true, driveFileId, driveFolderId?, driveFolderUrl? }
 // ------------------------------------------------------------------
 
 export const uploadScanToDrive = onRequest(
@@ -2769,6 +2784,7 @@ export const uploadScanToDrive = onRequest(
 
       const targetFolderId = SCANS_DRIVE_UPLOAD_FOLDER_ID;
       let reservationRef: admin.firestore.DocumentReference | null = null;
+      let reservationDriveFolderId = "";
 
       if (reservationId) {
         reservationRef = admin.firestore()
@@ -2800,6 +2816,7 @@ export const uploadScanToDrive = onRequest(
           });
           return;
         }
+        reservationDriveFolderId = reservationFolderId;
       }
 
       const drive = await getScannerDriveClient();
@@ -2855,7 +2872,12 @@ export const uploadScanToDrive = onRequest(
         console.warn("[uploadScanToDrive] temp storage cleanup failed", e);
       }
 
-      res.status(200).json({ok: true, driveFileId});
+      res.status(200).json({
+        ok: true,
+        driveFileId,
+        driveFolderId: reservationDriveFolderId,
+        driveFolderUrl: buildDriveFolderUrl(reservationDriveFolderId),
+      });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[uploadScanToDrive] FAILED", e);

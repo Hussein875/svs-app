@@ -54,7 +54,10 @@ service cloud.firestore {
         "unreadNotificationUpdatedAt",
         "createdAt",
         "updatedAt",
-        "fcmTokens"
+        "fcmTokens",
+        "commissionAccessEnabled",
+        "stargutachterAccessEnabled",
+        "allowedLawyerPowerIds"
       ]) &&
       data.name is string &&
       data.roleRaw is string &&
@@ -65,7 +68,10 @@ service cloud.firestore {
       (!("pushEnabled" in data) || data.pushEnabled is bool) &&
       (!("pushEnabledUpdatedAt" in data) || data.pushEnabledUpdatedAt is timestamp) &&
       (!("unreadNotificationCount" in data) || data.unreadNotificationCount is int) &&
-      (!("unreadNotificationUpdatedAt" in data) || data.unreadNotificationUpdatedAt is timestamp);
+      (!("unreadNotificationUpdatedAt" in data) || data.unreadNotificationUpdatedAt is timestamp) &&
+      (!("commissionAccessEnabled" in data) || data.commissionAccessEnabled is bool) &&
+      (!("stargutachterAccessEnabled" in data) || data.stargutachterAccessEnabled is bool) &&
+      (!("allowedLawyerPowerIds" in data) || data.allowedLawyerPowerIds is list);
     }
 
     function userDocHasCompleteProfileCore(data) {
@@ -508,6 +514,15 @@ match /meetingArchives/{id} {
     // ------------------------------------------------------------------
     match /scannerMeta/{id} {
       allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // scannerReservations/<id>
+    // ------------------------------------------------------------------
+    match /scannerReservations/{id} {
+      allow read: if signedIn()
+                  && (isAdmin() || resource.data.reservedByUid == myUid());
       allow write: if false;
     }
 

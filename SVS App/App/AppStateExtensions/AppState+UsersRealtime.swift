@@ -169,7 +169,10 @@ extension AppState {
                     a.shortCode != b.shortCode ||
                     a.pushNotificationsEnabled != b.pushNotificationsEnabled ||
                     a.receiveAdminPushes != b.receiveAdminPushes ||
-                    a.meetingSchedulePushEnabled != b.meetingSchedulePushEnabled {
+                    a.meetingSchedulePushEnabled != b.meetingSchedulePushEnabled ||
+                    a.commissionAccessEnabled != b.commissionAccessEnabled ||
+                    a.stargutachterAccessEnabled != b.stargutachterAccessEnabled ||
+                    a.allowedLawyerPowerIds != b.allowedLawyerPowerIds {
                     same = false
                     break
                 }
@@ -231,6 +234,7 @@ extension AppState {
         startMeetingMetaListenerIfNeeded()
         startMeetingArchivesListenerIfNeeded()
         startScannerWidgetSyncIfNeeded()
+        startScannerUploadsListenerIfNeeded()
     }
     
     private func startUsersListenersIfNeeded() {

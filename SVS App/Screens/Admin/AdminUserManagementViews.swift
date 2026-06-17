@@ -228,11 +228,46 @@ struct EditUserView: View {
         let annualLeaveDays: Int
         let colorName: String
         let birthday: Date?
+        let commissionAccessEnabled: Bool
+        let stargutachterAccessEnabled: Bool
+        let allowedLawyerPowerIds: [String]
+    }
+
+    private var lawyerPowerDocuments: [CompanyDocument] {
+        CompanyDocumentsCatalog.lawyerPowerItems
     }
 
     private func normalizedBirthday(_ date: Date?) -> Date? {
         guard let date else { return nil }
         return Calendar.current.startOfDay(for: date)
+    }
+
+    private func isLawyerPowerEnabled(_ id: String) -> Bool {
+        if user.allowedLawyerPowerIds.isEmpty { return true }
+        return user.allowedLawyerPowerIds.contains(id)
+    }
+
+    private func setLawyerPowerEnabled(_ id: String, enabled: Bool) {
+        var allowed = user.allowedLawyerPowerIds
+        let allIds = CompanyDocumentsCatalog.allLawyerPowerIds
+
+        if allowed.isEmpty {
+            allowed = allIds
+        }
+
+        if enabled {
+            if !allowed.contains(id) {
+                allowed.append(id)
+            }
+        } else {
+            allowed.removeAll { $0 == id }
+        }
+
+        if Set(allowed) == Set(allIds) {
+            user.allowedLawyerPowerIds = []
+        } else {
+            user.allowedLawyerPowerIds = allIds.filter { allowed.contains($0) }
+        }
     }
 
     private var hasUnsavedChanges: Bool {
@@ -242,7 +277,10 @@ struct EditUserView: View {
             role: user.role,
             annualLeaveDays: user.annualLeaveDays,
             colorName: user.colorName,
-            birthday: normalizedBirthday(user.birthday)
+            birthday: normalizedBirthday(user.birthday),
+            commissionAccessEnabled: user.commissionAccessEnabled,
+            stargutachterAccessEnabled: user.stargutachterAccessEnabled,
+            allowedLawyerPowerIds: user.allowedLawyerPowerIds
         )
     }
 
@@ -298,6 +336,32 @@ struct EditUserView: View {
                 .datePickerStyle(.compact)
             }
 
+            if user.role == .employee {
+                Section(
+                    header: Text("App-Zugang"),
+                    footer: Text("Steuert sichtbare Kacheln, Anwaltsvollmachten und Stargutachter für diesen Mitarbeiter in der App.")
+                ) {
+                    Toggle("Prämie anzeigen", isOn: binding(for: \.commissionAccessEnabled))
+                    Toggle("Stargutachter anzeigen", isOn: binding(for: \.stargutachterAccessEnabled))
+
+                    ForEach(lawyerPowerDocuments) { document in
+                        Toggle(isOn: Binding(
+                            get: { isLawyerPowerEnabled(document.id) },
+                            set: { setLawyerPowerEnabled(document.id, enabled: $0) }
+                        )) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(document.title)
+                                if let subtitle = document.subtitle {
+                                    Text(subtitle)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             Section {
                 Button("Mitarbeiter löschen", role: .destructive) {
                     showDeleteConfirm = true
@@ -316,7 +380,10 @@ struct EditUserView: View {
                         role: user.role,
                         annualLeaveDays: user.annualLeaveDays,
                         colorName: user.colorName,
-                        birthday: normalizedBirthday(user.birthday)
+                        birthday: normalizedBirthday(user.birthday),
+                        commissionAccessEnabled: user.commissionAccessEnabled,
+                        stargutachterAccessEnabled: user.stargutachterAccessEnabled,
+                        allowedLawyerPowerIds: user.allowedLawyerPowerIds
                     )
                     dismiss()
                 }
@@ -395,7 +462,10 @@ struct EditUserView: View {
                     role: user.role,
                     annualLeaveDays: user.annualLeaveDays,
                     colorName: user.colorName,
-                    birthday: normalizedBirthday(user.birthday)
+                    birthday: normalizedBirthday(user.birthday),
+                    commissionAccessEnabled: user.commissionAccessEnabled,
+                    stargutachterAccessEnabled: user.stargutachterAccessEnabled,
+                    allowedLawyerPowerIds: user.allowedLawyerPowerIds
                 )
             }
         }

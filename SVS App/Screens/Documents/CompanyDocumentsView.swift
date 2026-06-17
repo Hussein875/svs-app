@@ -16,6 +16,14 @@ struct CompanyDocumentsView: View {
         CompanyDocumentsCatalog.availableItems
     }
 
+    private func visibleItems(in section: CompanyDocumentSection) -> [CompanyDocument] {
+        let sectionItems = CompanyDocumentsCatalog.availableItems(in: section)
+        guard section == .lawyerPowers, let user = appState.currentUser else {
+            return sectionItems
+        }
+        return sectionItems.filter { user.canViewLawyerPower(id: $0.id) }
+    }
+
     var body: some View {
         Group {
             if availableDocuments.isEmpty {
@@ -32,7 +40,7 @@ struct CompanyDocumentsView: View {
     private var documentsList: some View {
         List {
             ForEach(CompanyDocumentSection.allCases) { section in
-                let sectionItems = CompanyDocumentsCatalog.availableItems(in: section)
+                let sectionItems = visibleItems(in: section)
                 if !sectionItems.isEmpty {
                     Section {
                         if section == .internalDocuments {

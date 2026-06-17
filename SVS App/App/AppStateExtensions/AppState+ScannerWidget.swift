@@ -33,6 +33,7 @@ extension AppState {
     func stopScannerWidgetSync() {
         scannerMetaListener?.remove()
         scannerMetaListener = nil
+        stopScannerUploadsListener()
         ScannerWidgetStore.clear()
     }
 
