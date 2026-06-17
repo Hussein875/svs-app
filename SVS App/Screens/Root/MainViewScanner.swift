@@ -974,6 +974,8 @@ struct ScannerScreen: View {
             return
         }
 
+        ScannerWidgetStore.endReservation()
+
         if let scannerSequence {
             ScannerWidgetStore.publishAvailable(
                 number: scannerSequence.nextNumber,

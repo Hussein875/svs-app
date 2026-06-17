@@ -18,7 +18,7 @@ struct SVSWatchApp: App {
 }
 
 struct WatchRootView: View {
-    private let snapshot = ScannerWidgetSnapshot.load()
+    @State private var snapshot = ScannerWidgetSnapshot.load()
 
     var body: some View {
         VStack(spacing: 8) {
@@ -34,5 +34,11 @@ struct WatchRootView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            snapshot = ScannerWidgetSnapshot.load()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .scannerWidgetSnapshotDidChange)) { _ in
+            snapshot = ScannerWidgetSnapshot.load()
+        }
     }
 }

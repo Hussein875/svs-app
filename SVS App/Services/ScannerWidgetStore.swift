@@ -31,6 +31,10 @@ enum ScannerWidgetStore {
         sharedDefaults?.bool(forKey: Key.isReserved) ?? false
     }
 
+    static func endReservation() {
+        sharedDefaults?.set(false, forKey: Key.isReserved)
+    }
+
     static func publishAvailable(number: Int, year2: String) {
         guard !isReservedActive() else { return }
         publish(number: number, year2: year2, isReserved: false)

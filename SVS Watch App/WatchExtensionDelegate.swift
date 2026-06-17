@@ -38,11 +38,20 @@ final class WatchExtensionDelegate: NSObject, WKExtensionDelegate, WCSessionDele
         guard !numberText.isEmpty else { return }
 
         let timestamp = payload["updatedAt"] as? TimeInterval ?? Date().timeIntervalSince1970
+        let resolvedStatus = statusText.isEmpty ? "Verfügbar" : statusText
         ScannerWidgetSnapshot.save(
             numberText: numberText,
-            statusText: statusText.isEmpty ? "Verfügbar" : statusText,
+            statusText: resolvedStatus,
             updatedAt: Date(timeIntervalSince1970: timestamp)
         )
         WidgetCenter.shared.reloadTimelines(ofKind: ScannerWidgetSnapshot.watchWidgetKind)
+        NotificationCenter.default.post(
+            name: .scannerWidgetSnapshotDidChange,
+            object: nil
+        )
     }
+}
+
+extension Notification.Name {
+    static let scannerWidgetSnapshotDidChange = Notification.Name("scannerWidgetSnapshotDidChange")
 }
