@@ -560,6 +560,42 @@ match /meetingArchives/{id} {
 
       allow delete: if signedIn() && resource.data.createdByUid == myUid();
     }
+
+    // ------------------------------------------------------------------
+    // officeShiftSlots/<dayKey>_<shift>
+    // Büroschichtplan Bremen (Mo–Fr, Früh/Spät)
+    // ------------------------------------------------------------------
+    function isValidOfficeShiftSlot(data) {
+      return data.keys().hasAll(['dayKey', 'shiftRaw', 'userIds', 'location'])
+        && data.dayKey is string
+        && data.shiftRaw in ['Früh', 'Spät']
+        && data.userIds is list
+        && data.userIds.size() <= 2
+        && data.location is string;
+    }
+
+    match /officeShiftSlots/{slotId} {
+      allow read: if signedIn();
+
+      allow create, update, delete: if isAdmin()
+        && isValidOfficeShiftSlot(request.resource.data);
+
+      allow create, update: if signedIn()
+        && isValidOfficeShiftSlot(request.resource.data)
+        && request.resource.data.userIds.size() <= 2
+        && myUid() in request.resource.data.userIds;
+
+      allow update, delete: if signedIn()
+        && resource.data.userIds is list
+        && myUid() in resource.data.userIds
+        && (
+          request.resource == null
+          || (
+            isValidOfficeShiftSlot(request.resource.data)
+            && request.resource.data.userIds.size() <= 2
+          )
+        );
+    }
     
 match /meetingTopics/{id} {
   allow read: if signedIn();

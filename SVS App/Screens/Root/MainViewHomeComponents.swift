@@ -173,8 +173,11 @@ struct MyOnCallSaturdaysScreen: View {
 
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                OfficeShiftWeekPlanSection()
+                    .environmentObject(appState)
+
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Samstage")
+                    Text("Samstags-Bereitschaft")
                         .font(.headline)
 
                     VStack(spacing: 10) {

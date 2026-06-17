@@ -105,6 +105,11 @@ struct AdminOnCallSaturdaysScreen: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            OfficeShiftWeekPlanSection()
+                .environmentObject(appState)
+                .padding(.horizontal, 18)
+                .padding(.top, 4)
+
             // Übersicht: Counts pro Mitarbeiter
             VStack(alignment: .leading, spacing: 10) {
                 HStack {

@@ -199,6 +199,7 @@ extension AppState {
         meetingTopicsListener?.remove(); meetingTopicsListener = nil
         meetingMetaListener?.remove(); meetingMetaListener = nil
         meetingArchivesListener?.remove(); meetingArchivesListener = nil
+        officeShiftSlotsListener?.remove(); officeShiftSlotsListener = nil
         usersSnapshotCache = []
         invitesSnapshotCache = []
         leaveRequests = []
@@ -217,6 +218,7 @@ extension AppState {
         meetingTopics = []
         meetingArchives = []
         nextMeetingAt = nil
+        officeShiftSlots = []
         didStartRealtimeListeners = false
         isProfileReady = false
     }
@@ -236,6 +238,7 @@ extension AppState {
         startMeetingTopicsListenerIfNeeded()
         startMeetingMetaListenerIfNeeded()
         startMeetingArchivesListenerIfNeeded()
+        startOfficeShiftSlotsListenerIfNeeded()
         startScannerWidgetSyncIfNeeded()
         startScannerUploadsListenerIfNeeded()
     }
