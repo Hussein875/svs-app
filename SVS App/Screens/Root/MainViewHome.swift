@@ -224,8 +224,19 @@ struct WorkHomeView: View {
             || showsStargutachterTile
             || showsCommissionTile
 
-        if hasAnyTile {
-            VStack(spacing: 12) {
+        VStack(spacing: 12) {
+            NavigationLink {
+                AccidentSketchGalleryView()
+            } label: {
+                WorkCard(
+                    title: "Schadenhergang",
+                    subtitle: "Unfallskizze für Nacharbeit",
+                    systemImage: "pencil.and.scribble"
+                )
+            }
+            .buttonStyle(.plain)
+
+            if hasAnyTile {
                 if showsDocumentsTile {
                     NavigationLink {
                         CompanyDocumentsView()
@@ -277,21 +288,21 @@ struct WorkHomeView: View {
                     }
                     .buttonStyle(.plain)
                 }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Weitere Bereiche")
+                        .font(.headline)
+                    Text("Dein Admin kann dir in der Nutzerverwaltung Dokumente, Uploads und weitere Kacheln freischalten.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
             }
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Keine Bereiche freigeschaltet")
-                    .font(.headline)
-                Text("Dein Admin kann dir in der Nutzerverwaltung Dokumente, Uploads und weitere Kacheln freischalten.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            )
         }
     }
 
@@ -319,6 +330,17 @@ struct WorkHomeView: View {
                         title: "Dokumente",
                         subtitle: "Unterlagen und Vollmachten",
                         systemImage: "folder.fill"
+                    )
+                }
+                .buttonStyle(.plain)
+
+                NavigationLink {
+                    AccidentSketchGalleryView()
+                } label: {
+                    WorkCard(
+                        title: "Schadenhergang",
+                        subtitle: "Unfallskizze für Nacharbeit am Tresen",
+                        systemImage: "pencil.and.scribble"
                     )
                 }
                 .buttonStyle(.plain)

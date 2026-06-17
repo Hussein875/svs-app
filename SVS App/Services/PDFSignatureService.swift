@@ -200,6 +200,44 @@ enum PDFSignatureService {
         return outputURL
     }
 
+    static func sketchPDFURL(
+        backgroundImage: UIImage,
+        drawing: PKDrawing,
+        drawingBounds: CGRect,
+        outputBaseName: String
+    ) throws -> URL {
+        let pageBounds = CGRect(origin: .zero, size: backgroundImage.size)
+        let renderer = UIGraphicsPDFRenderer(bounds: pageBounds)
+
+        let drawingImage: UIImage? = drawing.bounds.isEmpty ? nil : drawing.image(
+            from: drawingBounds,
+            scale: 3
+        )
+
+        let data = renderer.pdfData { context in
+            context.beginPage(withBounds: pageBounds, pageInfo: [:])
+            backgroundImage.draw(in: pageBounds)
+
+            if let drawingImage {
+                drawSignature(drawingImage, in: pageBounds)
+            }
+        }
+
+        guard !data.isEmpty else {
+            throw SignError.renderFailed
+        }
+
+        let safeBase = outputBaseName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-")
+        let fileName = "\(safeBase)-\(UUID().uuidString.prefix(8)).pdf"
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(fileName)
+
+        try data.write(to: outputURL, options: .atomic)
+        return outputURL
+    }
+
     static func drawnPDFURL(
         sourceURL: URL,
         drawing: PKDrawing,
