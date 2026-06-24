@@ -2891,7 +2891,7 @@ export const uploadScanToDrive = onRequest(
 // ------------------------------------------------------------------
 // Provision: Token prüfen (für Firebase Hosting Webformular)
 // GET /getProvisionLink?token=<uuid>
-// Returns: { ok, status: valid|expired|used|not_found, expiresAt?, usedAt? }
+// Returns: { ok, status, expiresAt?, usedAt?, amount?, gutachtenNumber? }
 // ------------------------------------------------------------------
 
 export const getProvisionLink = onRequest(async (req, res) => {
@@ -2932,6 +2932,14 @@ export const getProvisionLink = onRequest(async (req, res) => {
     const data = snap.data() ?? {};
     const status = String(data.status ?? "unused");
 
+    const linkFields = {
+      amount:
+        typeof data.amount === "number" && Number.isFinite(data.amount) ?
+          data.amount :
+          null,
+      gutachtenNumber: String(data.gutachtenNumber ?? "").trim() || null,
+    };
+
     const expiresAtTs =
       data.expiresAt as admin.firestore.Timestamp | undefined;
     const usedAtTs =
@@ -2945,6 +2953,7 @@ export const getProvisionLink = onRequest(async (req, res) => {
         ok: true,
         status: "expired",
         expiresAt: expiresAtTs.toDate().toISOString(),
+        ...linkFields,
       });
       return;
     }
@@ -2955,6 +2964,7 @@ export const getProvisionLink = onRequest(async (req, res) => {
         status: "used",
         expiresAt: expiresAtTs ? expiresAtTs.toDate().toISOString() : null,
         usedAt: usedAtTs ? usedAtTs.toDate().toISOString() : null,
+        ...linkFields,
       });
       return;
     }
@@ -2963,6 +2973,7 @@ export const getProvisionLink = onRequest(async (req, res) => {
       ok: true,
       status: "valid",
       expiresAt: expiresAtTs ? expiresAtTs.toDate().toISOString() : null,
+      ...linkFields,
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
