@@ -7,7 +7,7 @@ import SafariServices
 import SwiftUI
 
 enum StargutachterLink {
-    static let url = URL(string: "https://stargutachter.de/dsjhl238jd230")!
+    static let url = URL(string: "https://form.stargutachter.de")!
 
     static var customerShareMessage: String {
         """
