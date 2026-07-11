@@ -11,6 +11,8 @@ extension AppState {
         guard scannerMetaListener == nil else { return }
         guard Auth.auth().currentUser != nil else { return }
 
+        ScannerWidgetStore.bootstrapForSessionIfNeeded()
+
         scannerMetaListener = db.collection("scannerMeta")
             .document("current")
             .addSnapshotListener(includeMetadataChanges: false) { snapshot, _ in

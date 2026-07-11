@@ -17,6 +17,8 @@ enum ScannerWidgetStore {
         static let updatedAt = "scanner.widget.updatedAt"
     }
 
+    private static var didBootstrapThisSession = false
+
     struct Snapshot: Equatable {
         let numberText: String
         let statusText: String
@@ -29,6 +31,18 @@ enum ScannerWidgetStore {
 
     static func isReservedActive() -> Bool {
         sharedDefaults?.bool(forKey: Key.isReserved) ?? false
+    }
+
+    static func bootstrapForSessionIfNeeded() {
+        guard !didBootstrapThisSession else { return }
+        didBootstrapThisSession = true
+        // Nach App-Neustart gibt es keine aktive Scanner-Session mehr.
+        endReservation()
+        requestWidgetRefresh()
+    }
+
+    static func requestWidgetRefresh() {
+        WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
     }
 
     static func endReservation() {
@@ -54,7 +68,7 @@ enum ScannerWidgetStore {
         defaults.set(statusText, forKey: Key.statusText)
         defaults.set(isReserved, forKey: Key.isReserved)
         defaults.set(Date().timeIntervalSince1970, forKey: Key.updatedAt)
-        WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
+        requestWidgetRefresh()
         WatchScannerNumberSync.shared.send(numberText: numberText, statusText: statusText)
     }
 
@@ -81,7 +95,7 @@ enum ScannerWidgetStore {
         defaults.removeObject(forKey: Key.statusText)
         defaults.removeObject(forKey: Key.isReserved)
         defaults.removeObject(forKey: Key.updatedAt)
-        WidgetCenter.shared.reloadTimelines(ofKind: widgetKind)
+        requestWidgetRefresh()
         let placeholder = placeholderNumberText()
         WatchScannerNumberSync.shared.send(numberText: placeholder, statusText: "Öffne SVS Office")
     }

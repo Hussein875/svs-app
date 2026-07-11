@@ -170,6 +170,7 @@ private struct AppLifecycleHandler<Content: View>: View {
             .onChange(of: scenePhase) {
                 if scenePhase == .active {
                     AppIconBadge.clear()
+                    ScannerWidgetStore.requestWidgetRefresh()
                     _Concurrency.Task { await appState.clearStoredUnreadBadge() }
                 }
             }

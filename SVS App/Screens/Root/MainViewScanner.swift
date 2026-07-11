@@ -657,6 +657,7 @@ struct ScannerScreen: View {
             }
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase == .active else { return }
+                syncScannerWidgetDisplay()
                 DispatchQueue.main.async {
                     _Concurrency.Task { await refreshScannerSequencePreview() }
                 }

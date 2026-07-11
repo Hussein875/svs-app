@@ -37,7 +37,7 @@ struct GutachtenNumberProvider: TimelineProvider {
             date: Date(),
             snapshot: ScannerWidgetSnapshot.load()
         )
-        let nextRefresh = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
+        let nextRefresh = Calendar.current.date(byAdding: .minute, value: 5, to: Date()) ?? Date().addingTimeInterval(300)
         completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
     }
 }
