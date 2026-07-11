@@ -1919,6 +1919,7 @@ type UploadScanToDriveBody = {
 
 const SCANS_DRIVE_UPLOAD_FOLDER_ID = "19n1REUlYfwdzrj3NntMqgzoQ05jg2T9f";
 const SCANNER_CASE_FOLDERS_ROOT_ID = "1FVnM3Y_ktIvXMUPuAQTpJ-sMB5yI1gYf";
+const SCANNER_FOTOS_SUBFOLDER_NAME = "Fotos";
 const SCANNER_META_DOC_PATH = "scannerMeta/current";
 const SCANNER_RESERVATIONS_COLLECTION = "scannerReservations";
 const SCANNER_SHEET_ID = "10mfm9SVVDiWcxnfK2QuUCj3msaVFBQIQx34NnPlUEo4";
@@ -2167,9 +2168,58 @@ async function createScannerDriveFolder(
   return driveFolderId;
 }
 
+async function createScannerDriveSubfolder(
+  drive: driveV3.Drive,
+  parentFolderId: string,
+  subfolderName: string
+): Promise<string> {
+  const createResp = await drive.files.create({
+    supportsAllDrives: true,
+    requestBody: {
+      name: subfolderName,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [parentFolderId],
+    },
+    fields: "id",
+  });
+
+  const subfolderId = String(createResp.data.id ?? "").trim();
+  if (!subfolderId) {
+    throw new Error(
+      `Drive-Unterordner "${subfolderName}" konnte nicht erstellt werden.`
+    );
+  }
+
+  return subfolderId;
+}
+
+async function ensureScannerFotosSubfolder(
+  reservationRef: FirebaseFirestore.DocumentReference,
+  parentFolderId: string,
+  data: FirebaseFirestore.DocumentData
+): Promise<void> {
+  const existingFotosFolderId = String(data.fotosFolderId ?? "").trim();
+  if (existingFotosFolderId) {
+    return;
+  }
+
+  const drive = await getScannerDriveClient();
+  const fotosFolderId = await createScannerDriveSubfolder(
+    drive,
+    parentFolderId,
+    SCANNER_FOTOS_SUBFOLDER_NAME
+  );
+
+  await reservationRef.set({
+    fotosFolderId,
+    fotosFolderUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+}
+
 async function ensureScannerReservationDriveFolder(
   reservationId: string
-): Promise<string> {
+): Promise<{ driveFolderId: string; fotosFolderId: string }> {
   const reservationRef = admin
     .firestore()
     .collection(SCANNER_RESERVATIONS_COLLECTION)
@@ -2183,7 +2233,21 @@ async function ensureScannerReservationDriveFolder(
   const data = reservationSnap.data() ?? {};
   const existingDriveFolderId = String(data.driveFolderId ?? "").trim();
   if (existingDriveFolderId) {
-    return existingDriveFolderId;
+    await ensureScannerFotosSubfolder(
+      reservationRef,
+      existingDriveFolderId,
+      data
+    );
+    const updatedSnap = await reservationRef.get();
+    const updatedData = updatedSnap.data() ?? {};
+    const fotosFolderId = String(updatedData.fotosFolderId ?? "").trim();
+    if (!fotosFolderId) {
+      throw new Error("Fotos-Ordner konnte nicht erstellt werden.");
+    }
+    return {
+      driveFolderId: existingDriveFolderId,
+      fotosFolderId,
+    };
   }
 
   const driveFolderName = String(data.driveFolderName ?? "").trim();
@@ -2201,16 +2265,26 @@ async function ensureScannerReservationDriveFolder(
     drive,
     driveFolderName
   );
+  const fotosFolderId = await createScannerDriveSubfolder(
+    drive,
+    createdDriveFolderId,
+    SCANNER_FOTOS_SUBFOLDER_NAME
+  );
 
   await reservationRef.set({
     driveFolderId: createdDriveFolderId,
+    fotosFolderId,
     driveFolderReady: true,
     driveFolderUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    fotosFolderUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
     status: "reserved",
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   }, {merge: true});
 
-  return createdDriveFolderId;
+  return {
+    driveFolderId: createdDriveFolderId,
+    fotosFolderId,
+  };
 }
 
 async function rollbackScannerReservation(
@@ -2255,6 +2329,98 @@ async function rollbackScannerReservation(
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, {merge: true});
   });
+}
+
+async function deleteScannerDriveFolder(
+  drive: driveV3.Drive,
+  folderId: string
+): Promise<void> {
+  const id = String(folderId ?? "").trim();
+  if (!id) {
+    return;
+  }
+
+  let deleteError: unknown = null;
+  try {
+    await drive.files.delete({
+      fileId: id,
+      supportsAllDrives: true,
+    });
+    return;
+  } catch (e: unknown) {
+    deleteError = e;
+    console.warn("[cancelScannerReservation] drive delete failed", e);
+  }
+
+  try {
+    await drive.files.update({
+      fileId: id,
+      supportsAllDrives: true,
+      requestBody: {
+        trashed: true,
+      },
+    });
+    return;
+  } catch (trashError: unknown) {
+    const deleteMsg = deleteError instanceof Error ?
+      deleteError.message :
+      String(deleteError ?? "unbekannt");
+    const trashMsg = trashError instanceof Error ?
+      trashError.message :
+      String(trashError);
+    throw new Error(
+      "Drive-Ordner konnte nicht gelöscht werden. " +
+      `delete=${deleteMsg}; trash=${trashMsg}`
+    );
+  }
+}
+
+async function cancelScannerReservationForCaller(
+  callerUid: string,
+  reservationId: string
+): Promise<void> {
+  const trimmedReservationId = String(reservationId ?? "").trim();
+  if (!trimmedReservationId) {
+    throw new Error("reservationId required");
+  }
+
+  const reservationRef = admin
+    .firestore()
+    .collection(SCANNER_RESERVATIONS_COLLECTION)
+    .doc(trimmedReservationId);
+  const reservationSnap = await reservationRef.get();
+
+  if (!reservationSnap.exists) {
+    throw new Error("Reservierung nicht gefunden.");
+  }
+
+  const data = reservationSnap.data() ?? {};
+  const reservedByUid = String(data.reservedByUid ?? "").trim();
+  if (reservedByUid !== callerUid) {
+    throw new Error("Keine Berechtigung für diese Reservierung.");
+  }
+
+  const status = String(data.status ?? "").trim().toLowerCase();
+  const uploadedFileId = String(data.uploadedFileId ?? "").trim();
+  if (status === "uploaded" || uploadedFileId) {
+    throw new Error(
+      "Hochgeladene Reservierungen können nicht aufgehoben werden."
+    );
+  }
+
+  const number = Number(data.number);
+  const year2 = String(data.year2 ?? "").trim();
+  if (!Number.isFinite(number) || number <= 0 || !year2) {
+    throw new Error("Ungültige Reservierungsdaten.");
+  }
+
+  const driveFolderId = String(data.driveFolderId ?? "").trim();
+  if (driveFolderId) {
+    const drive = await getScannerDriveClient();
+    await deleteScannerDriveFolder(drive, driveFolderId);
+  }
+
+  await rollbackScannerReservation(trimmedReservationId, year2, number);
 }
 
 async function readScannerSequencePreview(): Promise<{
@@ -2307,6 +2473,8 @@ async function reserveScannerNumberForCaller(
   driveFolderName: string;
   driveFolderId: string;
   driveFolderUrl: string;
+  fotosFolderId: string;
+  fotosFolderUrl: string;
 }> {
   const callerUserSnap = await admin.firestore()
     .collection("users")
@@ -2401,13 +2569,16 @@ async function reserveScannerNumberForCaller(
   });
 
   try {
-    const driveFolderId = await ensureScannerReservationDriveFolder(
-      result.reservationId
-    );
+    const {driveFolderId, fotosFolderId} =
+      await ensureScannerReservationDriveFolder(
+        result.reservationId
+      );
     return {
       ...result,
       driveFolderId,
       driveFolderUrl: buildDriveFolderUrl(driveFolderId),
+      fotosFolderId,
+      fotosFolderUrl: buildDriveFolderUrl(fotosFolderId),
     };
   } catch (e: unknown) {
     console.error("[reserveScannerNumber] drive folder create failed", e);
@@ -2700,12 +2871,94 @@ export const reserveScannerNumberHttp = onRequest(
   }
 );
 
+export const cancelScannerNumber = onCall(
+  {
+    region: "us-central1",
+    serviceAccount: "svs-app-864ed@appspot.gserviceaccount.com",
+  },
+  async (request) => {
+    const callerUid = request.auth?.uid;
+    if (!callerUid) {
+      throw new HttpsError("unauthenticated", "Not signed in.");
+    }
+
+    const reservationId = String(request.data?.reservationId ?? "").trim();
+    if (!reservationId) {
+      throw new HttpsError("invalid-argument", "reservationId required.");
+    }
+
+    await cancelScannerReservationForCaller(callerUid, reservationId);
+    return {ok: true};
+  }
+);
+
+export const cancelScannerNumberHttp = onRequest(
+  {
+    region: "us-central1",
+    serviceAccount: "svs-app-864ed@appspot.gserviceaccount.com",
+  },
+  async (req, res) => {
+    try {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST,OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+      if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+      }
+
+      if (req.method !== "POST") {
+        res.status(405).json({ok: false, error: "Method not allowed"});
+        return;
+      }
+
+      const authHeader = String(req.header("authorization") ?? "");
+      if (!authHeader.startsWith("Bearer ")) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      const idToken = authHeader.slice("Bearer ".length).trim();
+      if (!idToken) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      let callerUid = "";
+      try {
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        callerUid = decoded.uid;
+      } catch {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      const body = (req.body ?? {}) as Partial<{reservationId: string}>;
+      const reservationId = String(body.reservationId ?? "").trim();
+      if (!reservationId) {
+        res.status(400).json({ok: false, error: "reservationId required"});
+        return;
+      }
+
+      await cancelScannerReservationForCaller(callerUid, reservationId);
+      res.status(200).json({ok: true});
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[cancelScannerNumberHttp] FAILED", e);
+      res.status(500).json({ok: false, error: msg});
+    }
+  }
+);
+
 // ------------------------------------------------------------------
 // Scanner -> Upload Scan (PDF) to Google Drive
 // POST /uploadScanToDrive
 // Auth: Bearer <Firebase ID Token>
 // Body: { storagePath: string, fileName: string, reservationId?: string }
-// Returns: { ok: true, driveFileId, driveFolderId?, driveFolderUrl? }
+// Returns:
+// { ok, driveFileId, driveFolderId?, driveFolderUrl?,
+//   fotosFolderId?, fotosFolderUrl? }
 // ------------------------------------------------------------------
 
 export const uploadScanToDrive = onRequest(
@@ -2785,6 +3038,7 @@ export const uploadScanToDrive = onRequest(
       const targetFolderId = SCANS_DRIVE_UPLOAD_FOLDER_ID;
       let reservationRef: admin.firestore.DocumentReference | null = null;
       let reservationDriveFolderId = "";
+      let reservationFotosFolderId = "";
 
       if (reservationId) {
         reservationRef = admin.firestore()
@@ -2806,17 +3060,11 @@ export const uploadScanToDrive = onRequest(
           return;
         }
 
-        const reservationFolderId = String(
-          reservationData.driveFolderId ?? ""
-        ).trim();
-        if (!reservationFolderId) {
-          res.status(500).json({
-            ok: false,
-            error: "Gutachten-Ordner der Reservierung fehlt",
-          });
-          return;
-        }
-        reservationDriveFolderId = reservationFolderId;
+        const folderIds = await ensureScannerReservationDriveFolder(
+          reservationId
+        );
+        reservationDriveFolderId = folderIds.driveFolderId;
+        reservationFotosFolderId = folderIds.fotosFolderId;
       }
 
       const drive = await getScannerDriveClient();
@@ -2877,6 +3125,8 @@ export const uploadScanToDrive = onRequest(
         driveFileId,
         driveFolderId: reservationDriveFolderId,
         driveFolderUrl: buildDriveFolderUrl(reservationDriveFolderId),
+        fotosFolderId: reservationFotosFolderId,
+        fotosFolderUrl: buildDriveFolderUrl(reservationFotosFolderId),
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

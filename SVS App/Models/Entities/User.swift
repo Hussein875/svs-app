@@ -26,7 +26,7 @@ struct User: Identifiable, Hashable, Codable {
     var stargutachterAccessEnabled: Bool = false
     /// Kachel „Dokumente“ in Mein Bereich.
     var documentsAccessEnabled: Bool = false
-    /// Kachel „Meine Uploads“ in Mein Bereich.
+    /// Kachel „Meine Gutachten“ in Mein Bereich.
     var myUploadsAccessEnabled: Bool = false
     /// Versteckt „Mein Bereich“ – nur Scanner und Menü.
     var scannerOnlyMode: Bool = true
@@ -35,6 +35,21 @@ struct User: Identifiable, Hashable, Codable {
 
     var color: Color {
         Color.svsAccentColor(from: colorName)
+    }
+
+    var displayInitials: String {
+        if let shortCode, !shortCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return shortCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+
+        let components = name
+            .split(whereSeparator: \.isWhitespace)
+            .compactMap { part -> String? in
+                guard let first = part.first else { return nil }
+                return String(first)
+            }
+        let joined = components.prefix(2).joined()
+        return joined.isEmpty ? "?" : joined.uppercased()
     }
 
     func canViewLawyerPower(id: String) -> Bool {

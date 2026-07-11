@@ -33,7 +33,7 @@ struct MyScannerUploadsView: View {
             }
         }
         .background(Color(.systemGroupedBackground))
-        .navigationTitle("Meine Uploads")
+        .navigationTitle("Meine Gutachten")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -122,10 +122,10 @@ struct MyScannerUploadsView: View {
                 .font(.system(size: 34, weight: .semibold))
                 .foregroundColor(.secondary)
 
-            Text("Uploads nicht freigeschaltet")
+            Text("Gutachten nicht freigeschaltet")
                 .font(.headline)
 
-            Text("Dein Admin kann den Zugriff auf Meine Uploads in der Nutzerverwaltung aktivieren.")
+            Text("Dein Admin kann den Zugriff auf Meine Gutachten in der Nutzerverwaltung aktivieren.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -140,7 +140,7 @@ struct MyScannerUploadsView: View {
                 .font(.system(size: 34, weight: .semibold))
                 .foregroundColor(.secondary)
 
-            Text("Noch keine Uploads")
+            Text("Noch keine Gutachten")
                 .font(.headline)
 
             Text("Reservierte Gutachten-Nummern und hochgeladene Scans erscheinen hier mit Link zum Drive-Ordner.")

@@ -37,7 +37,7 @@ struct EmployeeAppAccessSettingsSection: View {
         ) {
             Toggle("Nur Scanner (ohne Mein Bereich)", isOn: manualBinding($scannerOnlyMode))
             Toggle("Dokumente anzeigen", isOn: manualBinding($documentsAccessEnabled))
-            Toggle("Meine Uploads anzeigen", isOn: manualBinding($myUploadsAccessEnabled))
+            Toggle("Meine Gutachten anzeigen", isOn: manualBinding($myUploadsAccessEnabled))
             Toggle("Stargutachter anzeigen", isOn: manualBinding($stargutachterAccessEnabled))
             Toggle("Prämie anzeigen", isOn: manualBinding($commissionAccessEnabled))
         }

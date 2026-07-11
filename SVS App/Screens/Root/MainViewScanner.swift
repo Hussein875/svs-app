@@ -28,10 +28,62 @@ private struct ScannerReservationState: Equatable {
     let year2: String
     let scanName: String
     let driveFolderName: String
+    let driveFolderId: String
+    let driveFolderUrl: String
+    let fotosFolderId: String
+    let fotosFolderUrl: String
+
+    var driveFolderURL: URL? {
+        folderURL(from: driveFolderUrl, folderId: driveFolderId)
+    }
+
+    var fotosFolderURL: URL? {
+        folderURL(from: fotosFolderUrl, folderId: fotosFolderId)
+    }
+
+    private func folderURL(from directUrl: String, folderId: String) -> URL? {
+        let direct = directUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !direct.isEmpty, let url = URL(string: direct) {
+            return url
+        }
+
+        let id = folderId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return nil }
+        return URL(string: "https://drive.google.com/drive/folders/\(id)")
+    }
 }
 
 private struct DriveUploadResult: Equatable {
     let driveFileId: String
+    let driveFolderId: String?
+    let driveFolderUrl: String?
+    let fotosFolderId: String?
+    let fotosFolderUrl: String?
+
+    var driveFolderURL: URL? {
+        folderURL(from: driveFolderUrl, folderId: driveFolderId)
+    }
+
+    var fotosFolderURL: URL? {
+        folderURL(from: fotosFolderUrl, folderId: fotosFolderId)
+    }
+
+    private func folderURL(from directUrl: String?, folderId: String?) -> URL? {
+        let direct = directUrl?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !direct.isEmpty, let url = URL(string: direct) {
+            return url
+        }
+
+        let id = folderId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !id.isEmpty else { return nil }
+        return URL(string: "https://drive.google.com/drive/folders/\(id)")
+    }
+}
+
+private struct DriveUploadFeedback: Identifiable, Equatable {
+    let id = UUID()
+    let message: String
+    let fotosFolderURL: URL?
 }
 
 struct ScannerScreen: View {
@@ -49,8 +101,11 @@ struct ScannerScreen: View {
     @State private var isUploadingToDrive = false
     @State private var isLoadingScannerSequence = false
     @State private var isReservingScanNumber = false
+    @State private var isCancelingReservation = false
+    @State private var showCancelReservationConfirm = false
     @State private var reservedScan: ScannerReservationState? = nil
     @State private var driveUploadSuccessMessage: String? = nil
+    @State private var driveUploadFeedback: DriveUploadFeedback? = nil
 
     private var userAccentColor: Color {
         Color.svsAccentColor(from: appState.currentUser?.colorName)
@@ -167,6 +222,10 @@ struct ScannerScreen: View {
     }
     private var reserveScannerNumberEndpoint: URL? {
         URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/reserveScannerNumberHttp")
+    }
+
+    private var cancelScannerNumberEndpoint: URL? {
+        URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/cancelScannerNumberHttp")
     }
 
     private var isErrorPresented: Binding<Bool> {
@@ -310,6 +369,38 @@ struct ScannerScreen: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.primary)
                 }
+                .padding(.top, 4)
+
+                Button(role: .destructive) {
+                    showCancelReservationConfirm = true
+                } label: {
+                    HStack(spacing: 10) {
+                        if isCancelingReservation {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                        }
+                        Text("Reservierung aufheben")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.red.opacity(0.08))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.red.opacity(0.18), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isCancelingReservation || isUploadingToDrive)
+                .opacity(isCancelingReservation || isUploadingToDrive ? 0.6 : 1.0)
                 .padding(.top, 4)
             } else {
                 Text(previewDriveFolderName)
@@ -606,7 +697,27 @@ struct ScannerScreen: View {
             } message: {
                 Text(driveUploadSuccessMessage ?? "")
             }
+            .sheet(item: $driveUploadFeedback) { feedback in
+                DriveUploadSuccessSheet(feedback: feedback) {
+                    driveUploadFeedback = nil
+                }
+            }
+            .alert("Reservierung aufheben?", isPresented: $showCancelReservationConfirm) {
+                Button("Abbrechen", role: .cancel) { }
+                Button("Reservierung aufheben", role: .destructive) {
+                    _Concurrency.Task { await cancelCurrentScannerReservation() }
+                }
+            } message: {
+                Text(cancelReservationAlertMessage)
+            }
         }
+    }
+
+    private var cancelReservationAlertMessage: String {
+        if scannedImages.isEmpty {
+            return "Die Gutachten-Nummer wird freigegeben und der Drive-Ordner entfernt."
+        }
+        return "Die Gutachten-Nummer wird freigegeben, der Drive-Ordner entfernt und der aktuelle Scan verworfen."
     }
 
     // MARK: - Scanner bootstrap (permissions + device support)
@@ -736,15 +847,27 @@ struct ScannerScreen: View {
             )
 
             let idToken = try await user.getIDToken()
-            _ = try await callUploadScanToDrive(
+            let uploadResult = try await callUploadScanToDrive(
                 idToken: idToken,
                 storagePath: storagePath,
                 reservationId: reservedScan.reservationId,
                 fileName: finalName
             )
 
+            let fotosFolderURL = uploadResult.fotosFolderURL
+                ?? reservedScan.fotosFolderURL
+                ?? uploadResult.driveFolderURL
+                ?? reservedScan.driveFolderURL
             resetScannerSession(removeAllTempFiles: true)
-            driveUploadSuccessMessage = "Datei wurde in Google Drive abgelegt."
+
+            if let fotosFolderURL {
+                driveUploadFeedback = DriveUploadFeedback(
+                    message: "Das Dokument wurde hochgeladen. Laden Sie jetzt die Fotos in den Gutachten-Ordner hoch.",
+                    fotosFolderURL: fotosFolderURL
+                )
+            } else {
+                driveUploadSuccessMessage = "Das Dokument wurde in Google Drive abgelegt."
+            }
         } catch {
             uiErrorMessage = "Drive-Upload fehlgeschlagen: \(error.localizedDescription)"
         }
@@ -801,13 +924,23 @@ struct ScannerScreen: View {
         struct Payload: Decodable {
             let ok: Bool
             let driveFileId: String?
+            let driveFolderId: String?
+            let driveFolderUrl: String?
+            let fotosFolderId: String?
+            let fotosFolderUrl: String?
             let error: String?
         }
 
         do {
             let decoded = try JSONDecoder().decode(Payload.self, from: data)
             if decoded.ok, let id = decoded.driveFileId, !id.isEmpty {
-                return DriveUploadResult(driveFileId: id)
+                return DriveUploadResult(
+                    driveFileId: id,
+                    driveFolderId: decoded.driveFolderId,
+                    driveFolderUrl: decoded.driveFolderUrl,
+                    fotosFolderId: decoded.fotosFolderId,
+                    fotosFolderUrl: decoded.fotosFolderUrl
+                )
             }
 
             let msg = decoded.error ?? "HTTP \(status)"
@@ -1028,6 +1161,14 @@ struct ScannerScreen: View {
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? currentYear2
             let driveFolderName = (payload["driveFolderName"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let driveFolderId = (payload["driveFolderId"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let driveFolderUrl = (payload["driveFolderUrl"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let fotosFolderId = (payload["fotosFolderId"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let fotosFolderUrl = (payload["fotosFolderUrl"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let driveFolderReady = (payload["driveFolderReady"] as? Bool) ?? false
             let warning = (payload["warning"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1037,7 +1178,11 @@ struct ScannerScreen: View {
                 number: number,
                 year2: year2,
                 scanName: trimmedScanName,
-                driveFolderName: driveFolderName
+                driveFolderName: driveFolderName,
+                driveFolderId: driveFolderId,
+                driveFolderUrl: driveFolderUrl,
+                fotosFolderId: fotosFolderId,
+                fotosFolderUrl: fotosFolderUrl
             )
             syncScannerWidgetDisplay()
             refreshScanPDFIfNeeded()
@@ -1049,6 +1194,44 @@ struct ScannerScreen: View {
         } catch {
             await refreshScannerSequencePreview()
             uiErrorMessage = "Scanner-Nummer konnte nicht reserviert werden: \(error.localizedDescription)"
+        }
+    }
+
+    private func cancelCurrentScannerReservation() async {
+        guard !isCancelingReservation else { return }
+        guard let reservedScan else { return }
+
+        isCancelingReservation = true
+        defer { isCancelingReservation = false }
+
+        do {
+            guard let user = Auth.auth().currentUser else {
+                throw NSError(
+                    domain: "Scanner",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Nicht angemeldet."]
+                )
+            }
+
+            guard let cancelScannerNumberEndpoint else {
+                throw NSError(
+                    domain: "Scanner",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Aufheben-URL ist ungültig."]
+                )
+            }
+
+            let idToken = try await user.getIDToken()
+            _ = try await callScannerHttpEndpoint(
+                cancelScannerNumberEndpoint,
+                idToken: idToken,
+                body: ["reservationId": reservedScan.reservationId]
+            )
+
+            resetScannerSession(removeAllTempFiles: true)
+            uiErrorMessage = nil
+        } catch {
+            uiErrorMessage = "Reservierung konnte nicht aufgehoben werden: \(error.localizedDescription)"
         }
     }
 
@@ -1089,5 +1272,53 @@ struct ScannerScreen: View {
         }
 
         return payload
+    }
+}
+
+private struct DriveUploadSuccessSheet: View {
+    let feedback: DriveUploadFeedback
+    let onDone: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.green)
+                    .padding(.top, 12)
+
+                Text(feedback.message)
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 24)
+
+                if let folderURL = feedback.fotosFolderURL {
+                    Button {
+                        UIApplication.shared.open(folderURL)
+                    } label: {
+                        Label("Fotos hochladen", systemImage: "photo.on.rectangle.angled")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.horizontal, 24)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .navigationTitle("Upload erfolgreich")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Fertig") {
+                        onDone()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }

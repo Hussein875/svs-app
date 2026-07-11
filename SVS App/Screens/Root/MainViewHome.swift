@@ -48,79 +48,6 @@ struct WorkHomeView: View {
         return appState.currentUser?.stargutachterAccessEnabled ?? false
     }
 
-    private var currentYearInterval: DateInterval {
-        let cal = Calendar.current
-        let year = cal.component(.year, from: Date())
-        let start = cal.date(from: DateComponents(year: year, month: 1, day: 1)) ?? Date()
-        let end = cal.date(from: DateComponents(year: year + 1, month: 1, day: 1))
-            ?? Date().addingTimeInterval(60 * 60 * 24 * 365)
-        return DateInterval(start: start, end: end)
-    }
-
-    private var nextMeetingShortText: String {
-        guard let next = appState.nextMeetingAt else { return "Nicht gesetzt" }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "de_DE")
-        f.dateFormat = "dd.MM · HH:mm"
-        return f.string(from: next)
-    }
-
-    private var nextMyOnCallSaturdayText: String {
-        guard let me = appState.currentUser else { return "—" }
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-
-        let next = appState.leaveRequests
-            .filter { $0.user.id == me.id }
-            .filter { $0.type == .onCallSaturday }
-            .map { cal.startOfDay(for: $0.startDate) }
-            .filter { $0 >= today }
-            .sorted()
-            .first
-
-        guard let next else { return "Keine geplant" }
-
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "de_DE")
-        f.dateFormat = "EEE, dd.MM"
-        return f.string(from: next)
-    }
-
-    private var upcomingFreeSaturdaysCount: Int {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        let saturdays = allSaturdays(in: currentYearInterval)
-        return saturdays
-            .filter { $0 >= today }
-            .filter { sat in
-                !appState.leaveRequests.contains(where: {
-                    $0.type == .onCallSaturday && cal.isDate($0.startDate, inSameDayAs: sat)
-                })
-            }
-            .count
-    }
-
-    private func allSaturdays(in interval: DateInterval) -> [Date] {
-        let cal = Calendar.current
-        var dates: [Date] = []
-        var d = cal.startOfDay(for: interval.start)
-
-        // Advance to first Saturday.
-        while cal.component(.weekday, from: d) != 7 {
-            guard let next = cal.date(byAdding: .day, value: 1, to: d) else { break }
-            d = next
-        }
-
-        // Collect Saturdays until end.
-        while d < interval.end {
-            dates.append(d)
-            guard let next = cal.date(byAdding: .day, value: 7, to: d) else { break }
-            d = next
-        }
-
-        return dates
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -157,29 +84,12 @@ struct WorkHomeView: View {
                             .padding(.horizontal, 18)
                             .padding(.bottom, 18)
                     } else {
-                        // MARK: Quick numbers
-                        VStack(spacing: 12) {
-                            HStack(spacing: 12) {
-                                StatTextPill(
-                                    title: "Nächste Bereitschaft",
-                                    valueText: nextMyOnCallSaturdayText,
-                                    systemImage: "calendar"
-                                )
-                                StatTextPill(
-                                    title: "Nächstes Meeting",
-                                    valueText: nextMeetingShortText,
-                                    systemImage: "person.3.fill"
-                                )
-                            }
+                        VStack(alignment: .leading, spacing: 20) {
+                            primaryToolsSection
+                            additionalToolsSection
                         }
                         .padding(.horizontal, 18)
-
-                        frequentSection
-                            .padding(.horizontal, 18)
-
-                        quickAccessSection
-                            .padding(.horizontal, 18)
-                            .padding(.bottom, 18)
+                        .padding(.bottom, 18)
                     }
                 }
             }
@@ -219,132 +129,26 @@ struct WorkHomeView: View {
 
     @ViewBuilder
     private var employeeToolsSection: some View {
-        let hasAnyTile = showsDocumentsTile
-            || showsMyUploadsTile
-            || showsStargutachterTile
-            || showsCommissionTile
-
-        VStack(spacing: 12) {
-            NavigationLink {
-                AccidentSketchGalleryView()
-            } label: {
-                WorkCard(
-                    title: "Schadenhergang",
-                    subtitle: "Unfallskizze für Nacharbeit",
-                    systemImage: "pencil.and.scribble"
-                )
+        VStack(alignment: .leading, spacing: 20) {
+            if showsDocumentsTile || showsMyUploadsTile || showsCommissionTile {
+                employeePrimarySection
             }
-            .buttonStyle(.plain)
 
-            if hasAnyTile {
-                if showsDocumentsTile {
-                    NavigationLink {
-                        CompanyDocumentsView()
-                    } label: {
-                        WorkCard(
-                            title: "Dokumente",
-                            subtitle: "Unterlagen und Vollmachten",
-                            systemImage: "folder.fill"
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
+            employeeAdditionalSection
 
-                if showsMyUploadsTile {
-                    NavigationLink {
-                        MyScannerUploadsView()
-                    } label: {
-                        WorkCard(
-                            title: "Meine Uploads",
-                            subtitle: "Gutachten-Ordner in Google Drive",
-                            systemImage: "icloud.and.arrow.up.fill"
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if showsStargutachterTile {
-                    NavigationLink {
-                        StargutachterView()
-                    } label: {
-                        WorkCard(
-                            title: "Stargutachter",
-                            subtitle: "Gutachter-Portal",
-                            systemImage: "star.fill"
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if showsCommissionTile {
-                    NavigationLink {
-                        ProvisionenView()
-                    } label: {
-                        WorkCard(
-                            title: "Prämie",
-                            subtitle: "Vermittlungsprämie und Links",
-                            systemImage: "eurosign.circle"
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Weitere Bereiche")
-                        .font(.headline)
-                    Text("Dein Admin kann dir in der Nutzerverwaltung Dokumente, Uploads und weitere Kacheln freischalten.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
-                )
+            if !showsDocumentsTile,
+               !showsMyUploadsTile,
+               !showsStargutachterTile,
+               !showsCommissionTile {
+                employeeAccessHint
             }
         }
     }
 
     @ViewBuilder
-    private var frequentSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            homeSectionHeader("Häufig genutzt")
-
-            VStack(spacing: 12) {
-                NavigationLink {
-                    MyRequestsScreen()
-                } label: {
-                    WorkCard(
-                        title: "Abwesenheiten",
-                        subtitle: "Urlaub, Krankheit",
-                        systemImage: "doc.text"
-                    )
-                }
-                .buttonStyle(.plain)
-
-                NavigationLink {
-                    CompanyDocumentsView()
-                } label: {
-                    WorkCard(
-                        title: "Dokumente",
-                        subtitle: "Unterlagen und Vollmachten",
-                        systemImage: "folder.fill"
-                    )
-                }
-                .buttonStyle(.plain)
-
-                NavigationLink {
-                    AccidentSketchGalleryView()
-                } label: {
-                    WorkCard(
-                        title: "Schadenhergang",
-                        subtitle: "Unfallskizze für Nacharbeit am Tresen",
-                        systemImage: "pencil.and.scribble"
-                    )
-                }
-                .buttonStyle(.plain)
-
+    private var employeePrimarySection: some View {
+        VStack(spacing: 12) {
+            if showsCommissionTile {
                 NavigationLink {
                     ProvisionenView()
                 } label: {
@@ -356,44 +160,168 @@ struct WorkHomeView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            if showsDocumentsTile {
+                NavigationLink {
+                    CompanyDocumentsView()
+                } label: {
+                    WorkCard(
+                        title: "Dokumente",
+                        subtitle: "Unterlagen und Vollmachten",
+                        systemImage: "folder.fill"
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
+            if showsMyUploadsTile {
+                NavigationLink {
+                    MyScannerUploadsView()
+                } label: {
+                    WorkCard(
+                        title: "Meine Gutachten",
+                        subtitle: "Gutachten-Ordner in Google Drive",
+                        systemImage: "icloud.and.arrow.up.fill"
+                    )
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
     @ViewBuilder
-    private var quickAccessSection: some View {
+    private var employeeAdditionalSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            homeSectionHeader("Schnellzugriff")
+            homeSectionHeader("Weitere Bereiche")
 
             VStack(spacing: 12) {
-                HStack(spacing: 12) {
-                    NavigationLink {
-                        MyScannerUploadsView()
-                    } label: {
-                        CompactWorkCard(
-                            title: "Meine Uploads",
-                            systemImage: "icloud.and.arrow.up.fill"
-                        )
+                compactToolRow {
+                    if showsStargutachterTile {
+                        NavigationLink {
+                            StargutachterView()
+                        } label: {
+                            CompactWorkCard(
+                                title: "Stargutachter",
+                                systemImage: "star.fill"
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
 
                     NavigationLink {
-                        MeetingTopicsView()
+                        AccidentSketchGalleryView()
                     } label: {
                         CompactWorkCard(
-                            title: "Meeting",
-                            systemImage: "person.3.fill"
+                            title: "Schadenhergang",
+                            systemImage: "pencil.and.scribble"
                         )
                     }
                     .buttonStyle(.plain)
                 }
+            }
+        }
+    }
 
-                HStack(spacing: 12) {
+    private var employeeAccessHint: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Weitere Bereiche")
+                .font(.headline)
+            Text("Dein Admin kann dir in der Nutzerverwaltung Dokumente, Uploads und weitere Kacheln freischalten.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    @ViewBuilder
+    private var primaryToolsSection: some View {
+        VStack(spacing: 12) {
+            NavigationLink {
+                DashboardView()
+            } label: {
+                WorkCard(
+                    title: "Dashboard",
+                    subtitle: "Übersicht und Kennzahlen",
+                    systemImage: "chart.bar.xaxis"
+                )
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
+                ProvisionenView()
+            } label: {
+                WorkCard(
+                    title: "Prämie",
+                    subtitle: "Vermittlungsprämie und Links",
+                    systemImage: "eurosign.circle"
+                )
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
+                CompanyDocumentsView()
+            } label: {
+                WorkCard(
+                    title: "Dokumente",
+                    subtitle: "Unterlagen und Vollmachten",
+                    systemImage: "folder.fill"
+                )
+            }
+            .buttonStyle(.plain)
+
+            NavigationLink {
+                MyScannerUploadsView()
+            } label: {
+                WorkCard(
+                    title: "Meine Gutachten",
+                    subtitle: "Gutachten-Ordner in Google Drive",
+                    systemImage: "icloud.and.arrow.up.fill"
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private var additionalToolsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            homeSectionHeader("Weitere Bereiche")
+
+            VStack(spacing: 12) {
+                compactToolRow {
+                    NavigationLink {
+                        MyRequestsScreen()
+                    } label: {
+                        CompactWorkCard(
+                            title: "Abwesenheiten",
+                            systemImage: "doc.text"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
                     NavigationLink {
                         TasksView()
                     } label: {
                         CompactWorkCard(
                             title: "Aufgaben",
                             systemImage: "checklist"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                compactToolRow {
+                    NavigationLink {
+                        MeetingTopicsView()
+                    } label: {
+                        CompactWorkCard(
+                            title: "Meeting",
+                            systemImage: "person.3.fill"
                         )
                     }
                     .buttonStyle(.plain)
@@ -409,7 +337,7 @@ struct WorkHomeView: View {
                     .buttonStyle(.plain)
                 }
 
-                HStack(spacing: 12) {
+                compactToolRow {
                     NavigationLink {
                         MyOnCallSaturdaysScreen()
                     } label: {
@@ -421,17 +349,22 @@ struct WorkHomeView: View {
                     .buttonStyle(.plain)
 
                     NavigationLink {
-                        DashboardView()
+                        AccidentSketchGalleryView()
                     } label: {
                         CompactWorkCard(
-                            title: "Dashboard",
-                            systemImage: "chart.bar.xaxis"
+                            title: "Schadenhergang",
+                            systemImage: "pencil.and.scribble"
                         )
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .padding(.top, 6)
+    }
+
+    private func compactToolRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 12) {
+            content()
+        }
     }
 }
