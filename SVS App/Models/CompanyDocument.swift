@@ -8,6 +8,7 @@ import Foundation
 enum CompanyDocumentSection: String, CaseIterable, Identifiable {
     case internalDocuments
     case lawyerPowers
+    case stargutachter
 
     var id: String { rawValue }
 
@@ -17,6 +18,8 @@ enum CompanyDocumentSection: String, CaseIterable, Identifiable {
             return "Interne Dokumente"
         case .lawyerPowers:
             return "Anwaltsvollmachten"
+        case .stargutachter:
+            return "Stargutachter"
         }
     }
 
@@ -26,6 +29,17 @@ enum CompanyDocumentSection: String, CaseIterable, Identifiable {
             return "Abtretungserklärung und Begleitdokument – zentrale Unterlagen für das Team."
         case .lawyerPowers:
             return "Vollmachten der Partnerkanzleien zum Ansehen, Download und Weiterleiten."
+        case .stargutachter:
+            return "Abtretungserklärung für Stargutachter-Fälle."
+        }
+    }
+
+    var usesLawyerPowerAccess: Bool {
+        switch self {
+        case .lawyerPowers, .stargutachter:
+            return true
+        case .internalDocuments:
+            return false
         }
     }
 }
@@ -172,6 +186,8 @@ struct CompanyDocument: Identifiable, Hashable {
         switch id {
         case "ae":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.68, width: 0.52, height: 0.14)
+        case "stargutachter-ae":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.68, width: 0.52, height: 0.14)
         case "bd":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.74, width: 0.48, height: 0.12)
         case "av-wessels":
@@ -192,6 +208,8 @@ struct CompanyDocument: Identifiable, Hashable {
     private var signingDatePlacement: PDFSignaturePlacement {
         switch id {
         case "ae":
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.60, width: 0.28, height: 0.045)
+        case "stargutachter-ae":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.60, width: 0.28, height: 0.045)
         case "bd":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.66, width: 0.28, height: 0.045)
@@ -296,6 +314,14 @@ enum CompanyDocumentsCatalog {
             resourceName: "av-zeppelin",
             accentSymbol: "building.columns.fill"
         ),
+        CompanyDocument(
+            id: "stargutachter-ae",
+            title: "Abtretungserklärung",
+            subtitle: "Stargutachter · AE",
+            section: .stargutachter,
+            resourceName: "stargutachter",
+            accentSymbol: "star.fill"
+        ),
     ]
 
     static var availableItems: [CompanyDocument] {
@@ -307,11 +333,15 @@ enum CompanyDocumentsCatalog {
     }
 
     static var lawyerPowerItems: [CompanyDocument] {
-        availableItems(in: .lawyerPowers)
+        availableItems.filter { $0.section.usesLawyerPowerAccess }
     }
 
     static var allLawyerPowerIds: [String] {
         lawyerPowerItems.map(\.id)
+    }
+
+    static var remoteSigningItems: [CompanyDocument] {
+        items.filter(\.supportsRemoteSigning)
     }
 
     static func bundleURL(for document: CompanyDocument) -> URL? {

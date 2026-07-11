@@ -67,7 +67,7 @@ struct CompanyDocumentDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showRemoteSigning) {
+        .fullScreenCover(isPresented: $showRemoteSigning) {
             DocumentRemoteSigningSheet(document: document, sourcePDFURL: fileURL)
         }
         .fullScreenCover(isPresented: $showDirectDrawing) {
@@ -76,7 +76,7 @@ struct CompanyDocumentDetailView: View {
                 outputBaseName: document.resourceName,
                 onCancel: { showDirectDrawing = false },
                 onComplete: { url in
-                    signedPDFURL = url
+                    persistSignedPDF(url)
                     showDirectDrawing = false
                 }
             )
@@ -176,11 +176,28 @@ struct CompanyDocumentDetailView: View {
                     inkOverlays: inkOverlays,
                     outputBaseName: document.resourceName
                 )
-                signedPDFURL = outputURL
+                let label = textOverlays
+                    .map(\.text)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .first(where: { !$0.isEmpty })
+                persistSignedPDF(outputURL, label: label)
                 showSignatureFlow = false
             } catch {
                 signErrorMessage = error.localizedDescription
             }
+        }
+    }
+
+    private func persistSignedPDF(_ url: URL, label: String? = nil) {
+        do {
+            let record = try LocalSignedDocumentArchive.archive(
+                pdfAt: url,
+                document: document,
+                label: label
+            )
+            signedPDFURL = LocalSignedDocumentArchive.pdfURL(for: record) ?? url
+        } catch {
+            signedPDFURL = url
         }
     }
 }

@@ -42,7 +42,7 @@ struct EmployeeAppAccessSettingsSection: View {
             Toggle("Prämie anzeigen", isOn: manualBinding($commissionAccessEnabled))
         }
 
-        Section(header: Text("Anwaltsvollmachten")) {
+        Section {
             ForEach(lawyerPowerDocuments) { document in
                 Toggle(isOn: lawyerPowerBinding(for: document.id)) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -55,6 +55,10 @@ struct EmployeeAppAccessSettingsSection: View {
                     }
                 }
             }
+        } header: {
+            Text("Anwaltsvollmachten")
+        } footer: {
+            Text("Gilt für Kanzlei-Vollmachten und die Stargutachter-Abtretungserklärung unter Dokumente.")
         }
     }
 

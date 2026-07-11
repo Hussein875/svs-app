@@ -16,17 +16,17 @@ struct CompanyDocumentsView: View {
         CompanyDocumentsCatalog.availableItems
     }
 
-    private func visibleItems(in section: CompanyDocumentSection) -> [CompanyDocument] {
-        let sectionItems = CompanyDocumentsCatalog.availableItems(in: section)
-        guard section == .lawyerPowers, let user = appState.currentUser else {
-            return sectionItems
-        }
-        return sectionItems.filter { user.canViewLawyerPower(id: $0.id) }
-    }
-
     private var canViewDocuments: Bool {
         guard let user = appState.currentUser, user.role == .employee else { return true }
         return user.documentsAccessEnabled
+    }
+
+    private func visibleItems(in section: CompanyDocumentSection) -> [CompanyDocument] {
+        let sectionItems = CompanyDocumentsCatalog.availableItems(in: section)
+        guard section.usesLawyerPowerAccess, let user = appState.currentUser else {
+            return sectionItems
+        }
+        return sectionItems.filter { user.canViewLawyerPower(id: $0.id) }
     }
 
     var body: some View {
@@ -50,13 +50,13 @@ struct CompanyDocumentsView: View {
                 let sectionItems = visibleItems(in: section)
                 if !sectionItems.isEmpty {
                     Section {
-                        if section == .internalDocuments {
+                        if section == .lawyerPowers {
                             ForEach(sectionItems) { document in
-                                internalDocumentLink(document)
+                                lawyerDocumentLink(document)
                             }
                         } else {
                             ForEach(sectionItems) { document in
-                                lawyerDocumentLink(document)
+                                internalDocumentLink(document)
                             }
                         }
                     } header: {
@@ -68,15 +68,43 @@ struct CompanyDocumentsView: View {
                     }
                 }
             }
+
+            if canViewDocuments {
+                Section {
+                    NavigationLink {
+                        SignedDocumentsArchiveView()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "signature")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text("Signierte Dokumente")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
         }
         .listStyle(.insetGrouped)
     }
 
     private func sectionHeader(_ section: CompanyDocumentSection) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: section == .internalDocuments ? "star.fill" : "briefcase.fill")
+            Image(systemName: sectionHeaderSymbol(section))
                 .font(.caption.weight(.semibold))
             Text(section.title)
+        }
+    }
+
+    private func sectionHeaderSymbol(_ section: CompanyDocumentSection) -> String {
+        switch section {
+        case .internalDocuments:
+            return "star.fill"
+        case .lawyerPowers:
+            return "briefcase.fill"
+        case .stargutachter:
+            return "star.circle.fill"
         }
     }
 

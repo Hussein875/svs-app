@@ -12,6 +12,11 @@ struct DocumentRemoteSigningSheet: View {
         case notes
     }
 
+    private enum RemoteSigningTab: String, CaseIterable {
+        case links = "Links"
+        case signed = "Signiert"
+    }
+
     let document: CompanyDocument
     let sourcePDFURL: URL
 
@@ -19,18 +24,18 @@ struct DocumentRemoteSigningSheet: View {
     @FocusState private var focusedField: SigningFormField?
     @StateObject private var statusModel = DocumentSigningStatusViewModel()
 
+    @State private var selectedTab: RemoteSigningTab = .links
+    @State private var selectedSignedLink: DocumentSigningLinkStatus?
     @State private var accidentDate = Date()
     @State private var customerName = ""
     @State private var notes = ""
     @State private var isGenerating = false
     @State private var generatedLink: DocumentSigningLinkResult?
     @State private var errorMessage: String?
-    @State private var pdfErrorMessage: String?
-    @State private var openingPDFToken: String?
-    @State private var previewPDFURL: URL?
-    @State private var previewPDFTitle = "Signiertes PDF"
-    @State private var showCreateLinkSection = false
+    @State private var showCreateLinkSection = true
     @State private var deleteErrorMessage: String?
+    @State private var linksPendingDeletion: [DocumentSigningLinkStatus] = []
+    @State private var showDeleteLinkConfirm = false
 
     private var signedLinks: [DocumentSigningLinkStatus] {
         statusModel.links.filter(\.isSigned)
@@ -42,17 +47,36 @@ struct DocumentRemoteSigningSheet: View {
 
     var body: some View {
         NavigationStack {
-            signingList
-                .listStyle(.insetGrouped)
-                .scrollDismissesKeyboard(.interactively)
-                .navigationTitle("Kundenunterschrift")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { signingToolbar }
+            VStack(spacing: 0) {
+                Picker("Bereich", selection: $selectedTab) {
+                    ForEach(RemoteSigningTab.allCases, id: \.self) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+
+                Group {
+                    switch selectedTab {
+                    case .signed:
+                        signedDocumentsTab
+                    case .links:
+                        linksTab
+                    }
+                }
+            }
+            .navigationTitle("Kundenunterschrift")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { signingToolbar }
+            .navigationDestination(item: $selectedSignedLink) { link in
+                SignedDocumentDetailView(link: link)
+            }
         }
-        .onAppear(perform: handleAppear)
+        .onAppear {
+            statusModel.start(documentId: document.id)
+        }
         .onDisappear { statusModel.stop() }
-        .refreshable { await statusModel.refresh(documentId: document.id) }
-        .fullScreenCover(isPresented: pdfPreviewPresented, content: pdfPreviewCover)
         .alert("Link fehlgeschlagen", isPresented: linkErrorPresented) {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: {
@@ -63,135 +87,17 @@ struct DocumentRemoteSigningSheet: View {
         } message: {
             Text(deleteErrorMessage ?? "")
         }
-        .alert("PDF konnte nicht geladen werden", isPresented: pdfErrorPresented) {
-            Button("OK", role: .cancel) { pdfErrorMessage = nil }
+        .alert(deleteLinkAlertTitle, isPresented: $showDeleteLinkConfirm) {
+            Button("Abbrechen", role: .cancel) {
+                linksPendingDeletion = []
+            }
+            Button("Löschen", role: .destructive) {
+                let links = linksPendingDeletion
+                linksPendingDeletion = []
+                _Concurrency.Task { await performDeleteLinks(links) }
+            }
         } message: {
-            Text(pdfErrorMessage ?? "")
-        }
-    }
-
-    @ViewBuilder
-    private var signingList: some View {
-        List {
-            loadingSection
-            errorSection
-            signedDocumentsSection
-            emptySignedDocumentsSection
-            openLinksSection
-            createLinkSection
-            latestGeneratedLinkSection
-        }
-    }
-
-    @ViewBuilder
-    private var loadingSection: some View {
-        if statusModel.isLoading && statusModel.links.isEmpty {
-            Section {
-                HStack(spacing: 12) {
-                    ProgressView()
-                    Text("Signierte Dokumente werden geladen …")
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var errorSection: some View {
-        if let loadError = statusModel.lastError {
-            Section {
-                Label(loadError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.subheadline)
-                    .foregroundStyle(.orange)
-            } footer: {
-                Text("Prüfe die Internetverbindung und ziehe die Liste nach unten zum Aktualisieren.")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var signedDocumentsSection: some View {
-        if !signedLinks.isEmpty {
-            Section {
-                ForEach(signedLinks) { link in
-                    signedDocumentCard(link)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
-                .onDelete { offsets in
-                    _Concurrency.Task { await deleteLinks(at: offsets, in: signedLinks) }
-                }
-            } header: {
-                signedDocumentsHeader
-            } footer: {
-                Text(signedDocumentsFooter)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var emptySignedDocumentsSection: some View {
-        if signedLinks.isEmpty && !statusModel.isLoading && statusModel.lastError == nil {
-            Section {
-                VStack(spacing: 12) {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
-                    Text("Noch keine Unterschriften")
-                        .font(.headline)
-                    Text("Sobald ein Kunde online unterschreibt, erscheint das PDF hier.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-            }
-            .listRowBackground(Color.clear)
-        }
-    }
-
-    @ViewBuilder
-    private var openLinksSection: some View {
-        if !openLinks.isEmpty {
-            Section {
-                ForEach(openLinks) { link in
-                    openLinkRow(link)
-                }
-                .onDelete { offsets in
-                    _Concurrency.Task { await deleteLinks(at: offsets, in: openLinks) }
-                }
-            } header: {
-                Text("Offene Links")
-            } footer: {
-                Text("Noch nicht unterschriebene Links kannst du ebenfalls nach links wischen, um sie zu entfernen.")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var createLinkSection: some View {
-        Section {
-            DisclosureGroup(isExpanded: $showCreateLinkSection) {
-                createLinkForm
-            } label: {
-                Label("Neuen Kundenlink erstellen", systemImage: "link.badge.plus")
-                    .font(.subheadline.weight(.semibold))
-            }
-        } footer: {
-            if !showCreateLinkSection {
-                Text("Unfalldatum wird ins PDF eingetragen. Unterschrift und Datum trägt der Kunde online ein.")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var latestGeneratedLinkSection: some View {
-        if let generatedLink {
-            Section("Zuletzt erstellter Link") {
-                generatedLinkRows(generatedLink)
-            }
+            Text(deleteLinkAlertMessage)
         }
     }
 
@@ -223,166 +129,112 @@ struct DocumentRemoteSigningSheet: View {
         }
     }
 
-    private var signedDocumentsFooter: String {
-        let count = signedLinks.count
-        let suffix = count == 1 ? "s" : ""
-        let docSuffix = count == 1 ? "" : "e"
-        return "Nach links wischen zum Löschen. \(count) unterschriebene\(suffix) Dokument\(docSuffix)."
-    }
-
-    private var pdfPreviewPresented: Binding<Bool> {
-        Binding(
-            get: { previewPDFURL != nil },
-            set: { isPresented in
-                if !isPresented {
-                    previewPDFURL = nil
-                }
-            }
-        )
-    }
-
-    private var linkErrorPresented: Binding<Bool> {
-        Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )
-    }
-
-    private var deleteErrorPresented: Binding<Bool> {
-        Binding(
-            get: { deleteErrorMessage != nil },
-            set: { if !$0 { deleteErrorMessage = nil } }
-        )
-    }
-
-    private var pdfErrorPresented: Binding<Bool> {
-        Binding(
-            get: { pdfErrorMessage != nil },
-            set: { if !$0 { pdfErrorMessage = nil } }
-        )
-    }
-
     @ViewBuilder
-    private func pdfPreviewCover() -> some View {
-        if let fileURL = previewPDFURL {
-            SignedPDFViewerSheet(
-                fileURL: fileURL,
-                title: previewPDFTitle,
-                onClose: { self.previewPDFURL = nil }
-            )
-        }
-    }
-
-    private func handleAppear() {
-        statusModel.start(documentId: document.id)
-        showCreateLinkSection = signedLinks.isEmpty
-    }
-
-    private func dismissSigningKeyboard() {
-        focusedField = nil
-        hideKeyboard()
-    }
-
-    private var signedDocumentsHeader: some View {
-        HStack {
-            Label("Signierte Dokumente", systemImage: "checkmark.seal.fill")
-            Spacer()
-            if statusModel.isLoading && !signedLinks.isEmpty {
-                ProgressView()
-                    .controlSize(.small)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func signedDocumentCard(_ link: DocumentSigningLinkStatus) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.green.opacity(0.12))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: "doc.richtext.fill")
-                        .font(.title3)
-                        .foregroundStyle(.green)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(link.displayName)
-                        .font(.headline)
-
-                    if !link.documentTitle.isEmpty {
-                        Text(link.documentTitle)
-                            .font(.subheadline)
+    private var signedDocumentsTab: some View {
+        List {
+            if statusModel.isLoading && statusModel.links.isEmpty {
+                Section {
+                    HStack(spacing: 12) {
+                        ProgressView()
+                        Text("Signierte Dokumente werden geladen …")
                             .foregroundStyle(.secondary)
                     }
-
-                    if let signedAt = link.signedAt {
-                        Text("Unterschrieben \(signedAt.formatted(.relative(presentation: .named)))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let accidentDateIso = link.accidentDateIso,
-                       let date = ISO8601DateFormatter().date(from: accidentDateIso) {
-                        Label(
-                            "Unfall: \(date.formatted(date: .abbreviated, time: .omitted))",
-                            systemImage: "calendar"
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    }
                 }
-
-                Spacer(minLength: 0)
             }
 
-            if link.isSigned && !link.canOpenSignedPDF {
-                Label(
-                    "PDF wird noch verarbeitet …",
-                    systemImage: "clock.arrow.circlepath"
-                )
-                .font(.caption)
-                .foregroundStyle(.orange)
+            if let loadError = statusModel.lastError {
+                Section {
+                    Label(loadError, systemImage: "exclamationmark.triangle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                }
             }
 
-            HStack(spacing: 10) {
-                Button {
-                    _Concurrency.Task { await openSignedPDF(for: link) }
-                } label: {
-                    HStack(spacing: 8) {
-                        if openingPDFToken == link.id {
+            if signedLinks.isEmpty && !statusModel.isLoading && statusModel.lastError == nil {
+                Section {
+                    ContentUnavailableView(
+                        "Noch keine Unterschriften",
+                        systemImage: "doc.text.magnifyingglass",
+                        description: Text("Sobald ein Kunde online unterschreibt, erscheint das PDF hier.")
+                    )
+                    .listRowBackground(Color.clear)
+                }
+            }
+
+            if !signedLinks.isEmpty {
+                Section {
+                    ForEach(signedLinks) { link in
+                        Button {
+                            if link.canOpenSignedPDF {
+                                selectedSignedLink = link
+                            }
+                        } label: {
+                            SignedDocumentRow(link: link)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!link.canOpenSignedPDF)
+                    }
+                    .onDelete { offsets in
+                        requestDeleteLinks(at: offsets, in: signedLinks)
+                    }
+                } header: {
+                    HStack {
+                        Text("Signierte Dokumente")
+                        Spacer()
+                        if statusModel.isLoading {
                             ProgressView()
                                 .controlSize(.small)
                         }
-                        Text("PDF anzeigen")
-                            .font(.subheadline.weight(.semibold))
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(openingPDFToken == link.id || (link.isSigned && !link.canOpenSignedPDF))
-
-                if let cached = DocumentSigningLinkService.cachedSignedPDFURL(linkToken: link.id) {
-                    ShareLink(item: cached) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.body.weight(.semibold))
-                            .frame(width: 44, height: 44)
-                    }
-                    .buttonStyle(.bordered)
+                } footer: {
+                    Text("Tippe auf einen Eintrag, um das PDF in voller Ansicht zu öffnen. Nach links wischen zum Löschen.")
                 }
             }
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.green.opacity(0.18), lineWidth: 1)
-        )
+        .listStyle(.insetGrouped)
+        .refreshable { await statusModel.refresh(documentId: document.id) }
+    }
+
+    @ViewBuilder
+    private var linksTab: some View {
+        List {
+            if !openLinks.isEmpty {
+                Section {
+                    ForEach(openLinks) { link in
+                        openLinkRow(link)
+                    }
+                    .onDelete { offsets in
+                        requestDeleteLinks(at: offsets, in: openLinks)
+                    }
+                } header: {
+                    Text("Offene Links")
+                } footer: {
+                    Text("Noch nicht unterschriebene Links kannst du nach links wischen, um sie zu entfernen.")
+                }
+            }
+
+            Section {
+                DisclosureGroup(isExpanded: $showCreateLinkSection) {
+                    createLinkForm
+                } label: {
+                    Label("Neuen Kundenlink erstellen", systemImage: "link.badge.plus")
+                        .font(.subheadline.weight(.semibold))
+                }
+            } footer: {
+                if !showCreateLinkSection {
+                    Text("Unfalldatum wird ins PDF eingetragen. Unterschrift und Datum trägt der Kunde online ein.")
+                }
+            }
+
+            if let generatedLink {
+                Section("Zuletzt erstellter Link") {
+                    generatedLinkRows(generatedLink)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollDismissesKeyboard(.interactively)
+        .refreshable { await statusModel.refresh(documentId: document.id) }
     }
 
     @ViewBuilder
@@ -491,12 +343,31 @@ struct DocumentRemoteSigningSheet: View {
         if let matching = signedLinks.first(where: { $0.id == generatedLink.id }),
            matching.canOpenSignedPDF {
             Button {
-                _Concurrency.Task { await openSignedPDF(for: matching) }
+                selectedTab = .signed
+                selectedSignedLink = matching
             } label: {
                 Label("Signiertes PDF öffnen", systemImage: "doc.richtext.fill")
             }
-            .disabled(openingPDFToken == generatedLink.id)
         }
+    }
+
+    private var linkErrorPresented: Binding<Bool> {
+        Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )
+    }
+
+    private var deleteErrorPresented: Binding<Bool> {
+        Binding(
+            get: { deleteErrorMessage != nil },
+            set: { if !$0 { deleteErrorMessage = nil } }
+        )
+    }
+
+    private func dismissSigningKeyboard() {
+        focusedField = nil
+        hideKeyboard()
     }
 
     private func statusBadge(label: String, color: Color) -> some View {
@@ -509,52 +380,43 @@ struct DocumentRemoteSigningSheet: View {
             .clipShape(Capsule())
     }
 
-    private func openSignedPDF(for link: DocumentSigningLinkStatus) async {
-        await openSignedPDF(for: link.id, title: link.displayName, fileName: link.localPDFFileName)
+    private var deleteLinkAlertTitle: String {
+        linksPendingDeletion.allSatisfy(\.isSigned) ? "Signiertes Dokument löschen?" : "Link löschen?"
     }
 
-    private func openSignedPDF(for token: String, title: String, fileName: String) async {
-        await MainActor.run {
-            openingPDFToken = token
-            pdfErrorMessage = nil
-        }
-
-        defer {
-            _Concurrency.Task { @MainActor in
-                openingPDFToken = nil
+    private var deleteLinkAlertMessage: String {
+        if linksPendingDeletion.count == 1,
+           let link = linksPendingDeletion.first {
+            if link.isSigned {
+                return "„\(link.displayName)“ wird dauerhaft entfernt."
             }
+            return "Der Link für „\(link.displayName)“ wird dauerhaft entfernt."
         }
-
-        do {
-            let localURL = try await DocumentSigningLinkService.downloadSignedPDF(
-                linkToken: token,
-                fileName: fileName
-            )
-
-            await MainActor.run {
-                previewPDFTitle = title
-                previewPDFURL = localURL
-            }
-        } catch {
-            await MainActor.run {
-                pdfErrorMessage = error.localizedDescription
-            }
-        }
+        return "\(linksPendingDeletion.count) Einträge werden dauerhaft entfernt."
     }
 
-    private func deleteLinks(
+    private func requestDeleteLinks(
         at offsets: IndexSet,
         in source: [DocumentSigningLinkStatus]
-    ) async {
-        let tokens = offsets.compactMap { index in
-            source.indices.contains(index) ? source[index].id : nil
+    ) {
+        let links = offsets.compactMap { index in
+            source.indices.contains(index) ? source[index] : nil
         }
+        guard !links.isEmpty else { return }
+        linksPendingDeletion = links
+        showDeleteLinkConfirm = true
+    }
 
-        for token in tokens {
+    private func performDeleteLinks(_ links: [DocumentSigningLinkStatus]) async {
+        for link in links {
+            let token = link.id
             do {
                 try await statusModel.deleteLink(token: token)
                 if generatedLink?.id == token {
                     await MainActor.run { generatedLink = nil }
+                }
+                if selectedSignedLink?.id == token {
+                    await MainActor.run { selectedSignedLink = nil }
                 }
             } catch {
                 await MainActor.run {
@@ -588,36 +450,12 @@ struct DocumentRemoteSigningSheet: View {
             await MainActor.run {
                 generatedLink = result
                 showCreateLinkSection = false
+                selectedTab = .links
             }
         } catch {
             await MainActor.run {
                 errorMessage = error.localizedDescription
             }
-        }
-    }
-}
-
-private struct SignedPDFViewerSheet: View {
-    let fileURL: URL
-    let title: String
-    let onClose: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            PDFPreview(url: fileURL)
-                .background(Color(.systemGroupedBackground))
-                .navigationTitle(title)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Schließen", action: onClose)
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        ShareLink(item: fileURL) {
-                            Label("Teilen", systemImage: "square.and.arrow.up")
-                        }
-                    }
-                }
         }
     }
 }

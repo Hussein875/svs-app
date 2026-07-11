@@ -51,6 +51,11 @@ struct DocumentSigningLinkStatus: Identifiable, Hashable {
         return "Offen"
     }
 
+    var overviewDocumentLabel: String {
+        let title = documentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? "Dokument" : title
+    }
+
 }
 
 @MainActor
@@ -60,22 +65,39 @@ final class DocumentSigningStatusViewModel: ObservableObject {
     @Published private(set) var lastError: String?
 
     private var pollTask: _Concurrency.Task<Void, Never>?
+    private var documentIdFilter: String?
     private static var listEndpoint: URL? {
         URL(string: "https://us-central1-svs-app-864ed.cloudfunctions.net/listDocumentSigningLinks")
     }
 
     func start(documentId: String) {
+        documentIdFilter = documentId
+        startPolling()
+    }
+
+    func startAll() {
+        documentIdFilter = nil
+        startPolling()
+    }
+
+    private func startPolling() {
         pollTask?.cancel()
         pollTask = _Concurrency.Task {
             while !_Concurrency.Task.isCancelled {
-                await fetchLinks(documentId: documentId)
+                await fetchLinks()
                 try? await _Concurrency.Task.sleep(nanoseconds: 15_000_000_000)
             }
         }
     }
 
     func refresh(documentId: String) async {
-        await fetchLinks(documentId: documentId)
+        documentIdFilter = documentId
+        await fetchLinks()
+    }
+
+    func refreshAll() async {
+        documentIdFilter = nil
+        await fetchLinks()
     }
 
     func stop() {
@@ -92,7 +114,7 @@ final class DocumentSigningStatusViewModel: ObservableObject {
         removeLinkLocally(token: token)
     }
 
-    private func fetchLinks(documentId: String) async {
+    private func fetchLinks() async {
         guard !_Concurrency.Task.isCancelled else { return }
 
         guard let user = Auth.auth().currentUser else {
@@ -111,9 +133,11 @@ final class DocumentSigningStatusViewModel: ObservableObject {
 
         do {
             var components = URLComponents(url: listEndpoint, resolvingAgainstBaseURL: false)
-            components?.queryItems = [
-                URLQueryItem(name: "documentId", value: documentId),
-            ]
+            if let documentIdFilter, !documentIdFilter.isEmpty {
+                components?.queryItems = [
+                    URLQueryItem(name: "documentId", value: documentIdFilter),
+                ]
+            }
             guard let requestURL = components?.url else {
                 lastError = "Listen-URL ist ungültig."
                 return
