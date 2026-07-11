@@ -268,4 +268,16 @@ class AppState: ObservableObject {
             return false
         }
     }
+
+    @MainActor
+    func clearStoredUnreadBadge() async {
+        guard currentUser != nil else { return }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            _ = try await functions.httpsCallable("clearMyUnreadBadge").call()
+        } catch {
+            print("clearMyUnreadBadge failed:", error.localizedDescription)
+        }
+    }
 }

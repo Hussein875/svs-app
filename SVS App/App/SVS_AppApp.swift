@@ -7,6 +7,15 @@ import FirebaseFirestore
 // optional, falls du FirebaseAuth nutzt:
 import FirebaseAuth
 
+enum AppIconBadge {
+    static func clear() {
+        if #available(iOS 16.0, *) {
+            UNUserNotificationCenter.current().setBadgeCount(0) { _ in }
+        }
+        UIApplication.shared.applicationIconBadgeNumber = 0
+    }
+}
+
 /// Zentrale AppDelegate-Klasse für:
 /// - Firebase Initialisierung
 /// - Push-Notification-Setup (APNs + FCM)
@@ -30,7 +39,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         UNUserNotificationCenter.current().delegate = self
         Messaging.messaging().delegate = self
 
-        UIApplication.shared.applicationIconBadgeNumber = 0
+        AppIconBadge.clear()
         requestPushAuthorization()
         WatchScannerNumberSync.shared.activate()
 
@@ -131,21 +140,38 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 @main
 struct SVS_AppApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var appState = AppState()
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(appState)
-                .onOpenURL { url in
-                    AppDeepLink.handle(url, appState: appState)
-                }
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                UIApplication.shared.applicationIconBadgeNumber = 0
+            AppLifecycleHandler {
+                ContentView()
+                    .environmentObject(appState)
+                    .onOpenURL { url in
+                        AppDeepLink.handle(url, appState: appState)
+                    }
             }
+            .environmentObject(appState)
         }
+    }
+}
+
+private struct AppLifecycleHandler<Content: View>: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var appState: AppState
+    @ViewBuilder private var content: () -> Content
+
+    init(@ViewBuilder content: @escaping () -> Content) {
+        self.content = content
+    }
+
+    var body: some View {
+        content()
+            .onChange(of: scenePhase) {
+                if scenePhase == .active {
+                    AppIconBadge.clear()
+                    _Concurrency.Task { await appState.clearStoredUnreadBadge() }
+                }
+            }
     }
 }

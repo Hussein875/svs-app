@@ -507,25 +507,17 @@ function logMulticastFailures(
 }
 
 /**
- * Returns a minimal APNs config that sets a visible app icon badge.
+ * Returns APNs config with badge disabled (always 0).
  *
- * Badge must be an absolute number (APNs requirement), therefore callers
- * should pass the current unread counter for the target user.
+ * App icon badges are intentionally not used because counts were unreliable.
  *
- * @param {number} badgeCount Unread counter value for the target user.
- * @return {admin.messaging.ApnsConfig} APNs config with concrete badge value.
+ * @return {admin.messaging.ApnsConfig} APNs config with badge set to 0.
  */
-function appIconBadgeApnsConfig(
-  badgeCount: number
-): admin.messaging.ApnsConfig {
-  const normalized = Number.isFinite(badgeCount) ?
-    Math.max(0, Math.min(999, Math.floor(badgeCount))) :
-    0;
-
+function appIconBadgeApnsConfig(): admin.messaging.ApnsConfig {
   return {
     payload: {
       aps: {
-        badge: normalized,
+        badge: 0,
       },
     },
   };
@@ -963,46 +955,6 @@ function filterOutUserTokenRefs(
 }
 
 /**
- * Normalizes an unread badge counter value from Firestore.
- *
- * @param {unknown} raw Value from Firestore.
- * @return {number} Safe integer in the range 0...999.
- */
-function normalizeUnreadBadgeCount(raw: unknown): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(999, Math.floor(n)));
-}
-
-/**
- * Increments the unread badge counter for one user and returns the new value.
- *
- * Counter is stored in users/<uid>.unreadNotificationCount.
- *
- * @param {string} userId Firebase Auth UID.
- * @return {Promise<number>} New unread count after increment.
- */
-async function incrementUnreadBadgeForUser(userId: string): Promise<number> {
-  const uid = String(userId ?? "").trim();
-  if (!uid) return 1;
-
-  const userRef = admin.firestore().collection("users").doc(uid);
-  return admin.firestore().runTransaction(async (tx) => {
-    const snap = await tx.get(userRef);
-    const current = normalizeUnreadBadgeCount(
-      (snap.data() as Record<string, unknown> | undefined)
-        ?.unreadNotificationCount
-    );
-    const next = Math.min(999, current + 1);
-    tx.set(userRef, {
-      unreadNotificationCount: next,
-      unreadNotificationUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, {merge: true});
-    return next;
-  });
-}
-
-/**
  * Clears the unread badge counter for one user.
  *
  * @param {string} userId Firebase Auth UID.
@@ -1037,12 +989,10 @@ function groupTokenRefsByOwner(tokenRefs: TokenRef[]): Map<string, TokenRef[]> {
 }
 
 /**
- * Sends one logical push payload to many users while maintaining per-user
- * unread badge counters.
+ * Sends one logical push payload to many users.
  *
- * Each owner gets:
- * 1) unreadNotificationCount incremented in users/<uid>
- * 2) push to all of their devices with that concrete badge value
+ * Badge counters are disabled; each push explicitly clears the app icon
+ * badge via APNs badge=0.
  *
  * @param {string} tag Short logging tag.
  * @param {TokenRef[]} tokenRefs Recipient device token refs.
@@ -1065,24 +1015,13 @@ async function sendBadgeCountedMulticast(
   let totalSuccess = 0;
   let totalFailure = 0;
 
-  for (const [ownerUserId, ownerRefs] of byOwner.entries()) {
+  for (const [, ownerRefs] of byOwner.entries()) {
     const tokens = ownerRefs.map((t) => t.token);
     if (tokens.length === 0) continue;
 
-    let badgeCount = 1;
-    try {
-      badgeCount = await incrementUnreadBadgeForUser(ownerUserId);
-    } catch (e) {
-      console.warn(
-        "[push][" + tag + "] badge increment failed for",
-        ownerUserId,
-        e
-      );
-    }
-
     const resp = await admin.messaging().sendEachForMulticast({
       tokens,
-      apns: appIconBadgeApnsConfig(badgeCount),
+      apns: appIconBadgeApnsConfig(),
       notification,
       data,
     });
