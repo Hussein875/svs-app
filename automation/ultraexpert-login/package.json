@@ -8,6 +8,8 @@
     "login:debug": "UX_HEADLESS=false UX_KEEP_OPEN=true node --env-file=.env login.mjs",
     "create:akte": "UX_KEEP_OPEN=false node --env-file=.env create-akte.mjs",
     "create:akte:debug": "UX_HEADLESS=false UX_KEEP_OPEN=true node --env-file=.env create-akte.mjs",
+    "search:vin": "UX_KEEP_OPEN=false node --env-file=.env search-by-vin.mjs",
+    "search:vin:debug": "UX_HEADLESS=false UX_KEEP_OPEN=true node --env-file=.env search-by-vin.mjs",
     "server": "UX_KEEP_OPEN=false node --env-file=.env server.mjs",
     "server:debug": "UX_HEADLESS=false UX_KEEP_OPEN=false node --env-file=.env server.mjs"
   },

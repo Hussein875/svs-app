@@ -138,6 +138,52 @@ export function extractDossierId(url) {
   return match?.[1] || null;
 }
 
+export function normalizeVin(vin) {
+  return String(vin || "")
+    .toUpperCase()
+    .replace(/[\s-]+/g, "")
+    .trim();
+}
+
+const GUTACHTEN_NUMBER_PATTERN = /\b(\d{1,5}\/\d{2})\b/g;
+const VIN_PATTERN = /\b([A-HJ-NPR-Z0-9]{17})\b/gi;
+
+export function extractGutachtenNumbersFromText(text) {
+  const matches = new Set();
+  for (const match of String(text || "").matchAll(GUTACHTEN_NUMBER_PATTERN)) {
+    if (match[1]) {
+      matches.add(match[1]);
+    }
+  }
+  return [...matches];
+}
+
+export function extractVinFromText(text) {
+  const match = String(text || "").match(VIN_PATTERN);
+  return match?.[0] ? normalizeVin(match[0]) : null;
+}
+
+export function dedupeMatches(matches) {
+  const seen = new Set();
+  const result = [];
+
+  for (const match of matches) {
+    const gutachtenNumber = String(match?.gutachtenNumber || "").trim();
+    if (!gutachtenNumber || seen.has(gutachtenNumber)) {
+      continue;
+    }
+
+    seen.add(gutachtenNumber);
+    result.push({
+      gutachtenNumber,
+      dossierId: match?.dossierId ? String(match.dossierId) : undefined,
+      dossierUrl: match?.dossierUrl ? String(match.dossierUrl) : undefined
+    });
+  }
+
+  return result;
+}
+
 async function createContextOptions() {
   const options = {
     viewport: { width: 1440, height: 960 },

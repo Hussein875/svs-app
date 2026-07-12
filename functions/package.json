@@ -11,6 +11,9 @@
     "test": "npm run build && node --test test/**/*.test.js",
     "serve": "npm run build && firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions",
+    "setup:docupipe-schema": "node scripts/setup-docupipe-schema.mjs",
+    "patch:docupipe-erstzulassung": "node scripts/patch-docupipe-schema-erstzulassung.mjs",
+    "patch:docupipe-erstzulassung-guidelines": "node scripts/patch-docupipe-erstzulassung-guidelines.mjs",
     "logs": "firebase functions:log"
   },
   "dependencies": {

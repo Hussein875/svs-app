@@ -339,12 +339,7 @@ enum PDFSignatureService {
                 let pageBounds = page.bounds(for: .mediaBox)
                 context.beginPage(withBounds: pageBounds, pageInfo: [:])
 
-                let cgContext = context.cgContext
-                cgContext.saveGState()
-                cgContext.translateBy(x: 0, y: pageBounds.height)
-                cgContext.scaleBy(x: 1, y: -1)
-                page.draw(with: .mediaBox, to: cgContext)
-                cgContext.restoreGState()
+                drawRasterizedPage(page, in: pageBounds)
 
                 for overlay in textOverlays where overlay.placement.pageIndex == pageIndex {
                     let textRect = overlay.placement.rect(in: pageBounds)
@@ -385,12 +380,7 @@ enum PDFSignatureService {
                 let pageBounds = page.bounds(for: .mediaBox)
                 context.beginPage(withBounds: pageBounds, pageInfo: [:])
 
-                let cgContext = context.cgContext
-                cgContext.saveGState()
-                cgContext.translateBy(x: 0, y: pageBounds.height)
-                cgContext.scaleBy(x: 1, y: -1)
-                page.draw(with: .mediaBox, to: cgContext)
-                cgContext.restoreGState()
+                drawRasterizedPage(page, in: pageBounds)
 
                 if pageIndex == signaturePlacement.pageIndex {
                     let signatureRect = signaturePlacement.rect(in: pageBounds)
@@ -416,6 +406,25 @@ enum PDFSignatureService {
         return data
     }
 
+    private static func drawRasterizedPage(_ page: PDFPage, in pageBounds: CGRect) {
+        let renderSize = CGSize(
+            width: max(pageBounds.width, 1) * 2,
+            height: max(pageBounds.height, 1) * 2
+        )
+        let image = page.thumbnail(of: renderSize, for: .mediaBox)
+        if image.size.width > 0, image.size.height > 0 {
+            image.draw(in: pageBounds)
+            return
+        }
+
+        guard let cgContext = UIGraphicsGetCurrentContext() else { return }
+        cgContext.saveGState()
+        cgContext.translateBy(x: 0, y: pageBounds.height)
+        cgContext.scaleBy(x: 1, y: -1)
+        page.draw(with: .mediaBox, to: cgContext)
+        cgContext.restoreGState()
+    }
+
     private static func drawSignature(_ signature: UIImage, in rect: CGRect) {
         let fitted = aspectFitRect(for: signature.size, in: rect)
         signature.draw(in: fitted)
@@ -427,7 +436,7 @@ enum PDFSignatureService {
         let maxFontSize = max(6, rect.height * 0.52)
         var fontSize = maxFontSize
 
-        while fontSize > 5 {
+        while fontSize > 6 {
             let font = UIFont.systemFont(ofSize: fontSize, weight: .regular)
             let size = (text as NSString).size(withAttributes: [.font: font])
             if size.width <= rect.width * 0.98 {
@@ -436,7 +445,7 @@ enum PDFSignatureService {
             fontSize -= 0.5
         }
 
-        fontSize = max(5, fontSize - 6)
+        fontSize = max(6, min(fontSize, rect.height * 0.85))
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .left

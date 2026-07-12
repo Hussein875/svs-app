@@ -133,6 +133,11 @@ struct CompanyDocument: Identifiable, Hashable {
         id == "av-wessels"
     }
 
+    /// Geführter Formular-Funnel zum Ausfüllen der PDF.
+    var supportsFormFunnel: Bool {
+        id == "ae"
+    }
+
     /// Textfelder, die beim Signieren auf das PDF gesetzt werden (Datum immer enthalten).
     var textFields: [CompanyDocumentTextField] {
         var fields: [CompanyDocumentTextField] = []
@@ -185,7 +190,7 @@ struct CompanyDocument: Identifiable, Hashable {
     var signaturePlacement: PDFSignaturePlacement {
         switch id {
         case "ae":
-            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.68, width: 0.52, height: 0.14)
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.579, y: 0.865, width: 0.235, height: 0.075)
         case "stargutachter-ae":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.68, width: 0.52, height: 0.14)
         case "bd":
@@ -208,7 +213,7 @@ struct CompanyDocument: Identifiable, Hashable {
     private var signingDatePlacement: PDFSignaturePlacement {
         switch id {
         case "ae":
-            return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.60, width: 0.28, height: 0.045)
+            return PDFSignaturePlacement(pageIndex: 0, x: 0.107, y: 0.912, width: 0.20, height: 0.025)
         case "stargutachter-ae":
             return PDFSignaturePlacement(pageIndex: 0, x: 0.06, y: 0.60, width: 0.28, height: 0.045)
         case "bd":

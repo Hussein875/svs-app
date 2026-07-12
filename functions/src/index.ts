@@ -19,6 +19,13 @@ import {
   filterTokenRefsByPreference,
   isBooleanPreferenceEnabled,
 } from "./pushPreferences";
+import {
+  recognizeVehicleRegistrationWithDocuPipe,
+} from "./docupipeVehicleRegistration";
+import {
+  checkUltraExpertPriorDamageByVin,
+  normalizeVin as normalizeVehicleVin,
+} from "./ultraExpertVinCheck";
 
 admin.initializeApp();
 
@@ -28,6 +35,16 @@ setGlobalOptions({region: "us-central1"});
 const SMTP_HOST_SECRET = defineSecret("SMTP_HOST");
 const SMTP_USER_SECRET = defineSecret("SMTP_USER");
 const SMTP_PASS_SECRET = defineSecret("SMTP_PASS");
+const DOCUPIPE_API_KEY_SECRET = defineSecret("DOCUPIPE_API_KEY");
+const DOCUPIPE_VEHICLE_REGISTRATION_SCHEMA_ID_SECRET = defineSecret(
+  "DOCUPIPE_VEHICLE_REGISTRATION_SCHEMA_ID"
+);
+const ULTRAEXPERT_BOT_WEBHOOK_URL_SECRET = defineSecret(
+  "ULTRAEXPERT_BOT_WEBHOOK_URL"
+);
+const ULTRAEXPERT_BOT_WEBHOOK_SECRET = defineSecret(
+  "ULTRAEXPERT_BOT_WEBHOOK_SECRET"
+);
 
 type Role = "admin" | "employee" | "expert";
 
@@ -1854,6 +1871,7 @@ type UploadScanToDriveBody = {
   storagePath: string;
   fileName: string;
   reservationId?: string;
+  useReservationFolder?: boolean;
 };
 
 const SCANS_DRIVE_UPLOAD_FOLDER_ID = "19n1REUlYfwdzrj3NntMqgzoQ05jg2T9f";
@@ -2891,6 +2909,292 @@ export const cancelScannerNumberHttp = onRequest(
 );
 
 // ------------------------------------------------------------------
+// Vehicle registration OCR via DocuPipe
+// POST /recognizeVehicleRegistrationHttp
+// Auth: Bearer <Firebase ID Token>
+// Body: { imageBase64: string } or legacy { storagePath: string }
+// Returns: { ok, source, clientLastName?, clientFirstName?, ... }
+// ------------------------------------------------------------------
+
+type RecognizeVehicleRegistrationBody = {
+  storagePath?: string;
+  imageBase64?: string;
+};
+
+export const recognizeVehicleRegistrationHttp = onRequest(
+  {
+    region: "us-central1",
+    serviceAccount: "svs-app-864ed@appspot.gserviceaccount.com",
+    secrets: [
+      DOCUPIPE_API_KEY_SECRET,
+      DOCUPIPE_VEHICLE_REGISTRATION_SCHEMA_ID_SECRET,
+    ],
+    timeoutSeconds: 120,
+    memory: "512MiB",
+  },
+  async (req, res) => {
+    try {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST,OPTIONS");
+      res.set(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+      );
+
+      if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+      }
+
+      if (req.method !== "POST") {
+        res.status(405).json({ok: false, error: "Method not allowed"});
+        return;
+      }
+
+      const authHeader = String(req.header("authorization") ?? "");
+      if (!authHeader.startsWith("Bearer ")) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      const idToken = authHeader.slice("Bearer ".length).trim();
+      if (!idToken) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      let callerUid = "";
+      try {
+        const decoded = await admin.auth().verifyIdToken(idToken);
+        callerUid = decoded.uid;
+      } catch {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      const apiKey = String(
+        DOCUPIPE_API_KEY_SECRET.value() ||
+        process.env.DOCUPIPE_API_KEY ||
+        ""
+      ).trim();
+      const schemaId = String(
+        DOCUPIPE_VEHICLE_REGISTRATION_SCHEMA_ID_SECRET.value() ||
+        process.env.DOCUPIPE_VEHICLE_REGISTRATION_SCHEMA_ID ||
+        ""
+      ).trim();
+
+      if (!apiKey || !schemaId) {
+        res.status(503).json({
+          ok: false,
+          code: "not_configured",
+          error: "DocuPipe is not configured on the server.",
+        });
+        return;
+      }
+
+      const body = (req.body ?? {}) as
+        Partial<RecognizeVehicleRegistrationBody>;
+      const imageBase64 = String(body.imageBase64 ?? "").trim();
+      const storagePath = String(body.storagePath ?? "").trim();
+
+      let imageBuffer: Buffer | null = null;
+      let mimeType = "image/jpeg";
+      let tempStoragePath = "";
+
+      if (imageBase64) {
+        imageBuffer = Buffer.from(imageBase64, "base64");
+        if (!imageBuffer.length) {
+          res.status(400).json({ok: false, error: "Invalid image data"});
+          return;
+        }
+        if (imageBuffer.length > 8 * 1024 * 1024) {
+          res.status(400).json({ok: false, error: "Image too large"});
+          return;
+        }
+      } else if (storagePath) {
+        const allowedPrefixes = [
+          `scans/${callerUid}/ocr__`,
+          `ocr-temp/${callerUid}/`,
+        ];
+        const allowed = allowedPrefixes.some((prefix) =>
+          storagePath.startsWith(prefix)
+        );
+        if (!allowed) {
+          res.status(403).json({ok: false, error: "Forbidden"});
+          return;
+        }
+
+        tempStoragePath = storagePath;
+        const bucket = admin.storage().bucket();
+        const file = bucket.file(storagePath);
+        const [exists] = await file.exists();
+        if (!exists) {
+          res.status(404).json({ok: false, error: "file not found"});
+          return;
+        }
+
+        const [metadata] = await file.getMetadata();
+        mimeType = String(metadata.contentType ?? "image/jpeg");
+        const [downloaded] = await file.download();
+        imageBuffer = downloaded;
+      } else {
+        res.status(400).json({
+          ok: false,
+          error: "imageBase64 or storagePath required",
+        });
+        return;
+      }
+
+      const result = await recognizeVehicleRegistrationWithDocuPipe(
+        {apiKey, schemaId},
+        imageBuffer,
+        mimeType
+      );
+
+      if (tempStoragePath) {
+        try {
+          await admin.storage().bucket().file(tempStoragePath)
+            .delete({ignoreNotFound: true});
+        } catch (cleanupError) {
+          console.warn(
+            "[recognizeVehicleRegistrationHttp] temp storage cleanup failed",
+            cleanupError
+          );
+        }
+      }
+
+      res.status(200).json({
+        ok: true,
+        source: "docupipe",
+        clientLastName: result.clientLastName,
+        clientFirstName: result.clientFirstName,
+        clientName: result.clientName,
+        streetAndNumber: result.streetAndNumber,
+        postalCode: result.postalCode,
+        city: result.city,
+        licensePlate: result.licensePlate,
+        vin: result.vin,
+        firstRegistrationDate: result.firstRegistrationDate,
+        rawText: result.rawText,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[recognizeVehicleRegistrationHttp] FAILED", e);
+      res.status(500).json({ok: false, error: msg});
+    }
+  }
+);
+
+// ------------------------------------------------------------------
+// UltraExpert Vorschaden-Check by FIN/VIN
+// POST /checkUltraExpertPriorDamageHttp
+// Auth: Bearer <Firebase ID Token>
+// Body: { vin: string }
+// Returns: { ok, vin, matchCount, gutachtenNumbers, matches }
+// ------------------------------------------------------------------
+
+type CheckUltraExpertPriorDamageBody = {
+  vin?: string;
+  fin?: string;
+};
+
+export const checkUltraExpertPriorDamageHttp = onRequest(
+  {
+    region: "us-central1",
+    serviceAccount: "svs-app-864ed@appspot.gserviceaccount.com",
+    secrets: [
+      ULTRAEXPERT_BOT_WEBHOOK_URL_SECRET,
+      ULTRAEXPERT_BOT_WEBHOOK_SECRET,
+    ],
+    timeoutSeconds: 120,
+    memory: "256MiB",
+  },
+  async (req, res) => {
+    try {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST,OPTIONS");
+      res.set(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization"
+      );
+
+      if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+      }
+
+      if (req.method !== "POST") {
+        res.status(405).json({ok: false, error: "Method not allowed"});
+        return;
+      }
+
+      const authHeader = String(req.header("authorization") ?? "");
+      if (!authHeader.startsWith("Bearer ")) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      const idToken = authHeader.slice("Bearer ".length).trim();
+      if (!idToken) {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      try {
+        await admin.auth().verifyIdToken(idToken);
+      } catch {
+        res.status(401).json({ok: false, error: "Unauthorized"});
+        return;
+      }
+
+      const botUrl = String(
+        ULTRAEXPERT_BOT_WEBHOOK_URL_SECRET.value() ||
+        process.env.ULTRAEXPERT_BOT_WEBHOOK_URL ||
+        ""
+      ).trim();
+      const botSecret = String(
+        ULTRAEXPERT_BOT_WEBHOOK_SECRET.value() ||
+        process.env.ULTRAEXPERT_BOT_WEBHOOK_SECRET ||
+        ""
+      ).trim();
+
+      if (!botUrl || !botSecret) {
+        res.status(503).json({
+          ok: false,
+          code: "not_configured",
+          error: "UltraExpert bot is not configured on the server.",
+        });
+        return;
+      }
+
+      const body = (req.body ?? {}) as Partial<CheckUltraExpertPriorDamageBody>;
+      const vin = normalizeVehicleVin(String(body.vin ?? body.fin ?? ""));
+      if (!vin) {
+        res.status(400).json({ok: false, error: "vin required"});
+        return;
+      }
+
+      const result = await checkUltraExpertPriorDamageByVin(
+        {botUrl, botSecret},
+        vin
+      );
+
+      if (!result.ok) {
+        const statusCode = result.error === "Invalid VIN" ? 400 : 502;
+        res.status(statusCode).json(result);
+        return;
+      }
+
+      res.status(200).json(result);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[checkUltraExpertPriorDamageHttp] FAILED", e);
+      res.status(500).json({ok: false, error: msg});
+    }
+  }
+);
+
+// ------------------------------------------------------------------
 // Scanner -> Upload Scan (PDF) to Google Drive
 // POST /uploadScanToDrive
 // Auth: Bearer <Firebase ID Token>
@@ -2949,6 +3253,7 @@ export const uploadScanToDrive = onRequest(
       const storagePath = String(body.storagePath ?? "").trim();
       const reservationId = String(body.reservationId ?? "").trim();
       const fileName = String(body.fileName ?? "").trim();
+      const useReservationFolder = body.useReservationFolder === true;
 
       if (!storagePath) {
         res.status(400).json({ok: false, error: "storagePath required"});
@@ -2978,6 +3283,7 @@ export const uploadScanToDrive = onRequest(
       let reservationRef: admin.firestore.DocumentReference | null = null;
       let reservationDriveFolderId = "";
       let reservationFotosFolderId = "";
+      let parentFolderId = targetFolderId;
 
       if (reservationId) {
         reservationRef = admin.firestore()
@@ -3004,6 +3310,9 @@ export const uploadScanToDrive = onRequest(
         );
         reservationDriveFolderId = folderIds.driveFolderId;
         reservationFotosFolderId = folderIds.fotosFolderId;
+        if (useReservationFolder && reservationDriveFolderId) {
+          parentFolderId = reservationDriveFolderId;
+        }
       }
 
       const drive = await getScannerDriveClient();
@@ -3029,7 +3338,7 @@ export const uploadScanToDrive = onRequest(
         supportsAllDrives: true,
         requestBody: {
           name: fileName,
-          parents: [targetFolderId],
+          parents: [parentFolderId],
         },
         media,
         fields: "id",

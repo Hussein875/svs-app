@@ -13,6 +13,7 @@ struct CompanyDocumentDetailView: View {
     @State private var showSignatureFlow = false
     @State private var showDirectDrawing = false
     @State private var showRemoteSigning = false
+    @State private var showFormFunnel = false
     @State private var isSigning = false
     @State private var signErrorMessage: String?
 
@@ -37,6 +38,15 @@ struct CompanyDocumentDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                if document.supportsFormFunnel {
+                    Button {
+                        showFormFunnel = true
+                    } label: {
+                        Label("Ausfüllen", systemImage: "list.bullet.rectangle")
+                    }
+                    .disabled(isSigning)
+                }
+
                 if document.supportsRemoteSigning {
                     Button {
                         showRemoteSigning = true
@@ -67,6 +77,10 @@ struct CompanyDocumentDetailView: View {
                 }
             }
         }
+        .fullScreenCover(isPresented: $showFormFunnel) {
+            AbtretungserklaerungFunnelView(sourcePDFURL: fileURL)
+        }
+        .interactiveDismissDisabled(showFormFunnel)
         .fullScreenCover(isPresented: $showRemoteSigning) {
             DocumentRemoteSigningSheet(document: document, sourcePDFURL: fileURL)
         }

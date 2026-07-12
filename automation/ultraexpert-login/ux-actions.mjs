@@ -1,5 +1,7 @@
 import { extractDossierId, saveArtifacts } from "./ux-common.mjs";
 
+export { searchDossiersByVin } from "./ux-vin-search.mjs";
+
 export async function createAkte(page) {
   const neuButton = page.getByRole("button", { name: /^Neu$/i }).first();
   await neuButton.waitFor({ state: "visible" });

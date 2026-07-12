@@ -60,6 +60,50 @@ npm run server
 - speichert eine Sitzung optional in `storage-state.json`
 - kann ueber `create-akte.mjs` danach `Neu -> Akte` klicken und die neue Akten-URL auslesen
 - kann ueber `server.mjs` Webhook-Aufrufe von Google Apps Script empfangen und pro Drive-Ordner genau eine Akte anlegen
+- kann per `POST /vorschaden-check` eine FIN in UltraExpert suchen und fruehere Gutachtennummern (Aktenzeichen) zurueckgeben
+
+## Vorschaden-Check (FIN)
+
+Der Server-Endpunkt:
+
+```text
+POST https://DEINE-SERVER-URL/vorschaden-check
+Header: X-Webhook-Secret: <WEBHOOK_SECRET>
+Body: { "vin": "WVWZZZCD3PW104182" }
+```
+
+Antwort:
+
+```json
+{
+  "ok": true,
+  "vin": "WVWZZZCD3PW104182",
+  "matchCount": 2,
+  "gutachtenNumbers": ["1460/26", "890/25"],
+  "matches": [
+    { "gutachtenNumber": "1460/26", "dossierId": "...", "dossierUrl": "..." }
+  ]
+}
+```
+
+Lokaler Test:
+
+```bash
+npm run search:vin -- WVWZZZCD3PW104182
+npm run search:vin:debug
+```
+
+Die SVS-App ruft diesen Check nicht direkt auf, sondern ueber die Firebase Function `checkUltraExpertPriorDamageHttp`.
+
+Secrets in Firebase:
+
+```bash
+firebase functions:secrets:set ULTRAEXPERT_BOT_WEBHOOK_URL
+# z. B. https://69-62-113-32.sslip.io/vorschaden-check
+
+firebase functions:secrets:set ULTRAEXPERT_BOT_WEBHOOK_SECRET
+# derselbe Wert wie WEBHOOK_SECRET auf dem VPS
+```
 
 ## Verbindung Mit Google Apps Script
 

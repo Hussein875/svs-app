@@ -3,8 +3,15 @@ import http from "node:http";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { closeSession, ensureLoggedIn, handleRunError, openSession } from "./ux-common.mjs";
+import {
+  closeSession,
+  ensureLoggedIn,
+  handleRunError,
+  normalizeVin,
+  openSession
+} from "./ux-common.mjs";
 import { createAkte } from "./ux-actions.mjs";
+import { searchDossiersByVin } from "./ux-vin-search.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 3000);
@@ -41,6 +48,17 @@ const server = http.createServer(async (req, res) => {
 
       const payload = await readJsonBody(req);
       const result = await enqueue(() => processFolder(payload));
+      return sendJson(res, 200, { ok: true, ...result });
+    }
+
+    if (req.method === "POST" && url.pathname === "/vorschaden-check") {
+      const providedSecret = req.headers["x-webhook-secret"];
+      if (providedSecret !== WEBHOOK_SECRET) {
+        return sendJson(res, 401, { ok: false, error: "unauthorized" });
+      }
+
+      const payload = await readJsonBody(req);
+      const result = await enqueue(() => processVinCheck(payload));
       return sendJson(res, 200, { ok: true, ...result });
     }
 
@@ -137,6 +155,38 @@ async function processFolder(payload) {
     };
   } catch (error) {
     await handleRunError(error, session, "server-create-akte-error");
+    throw error;
+  }
+}
+
+async function processVinCheck(payload) {
+  const vin = normalizeVin(payload?.vin || payload?.fin || "");
+  if (!vin) {
+    throw new Error("vin fehlt im Payload.");
+  }
+
+  console.log(`Vorschaden-Check fuer FIN ${vin}`);
+
+  const session = await openSession();
+
+  try {
+    await ensureLoggedIn(session.page);
+    const matches = await searchDossiersByVin(session.page, vin);
+    await closeSession(session);
+
+    const gutachtenNumbers = matches.map(match => match.gutachtenNumber);
+    console.log(
+      `Vorschaden-Check abgeschlossen: ${gutachtenNumbers.length} Treffer (${gutachtenNumbers.join(", ") || "keine"})`
+    );
+
+    return {
+      vin,
+      matchCount: matches.length,
+      gutachtenNumbers,
+      matches
+    };
+  } catch (error) {
+    await handleRunError(error, session, "server-vin-search-error");
     throw error;
   }
 }

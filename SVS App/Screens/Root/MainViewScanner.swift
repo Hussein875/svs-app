@@ -669,10 +669,11 @@ struct ScannerScreen: View {
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $isPresentingScanner) {
                 DocumentScanner { images in
+                    isPresentingScanner = false
                     scannedImages.append(contentsOf: images)
                     rebuildPDFFromScannedImages()
                 } onCancel: {
-                    // no-op
+                    isPresentingScanner = false
                 }
                 .ignoresSafeArea()
             }

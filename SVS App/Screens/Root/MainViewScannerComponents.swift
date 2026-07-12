@@ -37,14 +37,16 @@ struct DocumentScanner: UIViewControllerRepresentable {
         }
 
         func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
-            controller.dismiss(animated: true)
-            onCancel()
+            DispatchQueue.main.async {
+                self.onCancel()
+            }
         }
 
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
-            controller.dismiss(animated: true)
-            onCancel()
             print("[Scanner] VNDocumentCamera failed:", error.localizedDescription)
+            DispatchQueue.main.async {
+                self.onCancel()
+            }
         }
 
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
@@ -53,8 +55,9 @@ struct DocumentScanner: UIViewControllerRepresentable {
             for i in 0..<scan.pageCount {
                 images.append(scan.imageOfPage(at: i))
             }
-            controller.dismiss(animated: true)
-            onFinish(images)
+            DispatchQueue.main.async {
+                self.onFinish(images)
+            }
         }
     }
 }
