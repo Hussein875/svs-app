@@ -56,10 +56,10 @@ enum AccidentSketchRenderer {
             context.fill(rect)
 
             drawHeader(template: template, in: rect, context: context.cgContext)
-            drawRoads(for: template, in: rect, context: context.cgContext)
+            drawRoads(for: template, context: context.cgContext)
 
             for vehicle in vehicles {
-                drawCar(
+                drawTopDownCar(
                     center: vehicle.center,
                     size: vehicle.size,
                     angle: vehicle.angle,
@@ -79,14 +79,14 @@ enum AccidentSketchRenderer {
     }
 
     static func renderVehicleImage(_ vehicle: AccidentSketchVehicle, scale: CGFloat = 2) -> UIImage {
-        let fitted = vehicleAxisAlignedSize(for: vehicle.size, angle: vehicle.angle, padding: 10)
+        let fitted = vehicleHostSize(for: vehicle)
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
         let renderer = UIGraphicsImageRenderer(size: fitted, format: format)
         return renderer.image { context in
             let cg = context.cgContext
             cg.translateBy(x: fitted.width / 2, y: fitted.height / 2)
-            drawCar(
+            drawTopDownCar(
                 center: .zero,
                 size: vehicle.size,
                 angle: vehicle.angle,
@@ -97,8 +97,13 @@ enum AccidentSketchRenderer {
         }
     }
 
-    static func vehicleHostSize(for vehicle: AccidentSketchVehicle, padding: CGFloat = 10) -> CGSize {
-        vehicleAxisAlignedSize(for: vehicle.size, angle: vehicle.angle, padding: padding)
+    static func vehicleHostSize(for vehicle: AccidentSketchVehicle, padding: CGFloat = 12) -> CGSize {
+        let directionPadding = vehicle.size.height * 0.58
+        return vehicleAxisAlignedSize(
+            for: vehicle.size,
+            angle: vehicle.angle,
+            padding: padding + directionPadding
+        )
     }
 
     private static func vehicleAxisAlignedSize(
@@ -114,61 +119,354 @@ enum AccidentSketchRenderer {
         )
     }
 
-    // MARK: - Layout helpers
+    // MARK: - Roads
 
     private static let drawingRect = AccidentSketchMetrics.drawingRect
 
     private static func drawRoads(
         for template: AccidentSketchTemplate,
-        in page: CGRect,
         context: CGContext
     ) {
         switch template {
-        case .rearEnd:
-            drawRearEndRoads(in: page, context: context)
+        case .straightRoad:
+            drawStraightRoad(context: context)
         case .intersection:
-            drawIntersectionRoads(in: page, context: context)
-        case .rightOfWay:
-            drawRightOfWayRoads(in: page, context: context)
-        case .laneChange:
-            drawLaneChangeRoads(in: page, context: context)
+            drawIntersectionRoads(context: context)
         case .parking:
-            drawParkingRoads(in: page, context: context)
-        case .roundabout:
-            drawRoundaboutRoads(in: page, context: context)
+            drawParkingRoads(context: context)
         case .freeCanvas:
-            drawFreeCanvasRoads(in: page, context: context)
+            drawFreeCanvasRoads(context: context)
         }
     }
 
     private static func drawStraightRoad(context: CGContext) {
         asphalt(in: drawingRect, context: context)
+
         let midX = drawingRect.midX
+        let laneOffset: CGFloat = 55
+
         roadLine(
-            from: CGPoint(x: midX, y: drawingRect.minY + 20),
-            to: CGPoint(x: midX, y: drawingRect.maxY - 20),
-            width: 2,
+            from: CGPoint(x: midX, y: drawingRect.minY + 16),
+            to: CGPoint(x: midX, y: drawingRect.maxY - 16),
+            width: 2.5,
             color: .white,
             dashed: true,
             context: context
         )
         roadLine(
-            from: CGPoint(x: drawingRect.minX + 24, y: drawingRect.minY),
-            to: CGPoint(x: drawingRect.minX + 24, y: drawingRect.maxY),
-            width: 3,
-            color: .white,
-            dashed: false,
+            from: CGPoint(x: midX - laneOffset, y: drawingRect.minY + 16),
+            to: CGPoint(x: midX - laneOffset, y: drawingRect.maxY - 16),
+            width: 2,
+            color: UIColor.white.withAlphaComponent(0.55),
+            dashed: true,
             context: context
         )
         roadLine(
-            from: CGPoint(x: drawingRect.maxX - 24, y: drawingRect.minY),
-            to: CGPoint(x: drawingRect.maxX - 24, y: drawingRect.maxY),
+            from: CGPoint(x: midX + laneOffset, y: drawingRect.minY + 16),
+            to: CGPoint(x: midX + laneOffset, y: drawingRect.maxY - 16),
+            width: 2,
+            color: UIColor.white.withAlphaComponent(0.55),
+            dashed: true,
+            context: context
+        )
+
+        drawRoadEdge(at: drawingRect.minX + 20, context: context)
+        drawRoadEdge(at: drawingRect.maxX - 20, context: context)
+    }
+
+    private static func drawIntersectionRoads(context: CGContext) {
+        asphalt(in: drawingRect, context: context)
+
+        let midX = drawingRect.midX
+        let midY = drawingRect.midY
+        let roadWidth: CGFloat = 130
+
+        context.setFillColor(UIColor(white: 0.86, alpha: 1).cgColor)
+        context.fill(
+            CGRect(
+                x: midX - roadWidth / 2,
+                y: drawingRect.minY,
+                width: roadWidth,
+                height: drawingRect.height
+            )
+        )
+        context.fill(
+            CGRect(
+                x: drawingRect.minX,
+                y: midY - roadWidth / 2,
+                width: drawingRect.width,
+                height: roadWidth
+            )
+        )
+
+        roadLine(
+            from: CGPoint(x: midX, y: drawingRect.minY + 12),
+            to: CGPoint(x: midX, y: drawingRect.maxY - 12),
+            width: 2.5,
+            color: .white,
+            dashed: true,
+            context: context
+        )
+        roadLine(
+            from: CGPoint(x: drawingRect.minX + 12, y: midY),
+            to: CGPoint(x: drawingRect.maxX - 12, y: midY),
+            width: 2.5,
+            color: .white,
+            dashed: true,
+            context: context
+        )
+
+        drawRoadEdge(at: drawingRect.minX + 20, context: context)
+        drawRoadEdge(at: drawingRect.maxX - 20, context: context)
+    }
+
+    private static func drawParkingRoads(context: CGContext) {
+        asphalt(in: drawingRect, context: context)
+
+        let slotWidth: CGFloat = 96
+        let slotHeight: CGFloat = 152
+        let startX = drawingRect.minX + 48
+        let baseY = drawingRect.midY + 36
+        let aisleY = baseY - 18
+
+        roadLine(
+            from: CGPoint(x: drawingRect.minX + 24, y: aisleY),
+            to: CGPoint(x: drawingRect.maxX - 24, y: aisleY),
             width: 3,
+            color: UIColor.white.withAlphaComponent(0.7),
+            dashed: true,
+            context: context
+        )
+
+        for index in 0..<4 {
+            let x = startX + CGFloat(index) * (slotWidth + 14)
+            let slot = CGRect(x: x, y: baseY, width: slotWidth, height: slotHeight)
+            context.setStrokeColor(UIColor.white.cgColor)
+            context.setLineWidth(2.5)
+            context.stroke(slot)
+
+            let label = "P\(index + 1)"
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 10, weight: .medium),
+                .foregroundColor: UIColor.white.withAlphaComponent(0.75)
+            ]
+            let textSize = (label as NSString).size(withAttributes: attrs)
+            (label as NSString).draw(
+                at: CGPoint(x: slot.midX - textSize.width / 2, y: slot.maxY + 4),
+                withAttributes: attrs
+            )
+        }
+    }
+
+    private static func drawFreeCanvasRoads(context: CGContext) {
+        asphalt(in: drawingRect, context: context)
+        context.setStrokeColor(UIColor(white: 0.86, alpha: 1).cgColor)
+        context.setLineWidth(0.5)
+        let step: CGFloat = 32
+        var x = drawingRect.minX
+        while x <= drawingRect.maxX {
+            context.move(to: CGPoint(x: x, y: drawingRect.minY))
+            context.addLine(to: CGPoint(x: x, y: drawingRect.maxY))
+            x += step
+        }
+        var y = drawingRect.minY
+        while y <= drawingRect.maxY {
+            context.move(to: CGPoint(x: drawingRect.minX, y: y))
+            context.addLine(to: CGPoint(x: drawingRect.maxX, y: y))
+            y += step
+        }
+        context.strokePath()
+    }
+
+    private static func drawRoadEdge(at x: CGFloat, context: CGContext) {
+        roadLine(
+            from: CGPoint(x: x, y: drawingRect.minY),
+            to: CGPoint(x: x, y: drawingRect.maxY),
+            width: 3.5,
             color: .white,
             dashed: false,
             context: context
         )
     }
+
+    // MARK: - Top-down car
+
+    private static func drawTopDownCar(
+        center: CGPoint,
+        size: CGSize,
+        angle: CGFloat,
+        label: String,
+        color: UIColor,
+        context: CGContext
+    ) {
+        context.saveGState()
+        context.translateBy(x: center.x, y: center.y)
+        context.rotate(by: angle)
+
+        let body = CGRect(
+            x: -size.width / 2,
+            y: -size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+
+        let bodyPath = UIBezierPath(roundedRect: body, cornerRadius: size.width * 0.28)
+        context.setFillColor(color.withAlphaComponent(0.82).cgColor)
+        context.addPath(bodyPath.cgPath)
+        context.fillPath()
+
+        context.setStrokeColor(color.darker(by: 0.18).cgColor)
+        context.setLineWidth(2)
+        context.addPath(bodyPath.cgPath)
+        context.strokePath()
+
+        drawHeadlights(body: body, context: context)
+
+        let windshield = CGRect(
+            x: body.minX + size.width * 0.14,
+            y: body.minY + size.height * 0.1,
+            width: size.width * 0.72,
+            height: size.height * 0.2
+        )
+        let windshieldPath = UIBezierPath(roundedRect: windshield, cornerRadius: 4)
+        context.setFillColor(UIColor.white.withAlphaComponent(0.55).cgColor)
+        context.addPath(windshieldPath.cgPath)
+        context.fillPath()
+
+        let rearWindow = CGRect(
+            x: body.minX + size.width * 0.16,
+            y: body.maxY - size.height * 0.24,
+            width: size.width * 0.68,
+            height: size.height * 0.14
+        )
+        let rearPath = UIBezierPath(roundedRect: rearWindow, cornerRadius: 3)
+        context.setFillColor(UIColor.white.withAlphaComponent(0.4).cgColor)
+        context.addPath(rearPath.cgPath)
+        context.fillPath()
+
+        let wheelSize = CGSize(width: size.width * 0.22, height: size.height * 0.1)
+        let wheelOffsets: [(CGFloat, CGFloat)] = [
+            (-size.width * 0.34, -size.height * 0.3),
+            (size.width * 0.34, -size.height * 0.3),
+            (-size.width * 0.34, size.height * 0.3),
+            (size.width * 0.34, size.height * 0.3),
+        ]
+        for (offsetX, offsetY) in wheelOffsets {
+            let wheel = CGRect(
+                x: offsetX - wheelSize.width / 2,
+                y: offsetY - wheelSize.height / 2,
+                width: wheelSize.width,
+                height: wheelSize.height
+            )
+            context.setFillColor(UIColor(white: 0.12, alpha: 0.9).cgColor)
+            context.fillEllipse(in: wheel)
+        }
+
+        drawTravelDirectionIndicator(body: body, vehicleColor: color, context: context)
+
+        let text = label.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let charCount = max(text.count, 1)
+        let badgeWidth = min(size.width * 0.88, max(size.width * 0.42, CGFloat(charCount) * 9 + 8))
+        let badgeHeight = size.width * 0.4
+        let badge = CGRect(
+            x: -badgeWidth / 2,
+            y: -badgeHeight / 2,
+            width: badgeWidth,
+            height: badgeHeight
+        )
+
+        let badgePath = UIBezierPath(roundedRect: badge, cornerRadius: badgeHeight / 2)
+        context.setFillColor(UIColor.white.withAlphaComponent(0.94).cgColor)
+        context.addPath(badgePath.cgPath)
+        context.fillPath()
+        context.setStrokeColor(color.darker(by: 0.22).cgColor)
+        context.setLineWidth(1.5)
+        context.addPath(badgePath.cgPath)
+        context.strokePath()
+
+        let fontSize: CGFloat = charCount <= 2 ? badgeHeight * 0.52 : badgeHeight * 0.38
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: fontSize, weight: .bold),
+            .foregroundColor: color.darker(by: 0.28)
+        ]
+        let textSize = (text as NSString).size(withAttributes: attrs)
+        (text as NSString).draw(
+            at: CGPoint(x: -textSize.width / 2, y: -textSize.height / 2),
+            withAttributes: attrs
+        )
+
+        context.restoreGState()
+    }
+
+    /// Frontscheinwerfer + Fahrtrichtungspfeil (Front = oben im lokalen Koordinatensystem).
+    private static func drawHeadlights(body: CGRect, context: CGContext) {
+        let lightSize = CGSize(width: body.width * 0.14, height: body.height * 0.07)
+        let lightY = body.minY + body.height * 0.07
+        for offsetX in [-body.width * 0.28, body.width * 0.28] {
+            let light = CGRect(
+                x: offsetX - lightSize.width / 2,
+                y: lightY - lightSize.height / 2,
+                width: lightSize.width,
+                height: lightSize.height
+            )
+            context.setFillColor(UIColor.systemYellow.withAlphaComponent(0.9).cgColor)
+            context.fillEllipse(in: light)
+        }
+    }
+
+    private static func drawTravelDirectionIndicator(
+        body: CGRect,
+        vehicleColor: UIColor,
+        context: CGContext
+    ) {
+        let chevron = UIBezierPath()
+        let tipY = body.minY + body.height * 0.05
+        let baseY = body.minY + body.height * 0.24
+        let halfWidth = body.width * 0.2
+        chevron.move(to: CGPoint(x: 0, y: tipY))
+        chevron.addLine(to: CGPoint(x: -halfWidth, y: baseY))
+        chevron.addLine(to: CGPoint(x: halfWidth, y: baseY))
+        chevron.close()
+
+        context.setFillColor(UIColor.white.withAlphaComponent(0.95).cgColor)
+        context.addPath(chevron.cgPath)
+        context.fillPath()
+        context.setStrokeColor(vehicleColor.darker(by: 0.3).cgColor)
+        context.setLineWidth(1.2)
+        context.addPath(chevron.cgPath)
+        context.strokePath()
+
+        let rayStart = CGPoint(x: 0, y: body.minY)
+        let rayLength = body.height * 0.55
+        let rayEnd = CGPoint(x: 0, y: body.minY - rayLength)
+
+        context.saveGState()
+        context.setStrokeColor(UIColor.white.cgColor)
+        context.setLineWidth(2.2)
+        context.setLineCap(.round)
+        context.setLineDash(phase: 0, lengths: [7, 5])
+        context.move(to: rayStart)
+        context.addLine(to: rayEnd)
+        context.strokePath()
+        context.restoreGState()
+
+        context.saveGState()
+        context.setFillColor(UIColor.white.cgColor)
+        context.setStrokeColor(vehicleColor.darker(by: 0.15).cgColor)
+        context.setLineWidth(1.2)
+        context.translateBy(x: rayEnd.x, y: rayEnd.y)
+        let head = UIBezierPath()
+        head.move(to: .zero)
+        head.addLine(to: CGPoint(x: -6, y: 9))
+        head.addLine(to: CGPoint(x: 6, y: 9))
+        head.close()
+        context.addPath(head.cgPath)
+        context.fillPath()
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    // MARK: - Chrome
 
     private static func drawHeader(
         template: AccidentSketchTemplate,
@@ -198,7 +496,7 @@ enum AccidentSketchRenderer {
     }
 
     private static func drawFooter(in page: CGRect, context: CGContext) {
-        let hint = "Mit Stift ergänzen: Fahrweg · Bremspunkte · Sicht · Beschriftung"
+        let hint = "Fahrweg · Bremspunkte · Sicht · Beschriftung mit Stift ergänzen"
         let attrs: [NSAttributedString.Key: Any] = [
             .font: UIFont.systemFont(ofSize: 11, weight: .medium),
             .foregroundColor: UIColor.tertiaryLabel
@@ -220,7 +518,7 @@ enum AccidentSketchRenderer {
     }
 
     private static func asphalt(in rect: CGRect, context: CGContext) {
-        context.setFillColor(UIColor(white: 0.93, alpha: 1).cgColor)
+        context.setFillColor(UIColor(red: 0.55, green: 0.57, blue: 0.6, alpha: 1).cgColor)
         context.fill(rect)
     }
 
@@ -237,279 +535,29 @@ enum AccidentSketchRenderer {
         context.setLineWidth(width)
         context.setLineCap(.round)
         if dashed {
-            context.setLineDash(phase: 0, lengths: [10, 8])
+            context.setLineDash(phase: 0, lengths: [12, 10])
         }
         context.move(to: from)
         context.addLine(to: to)
         context.strokePath()
         context.restoreGState()
     }
+}
 
-    private static func drawCar(
-        center: CGPoint,
-        size: CGSize,
-        angle: CGFloat,
-        label: String,
-        color: UIColor,
-        context: CGContext
-    ) {
-        context.saveGState()
-        context.translateBy(x: center.x, y: center.y)
-        context.rotate(by: angle)
-
-        let body = CGRect(
-            x: -size.width / 2,
-            y: -size.height / 2,
-            width: size.width,
-            height: size.height
-        )
-        let path = UIBezierPath(roundedRect: body, cornerRadius: 6)
-        context.setFillColor(color.withAlphaComponent(0.35).cgColor)
-        context.addPath(path.cgPath)
-        context.fillPath()
-        context.setStrokeColor(color.cgColor)
-        context.setLineWidth(2)
-        context.addPath(path.cgPath)
-        context.strokePath()
-
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 11, weight: .semibold),
-            .foregroundColor: color
-        ]
-        let textSize = (label as NSString).size(withAttributes: attrs)
-        (label as NSString).draw(
-            at: CGPoint(x: -textSize.width / 2, y: -textSize.height / 2),
-            withAttributes: attrs
-        )
-        context.restoreGState()
-    }
-
-    private static func drawArrow(
-        from: CGPoint,
-        to: CGPoint,
-        color: UIColor,
-        context: CGContext
-    ) {
-        context.saveGState()
-        context.setStrokeColor(color.cgColor)
-        context.setFillColor(color.cgColor)
-        context.setLineWidth(2.5)
-        context.move(to: from)
-        context.addLine(to: to)
-        context.strokePath()
-
-        let angle = atan2(to.y - from.y, to.x - from.x)
-        let head = CGPoint(x: to.x, y: to.y)
-        context.translateBy(x: head.x, y: head.y)
-        context.rotate(by: angle)
-        let arrow = UIBezierPath()
-        arrow.move(to: .zero)
-        arrow.addLine(to: CGPoint(x: -10, y: -5))
-        arrow.addLine(to: CGPoint(x: -10, y: 5))
-        arrow.close()
-        context.addPath(arrow.cgPath)
-        context.fillPath()
-        context.restoreGState()
-    }
-
-    // MARK: - Templates
-
-    private static func drawFreeCanvasRoads(in page: CGRect, context: CGContext) {
-        asphalt(in: drawingRect, context: context)
-        context.setStrokeColor(UIColor(white: 0.85, alpha: 1).cgColor)
-        context.setLineWidth(0.5)
-        let step: CGFloat = 28
-        var x = drawingRect.minX
-        while x <= drawingRect.maxX {
-            context.move(to: CGPoint(x: x, y: drawingRect.minY))
-            context.addLine(to: CGPoint(x: x, y: drawingRect.maxY))
-            x += step
+private extension UIColor {
+    func darker(by amount: CGFloat) -> UIColor {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return self
         }
-        var y = drawingRect.minY
-        while y <= drawingRect.maxY {
-            context.move(to: CGPoint(x: drawingRect.minX, y: y))
-            context.addLine(to: CGPoint(x: drawingRect.maxX, y: y))
-            y += step
-        }
-        context.strokePath()
-    }
-
-    private static func drawRearEndRoads(in page: CGRect, context: CGContext) {
-        drawStraightRoad(context: context)
-
-        let midX = drawingRect.midX
-        drawArrow(
-            from: CGPoint(x: midX + 70, y: drawingRect.midY + 40),
-            to: CGPoint(x: midX + 70, y: drawingRect.midY - 30),
-            color: UIColor.systemRed,
-            context: context
+        return UIColor(
+            red: max(red - amount, 0),
+            green: max(green - amount, 0),
+            blue: max(blue - amount, 0),
+            alpha: alpha
         )
-    }
-
-    private static func drawIntersectionRoads(in page: CGRect, context: CGContext) {
-        asphalt(in: drawingRect, context: context)
-        let midX = drawingRect.midX
-        let midY = drawingRect.midY
-        let roadWidth: CGFloat = 120
-
-        context.setFillColor(UIColor(white: 0.88, alpha: 1).cgColor)
-        context.fill(CGRect(x: midX - roadWidth / 2, y: drawingRect.minY, width: roadWidth, height: drawingRect.height))
-        context.fill(CGRect(x: drawingRect.minX, y: midY - roadWidth / 2, width: drawingRect.width, height: roadWidth))
-
-        roadLine(
-            from: CGPoint(x: midX, y: drawingRect.minY),
-            to: CGPoint(x: midX, y: drawingRect.maxY),
-            width: 2,
-            color: .white,
-            dashed: true,
-            context: context
-        )
-        roadLine(
-            from: CGPoint(x: drawingRect.minX, y: midY),
-            to: CGPoint(x: drawingRect.maxX, y: midY),
-            width: 2,
-            color: .white,
-            dashed: true,
-            context: context
-        )
-    }
-
-    private static func drawRightOfWayRoads(in page: CGRect, context: CGContext) {
-        asphalt(in: drawingRect, context: context)
-        let midY = drawingRect.midY
-        let joinX = drawingRect.midX - 40
-
-        context.setFillColor(UIColor(white: 0.88, alpha: 1).cgColor)
-        context.fill(CGRect(x: drawingRect.minX + 40, y: midY - 55, width: drawingRect.width - 80, height: 110))
-        context.fill(CGRect(x: joinX - 55, y: midY, width: 110, height: drawingRect.maxY - midY - 20))
-
-        drawPriorityRoadSign(
-            center: CGPoint(x: drawingRect.midX + 95, y: midY - 8),
-            size: 34,
-            context: context
-        )
-        drawYieldSign(
-            center: CGPoint(x: joinX + 8, y: midY + 88),
-            size: 36,
-            context: context
-        )
-    }
-
-    /// StVO Zeichen 205 – Vorfahrt gewähren (rot umrandetes Dreieck).
-    private static func drawYieldSign(center: CGPoint, size: CGFloat, context: CGContext) {
-        let height = size
-        let width = size * 0.95
-        let apex = CGPoint(x: center.x, y: center.y + height * 0.42)
-        let topLeft = CGPoint(x: center.x - width / 2, y: center.y - height * 0.38)
-        let topRight = CGPoint(x: center.x + width / 2, y: center.y - height * 0.38)
-
-        let triangle = UIBezierPath()
-        triangle.move(to: apex)
-        triangle.addLine(to: topLeft)
-        triangle.addLine(to: topRight)
-        triangle.close()
-
-        context.saveGState()
-        context.setFillColor(UIColor.white.cgColor)
-        context.addPath(triangle.cgPath)
-        context.fillPath()
-        context.setStrokeColor(UIColor(red: 0.85, green: 0.05, blue: 0.08, alpha: 1).cgColor)
-        context.setLineWidth(max(2.5, size * 0.09))
-        context.setLineJoin(.round)
-        context.addPath(triangle.cgPath)
-        context.strokePath()
-        context.restoreGState()
-    }
-
-    /// StVO Zeichen 306 – Vorfahrtstraße (gelbe Raute).
-    private static func drawPriorityRoadSign(center: CGPoint, size: CGFloat, context: CGContext) {
-        let half = size / 2
-        let diamond = UIBezierPath()
-        diamond.move(to: CGPoint(x: center.x, y: center.y - half))
-        diamond.addLine(to: CGPoint(x: center.x + half, y: center.y))
-        diamond.addLine(to: CGPoint(x: center.x, y: center.y + half))
-        diamond.addLine(to: CGPoint(x: center.x - half, y: center.y))
-        diamond.close()
-
-        context.saveGState()
-        context.setFillColor(UIColor(red: 0.98, green: 0.82, blue: 0.08, alpha: 1).cgColor)
-        context.addPath(diamond.cgPath)
-        context.fillPath()
-        context.setStrokeColor(UIColor.white.cgColor)
-        context.setLineWidth(max(2, size * 0.08))
-        context.addPath(diamond.cgPath)
-        context.strokePath()
-        context.setStrokeColor(UIColor.black.withAlphaComponent(0.35).cgColor)
-        context.setLineWidth(max(1, size * 0.04))
-        context.addPath(diamond.cgPath)
-        context.strokePath()
-        context.restoreGState()
-    }
-
-    private static func drawLaneChangeRoads(in page: CGRect, context: CGContext) {
-        asphalt(in: drawingRect, context: context)
-        let left = drawingRect.minX + drawingRect.width * 0.33
-        let right = drawingRect.minX + drawingRect.width * 0.66
-
-        roadLine(
-            from: CGPoint(x: left, y: drawingRect.minY),
-            to: CGPoint(x: left, y: drawingRect.maxY),
-            width: 2,
-            color: .white,
-            dashed: true,
-            context: context
-        )
-        roadLine(
-            from: CGPoint(x: right, y: drawingRect.minY),
-            to: CGPoint(x: right, y: drawingRect.maxY),
-            width: 2,
-            color: .white,
-            dashed: true,
-            context: context
-        )
-
-        let curve = UIBezierPath()
-        curve.move(to: CGPoint(x: left - 45, y: drawingRect.midY + 10))
-        curve.addQuadCurve(
-            to: CGPoint(x: right + 45, y: drawingRect.midY + 30),
-            controlPoint: CGPoint(x: drawingRect.midX, y: drawingRect.midY - 40)
-        )
-        context.setStrokeColor(UIColor.systemRed.cgColor)
-        context.setLineWidth(2)
-        context.setLineDash(phase: 0, lengths: [6, 6])
-        context.addPath(curve.cgPath)
-        context.strokePath()
-    }
-
-    private static func drawParkingRoads(in page: CGRect, context: CGContext) {
-        asphalt(in: drawingRect, context: context)
-        let slotWidth: CGFloat = 90
-        let startX = drawingRect.minX + 50
-        let baseY = drawingRect.midY + 40
-
-        for index in 0..<4 {
-            let x = startX + CGFloat(index) * (slotWidth + 12)
-            let slot = CGRect(x: x, y: baseY, width: slotWidth, height: 150)
-            context.setStrokeColor(UIColor.white.cgColor)
-            context.setLineWidth(2)
-            context.stroke(slot)
-        }
-    }
-
-    private static func drawRoundaboutRoads(in page: CGRect, context: CGContext) {
-        asphalt(in: drawingRect, context: context)
-        let center = CGPoint(x: drawingRect.midX, y: drawingRect.midY)
-        let outer: CGFloat = 110
-        let inner: CGFloat = 55
-
-        context.setFillColor(UIColor(white: 0.88, alpha: 1).cgColor)
-        context.fillEllipse(in: CGRect(x: center.x - outer, y: center.y - outer, width: outer * 2, height: outer * 2))
-        context.setFillColor(UIColor(white: 0.96, alpha: 1).cgColor)
-        context.fillEllipse(in: CGRect(x: center.x - inner, y: center.y - inner, width: inner * 2, height: inner * 2))
-
-        context.setStrokeColor(UIColor.systemGreen.cgColor)
-        context.setLineWidth(2)
-        context.addArc(center: center, radius: (outer + inner) / 2, startAngle: 0, endAngle: .pi * 2, clockwise: false)
-        context.strokePath()
     }
 }

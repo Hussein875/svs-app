@@ -6,55 +6,40 @@
 import Foundation
 
 enum AccidentSketchTemplate: String, CaseIterable, Identifiable {
-    case rearEnd
+    case straightRoad
     case intersection
-    case rightOfWay
-    case laneChange
     case parking
-    case roundabout
     case freeCanvas
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .rearEnd: return "Auffahrunfall"
+        case .straightRoad: return "Gerade Straße"
         case .intersection: return "Kreuzung"
-        case .rightOfWay: return "Vorfahrt / Einfahrt"
-        case .laneChange: return "Spurwechsel"
-        case .parking: return "Parkrempler"
-        case .roundabout: return "Kreisverkehr"
+        case .parking: return "Parkplatz"
         case .freeCanvas: return "Leere Skizze"
         }
     }
 
     var subtitle: String {
         switch self {
-        case .rearEnd:
-            return "Zwei Fahrzeuge hintereinander auf einer Straße"
+        case .straightRoad:
+            return "Zwei Fahrspuren – Auffahrunfall, Spurwechsel"
         case .intersection:
-            return "Kreuzung mit Fahrtrichtungen"
-        case .rightOfWay:
-            return "Nebenstraße trifft auf Vorfahrtsstraße"
-        case .laneChange:
-            return "Parallele Fahrspuren"
+            return "Kreuzung von oben"
         case .parking:
-            return "Parkplatz / seitliches Einparken"
-        case .roundabout:
-            return "Kreisverkehr mit Ein- und Ausfahrten"
+            return "Parkbuchten – Parkrempler, Rangieren"
         case .freeCanvas:
-            return "Raster – ein Fahrzeug pro Plus-Tipp"
+            return "Raster – Autos frei platzieren"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .rearEnd: return "arrow.up.circle"
+        case .straightRoad: return "road.lanes"
         case .intersection: return "plus"
-        case .rightOfWay: return "arrow.turn.up.right"
-        case .laneChange: return "arrow.left.and.right"
         case .parking: return "parkingsign.circle"
-        case .roundabout: return "arrow.triangle.2.circlepath"
         case .freeCanvas: return "square.and.pencil"
         }
     }
@@ -70,7 +55,6 @@ enum AccidentSketchTemplate: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Titel in der Editor-Navigationsleiste.
     var navigationTitle: String {
         switch self {
         case .freeCanvas:
@@ -80,7 +64,6 @@ enum AccidentSketchTemplate: String, CaseIterable, Identifiable {
         }
     }
 
-    /// Überschrift auf dem exportierten PDF.
     var pdfHeaderTitle: String {
         switch self {
         case .freeCanvas:

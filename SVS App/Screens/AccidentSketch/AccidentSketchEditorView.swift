@@ -10,8 +10,8 @@ struct AccidentSketchEditorView: View {
     let template: AccidentSketchTemplate
     let onDismiss: () -> Void
 
+    @State private var activeTemplate: AccidentSketchTemplate
     @State private var vehicles: [AccidentSketchVehicle]
-    @State private var editMode: AccidentSketchEditMode = .vehicles
     @State private var selectedVehicleID: UUID?
     @State private var drawing = PKDrawing()
     @State private var drawingBounds: CGRect = .zero
@@ -19,39 +19,42 @@ struct AccidentSketchEditorView: View {
     @State private var errorMessage: String?
     @State private var exportedPDFURL: URL?
     @State private var participantLimitMessage: String?
+    @State private var activeDrawingTool: AccidentSketchDrawingTool?
+    @State private var showLabelEditor = false
+    @State private var labelDraft = ""
+    @State private var canUndoDrawing = false
+    @State private var undoRequest = 0
 
     private var backgroundImage: UIImage {
-        AccidentSketchRenderer.renderBackground(template)
+        AccidentSketchRenderer.renderBackground(activeTemplate)
     }
 
     init(template: AccidentSketchTemplate, onDismiss: @escaping () -> Void) {
         self.template = template
         self.onDismiss = onDismiss
-        let defaults = AccidentSketchVehicleLayout.defaults(for: template)
-        _vehicles = State(initialValue: defaults)
-        if template == .freeCanvas {
-            _editMode = State(initialValue: .vehicles)
-        } else {
-            _editMode = State(initialValue: defaults.isEmpty ? .draw : .vehicles)
-        }
+        _activeTemplate = State(initialValue: template)
+        _vehicles = State(initialValue: AccidentSketchVehicleLayout.defaults(for: template))
     }
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Color(.systemGroupedBackground).ignoresSafeArea()
+            VStack(spacing: 0) {
+                editorActionBar
 
                 AccidentSketchDrawingCanvas(
-                    template: template,
+                    template: activeTemplate,
                     backgroundImage: backgroundImage,
+                    activeDrawingTool: activeDrawingTool,
                     vehicles: $vehicles,
-                    editMode: $editMode,
                     selectedVehicleID: $selectedVehicleID,
                     drawing: $drawing,
-                    drawingBounds: $drawingBounds
+                    drawingBounds: $drawingBounds,
+                    canUndoDrawing: $canUndoDrawing,
+                    undoRequest: undoRequest
                 )
             }
-            .navigationTitle(template.navigationTitle)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle(activeTemplate.navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -61,52 +64,12 @@ struct AccidentSketchEditorView: View {
                     .disabled(isSaving)
                 }
 
-                ToolbarItem(placement: .principal) {
-                    Picker("Modus", selection: $editMode) {
-                        ForEach(AccidentSketchEditMode.allCases) { mode in
-                            Label(mode.title, systemImage: mode.systemImage)
-                                .tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 260)
-                }
-
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("PDF erstellen") {
+                    Button("PDF") {
                         exportPDF()
                     }
                     .fontWeight(.semibold)
                     .disabled(isSaving)
-                }
-
-                ToolbarItemGroup(placement: .bottomBar) {
-                    Button {
-                        addParticipant()
-                    } label: {
-                        Label("1 Fahrzeug", systemImage: "plus")
-                    }
-                    .disabled(isSaving || vehicles.count >= AccidentSketchVehicleLayout.maxParticipants)
-
-                    if editMode == .draw {
-                        Button("Zeichnung löschen", role: .destructive) {
-                            drawing = PKDrawing()
-                        }
-                        .disabled(drawing.bounds.isEmpty || isSaving)
-                    } else if let selectedVehicleID,
-                              vehicles.contains(where: { $0.id == selectedVehicleID }) {
-                        Button("Entfernen", role: .destructive) {
-                            removeSelectedVehicle()
-                        }
-                        .disabled(isSaving)
-
-                        Button("90° drehen") {
-                            rotateSelectedVehicle()
-                        }
-                        .disabled(isSaving)
-                    }
-
-                    Spacer()
                 }
             }
             .overlay {
@@ -124,11 +87,6 @@ struct AccidentSketchEditorView: View {
             }
         }
         .interactiveDismissDisabled(true)
-        .onChange(of: editMode) { _, newMode in
-            if newMode == .draw {
-                selectedVehicleID = nil
-            }
-        }
         .alert(
             "Export fehlgeschlagen",
             isPresented: Binding(
@@ -163,6 +121,199 @@ struct AccidentSketchEditorView: View {
                 }
             )
         }
+        .sheet(isPresented: $showLabelEditor) {
+            vehicleLabelEditorSheet
+        }
+    }
+
+    private var vehicleLabelEditorSheet: some View {
+        NavigationStack {
+            Form {
+                TextField("Kürzel (z. B. AS, UG)", text: $labelDraft)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+
+                Section("Schnellauswahl") {
+                    ForEach(AccidentSketchVehicleLabelPreset.allCases) { preset in
+                        Button(preset.title) {
+                            labelDraft = preset.rawValue
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Beschriftung")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Abbrechen") {
+                        showLabelEditor = false
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Übernehmen") {
+                        applyLabelDraft()
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private var editorActionBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Menu {
+                    ForEach(AccidentSketchTemplate.allCases) { option in
+                        Button {
+                            switchTemplate(to: option)
+                        } label: {
+                            Label(option.title, systemImage: option.systemImage)
+                        }
+                        .disabled(option == activeTemplate)
+                    }
+                } label: {
+                    actionChip(title: "Straße", systemImage: activeTemplate.systemImage)
+                }
+                .disabled(isSaving)
+
+                Button {
+                    addParticipant()
+                } label: {
+                    actionChip(title: "Auto", systemImage: "plus")
+                }
+                .disabled(isSaving || vehicles.count >= AccidentSketchVehicleLayout.maxParticipants)
+
+                if let selectedVehicleID,
+                   vehicles.contains(where: { $0.id == selectedVehicleID }) {
+                    Button {
+                        beginLabelEditing()
+                    } label: {
+                        actionChip(title: "Text", systemImage: "textformat")
+                    }
+                    .disabled(isSaving)
+
+                    Button(role: .destructive) {
+                        removeSelectedVehicle()
+                    } label: {
+                        actionChip(title: "Entfernen", systemImage: "trash", isDestructive: true)
+                    }
+                    .disabled(isSaving)
+                }
+
+                toolDivider
+
+                ForEach(AccidentSketchDrawingTool.allCases) { tool in
+                    Button {
+                        toggleDrawingTool(tool)
+                    } label: {
+                        toolChip(tool: tool, isSelected: activeDrawingTool == tool)
+                    }
+                    .disabled(isSaving)
+                }
+
+                Button {
+                    undoRequest += 1
+                } label: {
+                    actionChip(title: "Zurück", systemImage: "arrow.uturn.backward")
+                }
+                .disabled(!canUndoDrawing || isSaving)
+
+                Button(role: .destructive) {
+                    drawing = PKDrawing()
+                    canUndoDrawing = false
+                } label: {
+                    actionChip(title: "Alles löschen", systemImage: "trash", isDestructive: true)
+                }
+                .disabled(drawing.bounds.isEmpty || isSaving)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+        .background(Color(.secondarySystemBackground))
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
+    private var toolDivider: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.25))
+            .frame(width: 1, height: 28)
+    }
+
+    private func toolChip(tool: AccidentSketchDrawingTool, isSelected: Bool) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: tool.systemImage)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(tool == .eraser ? Color.secondary : Color(uiColor: tool.tintColor))
+            Text(tool.title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(isSelected ? Color.accentColor.opacity(0.14) : Color(.tertiarySystemGroupedBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(isSelected ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: 1)
+        )
+    }
+
+    private func actionChip(
+        title: String,
+        systemImage: String,
+        isDestructive: Bool = false
+    ) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(isDestructive ? Color.red : Color.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(.tertiarySystemGroupedBackground))
+            )
+    }
+
+    private func beginLabelEditing() {
+        guard let selectedVehicleID,
+              let vehicle = vehicles.first(where: { $0.id == selectedVehicleID }) else {
+            return
+        }
+        labelDraft = vehicle.label
+        showLabelEditor = true
+    }
+
+    private func applyLabelDraft() {
+        guard let selectedVehicleID,
+              let index = vehicles.firstIndex(where: { $0.id == selectedVehicleID }) else {
+            showLabelEditor = false
+            return
+        }
+        let trimmed = labelDraft
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        vehicles[index].label = trimmed.isEmpty ? "\(vehicles[index].number)" : String(trimmed.prefix(6))
+        showLabelEditor = false
+    }
+
+    private func toggleDrawingTool(_ tool: AccidentSketchDrawingTool) {
+        if activeDrawingTool == tool {
+            activeDrawingTool = nil
+        } else {
+            activeDrawingTool = tool
+        }
+    }
+
+    private func switchTemplate(to template: AccidentSketchTemplate) {
+        activeTemplate = template
+        vehicles = AccidentSketchVehicleLayout.defaults(for: template)
+        selectedVehicleID = nil
+        drawing = PKDrawing()
     }
 
     private func addParticipant() {
@@ -174,7 +325,6 @@ struct AccidentSketchEditorView: View {
         let newVehicle = AccidentSketchVehicleLayout.additionalParticipant(after: vehicles)
         vehicles.append(newVehicle)
         selectedVehicleID = newVehicle.id
-        editMode = .vehicles
     }
 
     private func removeSelectedVehicle() {
@@ -184,17 +334,6 @@ struct AccidentSketchEditorView: View {
         }
         vehicles.remove(at: index)
         self.selectedVehicleID = nil
-        if vehicles.isEmpty && template != .freeCanvas {
-            editMode = .draw
-        }
-    }
-
-    private func rotateSelectedVehicle() {
-        guard let selectedVehicleID,
-              let index = vehicles.firstIndex(where: { $0.id == selectedVehicleID }) else {
-            return
-        }
-        vehicles[index] = vehicles[index].rotated90Degrees()
     }
 
     private func exportPDF() {
@@ -205,7 +344,7 @@ struct AccidentSketchEditorView: View {
 
             do {
                 let composite = AccidentSketchRenderer.renderExport(
-                    template: template,
+                    template: activeTemplate,
                     vehicles: vehicles,
                     drawing: drawing,
                     drawingBounds: drawingBounds
@@ -214,7 +353,7 @@ struct AccidentSketchEditorView: View {
                     backgroundImage: composite,
                     drawing: PKDrawing(),
                     drawingBounds: .zero,
-                    outputBaseName: template.outputBaseName
+                    outputBaseName: activeTemplate.outputBaseName
                 )
                 exportedPDFURL = outputURL
             } catch {
@@ -276,30 +415,34 @@ private struct AccidentSketchExportSheet: View {
     }
 }
 
+// MARK: - Canvas bridge
+
 private struct AccidentSketchDrawingCanvas: UIViewControllerRepresentable {
     let template: AccidentSketchTemplate
     let backgroundImage: UIImage
+    let activeDrawingTool: AccidentSketchDrawingTool?
     @Binding var vehicles: [AccidentSketchVehicle]
-    @Binding var editMode: AccidentSketchEditMode
     @Binding var selectedVehicleID: UUID?
     @Binding var drawing: PKDrawing
     @Binding var drawingBounds: CGRect
+    @Binding var canUndoDrawing: Bool
+    let undoRequest: Int
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             vehicles: $vehicles,
-            editMode: $editMode,
             selectedVehicleID: $selectedVehicleID,
             drawing: $drawing,
-            drawingBounds: $drawingBounds
+            drawingBounds: $drawingBounds,
+            canUndoDrawing: $canUndoDrawing
         )
     }
 
     func makeUIViewController(context: Context) -> AccidentSketchCanvasViewController {
         let controller = AccidentSketchCanvasViewController(
-            template: template,
             backgroundImage: backgroundImage,
-            vehicles: vehicles
+            vehicles: vehicles,
+            templateID: template.rawValue
         )
         controller.canvasView.delegate = context.coordinator
         controller.onVehiclesChanged = { updated in
@@ -315,61 +458,89 @@ private struct AccidentSketchDrawingCanvas: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: AccidentSketchCanvasViewController, context: Context) {
+        if uiViewController.templateID != template.rawValue {
+            uiViewController.setBackgroundImage(backgroundImage, templateID: template.rawValue)
+        }
         if uiViewController.canvasView.drawing != drawing {
             uiViewController.canvasView.drawing = drawing
         }
-        uiViewController.setEditMode(editMode)
+        uiViewController.setDrawingTool(activeDrawingTool)
         uiViewController.setSelectedVehicleID(selectedVehicleID)
         uiViewController.updateVehicles(vehicles)
         uiViewController.updateLayout()
+
+        if context.coordinator.lastUndoRequest != undoRequest {
+            context.coordinator.lastUndoRequest = undoRequest
+            uiViewController.undoLastStroke()
+        }
     }
 
     final class Coordinator: NSObject, PKCanvasViewDelegate {
         @Binding var vehicles: [AccidentSketchVehicle]
-        @Binding var editMode: AccidentSketchEditMode
         @Binding var selectedVehicleID: UUID?
         @Binding var drawing: PKDrawing
         @Binding var drawingBounds: CGRect
+        @Binding var canUndoDrawing: Bool
+        var lastUndoRequest = 0
 
         init(
             vehicles: Binding<[AccidentSketchVehicle]>,
-            editMode: Binding<AccidentSketchEditMode>,
             selectedVehicleID: Binding<UUID?>,
             drawing: Binding<PKDrawing>,
-            drawingBounds: Binding<CGRect>
+            drawingBounds: Binding<CGRect>,
+            canUndoDrawing: Binding<Bool>
         ) {
             _vehicles = vehicles
-            _editMode = editMode
             _selectedVehicleID = selectedVehicleID
             _drawing = drawing
             _drawingBounds = drawingBounds
+            _canUndoDrawing = canUndoDrawing
         }
 
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             drawing = canvasView.drawing
             drawingBounds = canvasView.bounds
+            canUndoDrawing = canvasView.undoManager?.canUndo ?? false
         }
     }
 }
 
-private final class AccidentSketchVehicleHostView: UIView {
+// MARK: - Vehicle overlay
+
+private final class AccidentSketchPassThroughView: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        for subview in subviews.reversed() {
+            let converted = convert(point, to: subview)
+            if let hit = subview.hitTest(converted, with: event) {
+                return hit
+            }
+        }
+        return nil
+    }
+}
+
+private final class AccidentSketchVehicleHostView: UIView, UIGestureRecognizerDelegate {
     let vehicleID: UUID
     private let imageView = UIImageView()
     private var vehicle: AccidentSketchVehicle
     private let canvasScale: () -> CGFloat
     private let onMoved: (UUID, CGPoint) -> Void
+    private let onRotated: (UUID, CGFloat) -> Void
     private let onSelected: (UUID) -> Void
+    private var angleAtRotationStart: CGFloat = 0
 
     init(
         vehicle: AccidentSketchVehicle,
         canvasScale: @escaping () -> CGFloat,
         onMoved: @escaping (UUID, CGPoint) -> Void,
+        onRotated: @escaping (UUID, CGFloat) -> Void,
         onSelected: @escaping (UUID) -> Void
     ) {
         self.vehicleID = vehicle.id
         self.vehicle = vehicle
         self.canvasScale = canvasScale
         self.onMoved = onMoved
+        self.onRotated = onRotated
         self.onSelected = onSelected
         super.init(frame: .zero)
         isUserInteractionEnabled = true
@@ -379,7 +550,12 @@ private final class AccidentSketchVehicleHostView: UIView {
         addSubview(imageView)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.delegate = self
         addGestureRecognizer(pan)
+
+        let rotation = UIRotationGestureRecognizer(target: self, action: #selector(handleRotation(_:)))
+        rotation.delegate = self
+        addGestureRecognizer(rotation)
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         addGestureRecognizer(tap)
@@ -395,6 +571,7 @@ private final class AccidentSketchVehicleHostView: UIView {
 
     func update(vehicle: AccidentSketchVehicle, isSelected: Bool) {
         let needsImageRefresh = self.vehicle.number != vehicle.number
+            || self.vehicle.label != vehicle.label
             || self.vehicle.size != vehicle.size
             || abs(self.vehicle.angle - vehicle.angle) > 0.001
         self.vehicle = vehicle
@@ -402,9 +579,13 @@ private final class AccidentSketchVehicleHostView: UIView {
             refreshImage()
         }
         applyLayout()
-        layer.borderWidth = isSelected ? 2 : 0
+        layer.borderWidth = isSelected ? 2.5 : 0
         layer.borderColor = isSelected ? UIColor.systemBlue.cgColor : nil
-        layer.cornerRadius = isSelected ? 8 : 0
+        layer.cornerRadius = isSelected ? 10 : 0
+        layer.shadowColor = isSelected ? UIColor.systemBlue.cgColor : nil
+        layer.shadowOpacity = isSelected ? 0.25 : 0
+        layer.shadowRadius = isSelected ? 6 : 0
+        layer.shadowOffset = .zero
     }
 
     private func refreshImage() {
@@ -420,6 +601,14 @@ private final class AccidentSketchVehicleHostView: UIView {
         )
         imageView.frame = bounds
         center = CGPoint(x: vehicle.center.x * scale, y: vehicle.center.y * scale)
+        transform = CGAffineTransform(rotationAngle: 0)
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
     }
 
     @objc private func handleTap() {
@@ -440,30 +629,43 @@ private final class AccidentSketchVehicleHostView: UIView {
         center = newCenter
         onMoved(vehicleID, CGPoint(x: newCenter.x / scale, y: newCenter.y / scale))
     }
+
+    @objc private func handleRotation(_ recognizer: UIRotationGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            angleAtRotationStart = vehicle.angle
+            onSelected(vehicleID)
+        case .changed:
+            onRotated(vehicleID, angleAtRotationStart + recognizer.rotation)
+        default:
+            break
+        }
+    }
 }
 
+// MARK: - Canvas controller
+
 private final class AccidentSketchCanvasViewController: UIViewController {
-    let template: AccidentSketchTemplate
-    let backgroundImage: UIImage
+    private(set) var backgroundImage: UIImage
+    private(set) var templateID: String
 
     var onVehiclesChanged: (([AccidentSketchVehicle]) -> Void)?
     var onVehicleSelected: ((UUID?) -> Void)?
     var onLayout: ((CGRect) -> Void)?
 
+    private let canvasContainer = UIView()
     private let pageImageView = UIImageView()
-    private let vehiclesContainer = UIView()
+    private let vehiclesContainer = AccidentSketchPassThroughView()
     let canvasView = PKCanvasView()
-    private var toolPicker: PKToolPicker?
     private var vehicleViews: [UUID: AccidentSketchVehicleHostView] = [:]
     private var vehicles: [AccidentSketchVehicle]
-    private var editMode: AccidentSketchEditMode = .vehicles
     private var selectedVehicleID: UUID?
-    private var canvasFrame: CGRect = .zero
+    private var activeDrawingTool: AccidentSketchDrawingTool?
     private var canvasScale: CGFloat = 1
 
-    init(template: AccidentSketchTemplate, backgroundImage: UIImage, vehicles: [AccidentSketchVehicle]) {
-        self.template = template
+    init(backgroundImage: UIImage, vehicles: [AccidentSketchVehicle], templateID: String = "") {
         self.backgroundImage = backgroundImage
+        self.templateID = templateID
         self.vehicles = vehicles
         super.init(nibName: nil, bundle: nil)
     }
@@ -475,63 +677,60 @@ private final class AccidentSketchCanvasViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-
         view.backgroundColor = .systemGroupedBackground
+
+        canvasContainer.backgroundColor = .clear
 
         pageImageView.contentMode = .scaleToFill
         pageImageView.isUserInteractionEnabled = false
-        pageImageView.layer.cornerRadius = 12
+        pageImageView.layer.cornerRadius = 10
         pageImageView.clipsToBounds = true
         pageImageView.image = backgroundImage
 
         vehiclesContainer.backgroundColor = .clear
-        vehiclesContainer.isUserInteractionEnabled = true
         vehiclesContainer.clipsToBounds = false
 
         canvasView.backgroundColor = .clear
         canvasView.isOpaque = false
         canvasView.drawingPolicy = .anyInput
-        canvasView.tool = PKInkingTool(.pen, color: .black, width: 2)
 
-        view.addSubview(pageImageView)
-        view.addSubview(vehiclesContainer)
-        view.addSubview(canvasView)
-
-        let backgroundTap = UITapGestureRecognizer(target: self, action: #selector(handleBackgroundTap))
-        backgroundTap.cancelsTouchesInView = false
-        vehiclesContainer.addGestureRecognizer(backgroundTap)
+        canvasContainer.addSubview(pageImageView)
+        canvasContainer.addSubview(canvasView)
+        canvasContainer.addSubview(vehiclesContainer)
+        view.addSubview(canvasContainer)
 
         rebuildVehicleViews()
-        applyEditMode()
     }
 
-    @objc private func handleBackgroundTap() {
-        guard editMode == .vehicles else { return }
-        selectedVehicleID = nil
-        onVehicleSelected?(nil)
-        refreshVehicleSelection()
+    func setBackgroundImage(_ image: UIImage, templateID: String) {
+        backgroundImage = image
+        self.templateID = templateID
+        pageImageView.image = image
+        updateLayout()
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        configureToolPicker()
         updateLayout()
+    }
+
+    func setDrawingTool(_ tool: AccidentSketchDrawingTool?) {
+        activeDrawingTool = tool
+        if let tool {
+            canvasView.isUserInteractionEnabled = true
+            canvasView.tool = tool.makeTool()
+        } else {
+            canvasView.isUserInteractionEnabled = false
+        }
+    }
+
+    func undoLastStroke() {
+        canvasView.undoManager?.undo()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         updateLayout()
-    }
-
-    func setEditMode(_ mode: AccidentSketchEditMode) {
-        guard editMode != mode else { return }
-        editMode = mode
-        if mode == .draw {
-            selectedVehicleID = nil
-            onVehicleSelected?(nil)
-        }
-        applyEditMode()
-        refreshVehicleSelection()
     }
 
     func setSelectedVehicleID(_ id: UUID?) {
@@ -556,35 +755,39 @@ private final class AccidentSketchCanvasViewController: UIViewController {
         if updated.count > vehicleViews.count {
             rebuildVehicleViews()
         }
-        applyEditMode()
     }
 
     func updateLayout() {
         guard backgroundImage.size.width > 0, backgroundImage.size.height > 0 else { return }
 
-        let insets = UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        let insets = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         let available = view.bounds.inset(by: insets)
-        let scale = min(
+        let fitScale = min(
             available.width / backgroundImage.size.width,
             available.height / backgroundImage.size.height
         )
-        let size = CGSize(
-            width: backgroundImage.size.width * scale,
-            height: backgroundImage.size.height * scale
+        let fittedSize = CGSize(
+            width: backgroundImage.size.width * fitScale,
+            height: backgroundImage.size.height * fitScale
         )
         let origin = CGPoint(
-            x: available.midX - size.width / 2,
-            y: available.midY - size.height / 2
+            x: available.minX + (available.width - fittedSize.width) / 2,
+            y: available.minY + (available.height - fittedSize.height) / 2
         )
-        let frame = CGRect(origin: origin, size: size)
+        let sceneFrame = CGRect(origin: origin, size: fittedSize)
 
-        pageImageView.frame = frame
-        vehiclesContainer.frame = frame
-        canvasView.frame = frame
-        canvasFrame = frame
-        canvasScale = scale
+        canvasContainer.frame = view.bounds
+        pageImageView.frame = sceneFrame
+        canvasView.frame = sceneFrame
+        vehiclesContainer.frame = sceneFrame
+
+        canvasScale = fitScale
         onLayout?(canvasView.bounds)
 
+        refreshVehiclePositions()
+    }
+
+    private func refreshVehiclePositions() {
         for vehicle in vehicles {
             vehicleViews[vehicle.id]?.update(
                 vehicle: vehicle,
@@ -600,12 +803,17 @@ private final class AccidentSketchCanvasViewController: UIViewController {
         for vehicle in vehicles {
             let host = AccidentSketchVehicleHostView(
                 vehicle: vehicle,
-                canvasScale: { [weak self] in self?.canvasScale ?? 1 },
+                canvasScale: { [weak self] in
+                    guard let self else { return 1 }
+                    return self.canvasScale
+                },
                 onMoved: { [weak self] id, center in
                     self?.moveVehicle(id: id, to: center)
                 },
+                onRotated: { [weak self] id, angle in
+                    self?.rotateVehicle(id: id, to: angle)
+                },
                 onSelected: { [weak self] id in
-                    guard self?.editMode == .vehicles else { return }
                     self?.selectedVehicleID = id
                     self?.onVehicleSelected?(id)
                     self?.refreshVehicleSelection()
@@ -628,36 +836,22 @@ private final class AccidentSketchCanvasViewController: UIViewController {
         onVehiclesChanged?(vehicles)
     }
 
+    private func rotateVehicle(id: UUID, to angle: CGFloat) {
+        guard let index = vehicles.firstIndex(where: { $0.id == id }) else { return }
+        vehicles[index].angle = angle
+        vehicleViews[id]?.update(
+            vehicle: vehicles[index],
+            isSelected: vehicles[index].id == selectedVehicleID
+        )
+        onVehiclesChanged?(vehicles)
+    }
+
     private func refreshVehicleSelection() {
         for vehicle in vehicles {
             vehicleViews[vehicle.id]?.update(
                 vehicle: vehicle,
                 isSelected: vehicle.id == selectedVehicleID
             )
-        }
-    }
-
-    private func applyEditMode() {
-        let vehicleMode = editMode == .vehicles
-        vehiclesContainer.isUserInteractionEnabled = vehicleMode && !vehicles.isEmpty
-        canvasView.isUserInteractionEnabled = editMode == .draw
-
-        if editMode == .draw {
-            canvasView.becomeFirstResponder()
-            toolPicker?.setVisible(true, forFirstResponder: canvasView)
-        } else {
-            toolPicker?.setVisible(false, forFirstResponder: canvasView)
-            canvasView.resignFirstResponder()
-        }
-    }
-
-    private func configureToolPicker() {
-        let picker = PKToolPicker()
-        picker.addObserver(canvasView)
-        toolPicker = picker
-        if editMode == .draw {
-            picker.setVisible(true, forFirstResponder: canvasView)
-            canvasView.becomeFirstResponder()
         }
     }
 }
