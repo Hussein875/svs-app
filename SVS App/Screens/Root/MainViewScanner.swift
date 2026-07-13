@@ -258,8 +258,10 @@ struct ScannerScreen: View {
     }
 
     private var previewDriveFolderName: String {
-        let namePart = trimmedScanName.isEmpty ? "Name fehlt" : trimmedScanName
-        return "\(currentScannerNumberText) Unfallgutachten \(namePart)"
+        guard !trimmedScanName.isEmpty else {
+            return "\(currentScannerNumberText) Unfallgutachten"
+        }
+        return "\(currentScannerNumberText) Unfallgutachten \(trimmedScanName)"
     }
 
     private var canReserveScannerNumber: Bool {
@@ -271,59 +273,83 @@ struct ScannerScreen: View {
     }
 
     @ViewBuilder
-    private var headerSection: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "doc.viewfinder")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.tint)
+    private var compactGutachtenHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Unfallgutachten & Dokumente")
+                .font(.title3.weight(.bold))
 
-            Text("Gutachten")
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(.secondary)
-
-            Spacer(minLength: 0)
+            Text(
+                "Abtretungserklärung starten oder Dokumente scannen "
+                  + "und direkt in den Gutachten-Ordner legen."
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.top, 8)
-
-        Text("Gutachten")
-            .font(.largeTitle.bold())
-
-        Text(
-            "Abtretungserklärung ausfüllen oder Dokumente scannen "
-              + "und in Google Drive ablegen."
-        )
-        .font(.subheadline)
-        .foregroundColor(.secondary)
+        .padding(.top, 2)
     }
 
     @ViewBuilder
     private var scanWorkflowSectionHeader: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Rectangle()
                 .fill(Color.secondary.opacity(0.2))
                 .frame(height: 1)
-            Text("Dokument scannen")
-                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+
+            Text("Dokument\nscannen")
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
+                .multilineTextAlignment(.center)
+                .lineSpacing(1)
+
             Rectangle()
                 .fill(Color.secondary.opacity(0.2))
                 .frame(height: 1)
+                .frame(maxWidth: .infinity)
         }
-        .padding(.top, 4)
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
-    private var numberFieldSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Gutachten-Nr.")
-                .font(.caption)
-                .foregroundColor(.secondary)
+    private var gutachtenMainContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            compactGutachtenHeader
 
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(reservedScan == nil ? "Aktuell verfügbar" : "Reserviert")
-                        .font(.caption.weight(.semibold))
+            GutachtenAbtretungserklaerungEntryBar(
+                accent: userAccentColor,
+                action: {
+                    if CompanyDocumentsCatalog.abtretungserklaerungPDFURL != nil {
+                        showAbtretungserklaerungFunnel = true
+                    } else {
+                        uiErrorMessage = "Die Abtretungserklärung konnte nicht geladen werden."
+                    }
+                }
+            )
+
+            scanWorkflowSectionHeader
+
+            compactScannerSection
+
+            if let url = scannedPDFURL {
+                scannedActions(url: url)
+            } else {
+                emptyState
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 6)
+        .padding(.bottom, 22)
+    }
+
+    @ViewBuilder
+    private var compactScannerSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(reservedScan == nil ? "Gutachten-Nr." : "Reserviert")
+                        .font(.caption2.weight(.semibold))
                         .foregroundColor(.secondary)
 
                     Text(currentScannerNumberText)
@@ -331,7 +357,7 @@ struct ScannerScreen: View {
                         .foregroundColor(.primary)
                 }
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 4)
 
                 if isLoadingScannerSequence || isReservingScanNumber {
                     ProgressView()
@@ -343,7 +369,7 @@ struct ScannerScreen: View {
                 }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color(.secondarySystemBackground))
@@ -353,11 +379,7 @@ struct ScannerScreen: View {
                     .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
             )
 
-            Text("Name")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            TextField("Name", text: $scanName)
+            TextField("Name für Gutachten-Ordner", text: $scanName)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .submitLabel(.done)
@@ -366,7 +388,7 @@ struct ScannerScreen: View {
                 }
                 .disabled(reservedScan != nil)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.vertical, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color(.secondarySystemBackground))
@@ -377,16 +399,43 @@ struct ScannerScreen: View {
                 )
 
             if let reservedScan {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Drive-Ordner")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(userAccentColor)
+                        Text("Gutachten-Nr. reserviert")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 0)
+                    }
 
-                    Text(reservedScan.driveFolderName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.primary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Drive-Ordner")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text(reservedScan.driveFolderName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.tertiarySystemGroupedBackground))
+                    )
                 }
-                .padding(.top, 4)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(userAccentColor.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(userAccentColor.opacity(0.28), lineWidth: 1)
+                )
 
                 Button(role: .destructive) {
                     showCancelReservationConfirm = true
@@ -397,53 +446,67 @@ struct ScannerScreen: View {
                                 .controlSize(.small)
                         } else {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 16, weight: .semibold))
+                                .font(.system(size: 17, weight: .semibold))
                         }
                         Text("Reservierung aufheben")
                             .font(.subheadline.weight(.semibold))
-                        Spacer()
+                        Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Color.red.opacity(0.08))
+                            .fill(Color.red.opacity(0.1))
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.red.opacity(0.18), lineWidth: 1)
+                            .stroke(Color.red.opacity(0.28), lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)
                 .disabled(isCancelingReservation || isUploadingToDrive)
                 .opacity(isCancelingReservation || isUploadingToDrive ? 0.6 : 1.0)
-                .padding(.top, 4)
             } else {
-                Text(previewDriveFolderName)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 2)
+                if !trimmedScanName.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Vorschau Drive-Ordner")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+
+                        Text(previewDriveFolderName)
+                            .font(.caption.weight(.medium))
+                            .foregroundColor(.primary)
+                            .lineLimit(2)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(.tertiarySystemGroupedBackground))
+                    )
+                }
 
                 Button {
                     _Concurrency.Task { await reserveCurrentScannerNumber() }
                 } label: {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 8) {
                         Image(systemName: "number.circle.fill")
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                         Text("Nummer reservieren")
                             .font(.subheadline.weight(.semibold))
                         Spacer()
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(Color(.secondarySystemBackground))
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(userAccentColor.opacity(0.22), lineWidth: 1)
                     )
                 }
@@ -451,6 +514,8 @@ struct ScannerScreen: View {
                 .disabled(!canReserveScannerNumber)
                 .opacity(canReserveScannerNumber ? 1.0 : 0.6)
             }
+
+            scanButton
         }
     }
 
@@ -469,8 +534,8 @@ struct ScannerScreen: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.secondary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -609,24 +674,26 @@ struct ScannerScreen: View {
 
     @ViewBuilder
     private var emptyState: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 34, weight: .semibold))
+                .font(.system(size: 36, weight: .semibold))
                 .foregroundColor(.secondary)
 
             Text("Noch kein Scan")
                 .font(.headline)
 
             Text(
-                "Tippe auf „Scan starten“, um ein Dokument zu erfassen "
-                  + "und als PDF zu speichern."
+                "Reserviere zuerst eine Gutachten-Nr., tippe dann auf "
+                  + "„Scan starten“, um ein Dokument zu erfassen und als PDF zu speichern."
             )
             .font(.subheadline)
             .foregroundColor(.secondary)
             .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
+        .padding(.vertical, 20)
+        .padding(.horizontal, 14)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
@@ -635,48 +702,16 @@ struct ScannerScreen: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
         )
-        .padding(.top, 4)
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    headerSection
-
-                    GutachtenWorkflowPicker(
-                        accent: userAccentColor,
-                        onStartAbtretungserklaerung: {
-                            if CompanyDocumentsCatalog.abtretungserklaerungPDFURL != nil {
-                                showAbtretungserklaerungFunnel = true
-                            } else {
-                                uiErrorMessage = "Die Abtretungserklärung konnte nicht geladen werden."
-                            }
-                        }
-                    )
-
-                    scanWorkflowSectionHeader
-
-                    VStack(spacing: 12) {
-                        numberFieldSection
-                        scanButton
-
-                        if let url = scannedPDFURL {
-                            scannedActions(url: url)
-                        } else {
-                            emptyState
-                        }
-                    }
-                    .padding(.top, 4)
-
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 18)
-                .padding(.bottom, 22)
+                gutachtenMainContent
             }
+            .scrollDismissesKeyboard(.interactively)
             .background(Color(.systemGroupedBackground))
             .tint(userAccentColor)
-            .scrollDismissesKeyboard(.interactively)
             .contentShape(Rectangle())
             .onTapGesture { hideKeyboard() }
             .onAppear {

@@ -96,7 +96,112 @@ enum VehicleIdentificationStore {
             }
         }
 
-        return nil
+        return bestScoredErstzulassungDate(in: normalized)
+    }
+
+    /// Bevorzugt Feld B aus OCR-Text; DocuPipe-Wert nur bei plausibler Erstzulassungs-Umgebung.
+    static func resolveErstzulassungDate(parsedFromSchema: Date?, rawText: String) -> Date? {
+        if let fromFieldB = parseErstzulassungDateFromScheinText(rawText) {
+            return fromFieldB
+        }
+
+        guard let parsedFromSchema else { return nil }
+
+        let trimmedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return nil }
+
+        let formatted = formatFirstRegistrationDate(parsedFromSchema)
+        guard let range = trimmedText.range(of: formatted) else { return nil }
+
+        let start = trimmedText.index(
+            range.lowerBound,
+            offsetBy: -min(90, trimmedText.distance(from: trimmedText.startIndex, to: range.lowerBound)),
+            limitedBy: trimmedText.startIndex
+        ) ?? trimmedText.startIndex
+        let end = trimmedText.index(
+            range.upperBound,
+            offsetBy: min(90, trimmedText.distance(from: range.upperBound, to: trimmedText.endIndex)),
+            limitedBy: trimmedText.endIndex
+        ) ?? trimmedText.endIndex
+        let context = String(trimmedText[start..<end])
+        let score = scoreErstzulassungContext(context)
+        return score >= 40 ? parsedFromSchema : nil
+    }
+
+    private static func bestScoredErstzulassungDate(in text: String) -> Date? {
+        guard let regex = try? NSRegularExpression(pattern: #"\d{2}\.\d{2}\.\d{4}"#) else {
+            return nil
+        }
+
+        let range = NSRange(text.startIndex..., in: text)
+        var best: (date: Date, score: Int)?
+
+        regex.enumerateMatches(in: text, range: range) { match, _, _ in
+            guard let match,
+                  let dateRange = Range(match.range(at: 0), in: text) else {
+                return
+            }
+            let dateString = String(text[dateRange])
+            guard let date = parseFirstRegistrationDate(dateString) else { return }
+
+            let context = contextSnippet(around: match.range, in: text, radius: 90)
+            let score = scoreErstzulassungContext(context)
+            guard score > 0 else { return }
+
+            if let currentBest = best {
+                if score > currentBest.score {
+                    best = (date, score)
+                }
+            } else {
+                best = (date, score)
+            }
+        }
+
+        return best?.date
+    }
+
+    private static func contextSnippet(around matchRange: NSRange, in text: String, radius: Int) -> String {
+        guard let swiftRange = Range(matchRange, in: text) else { return "" }
+
+        let start = text.index(
+            swiftRange.lowerBound,
+            offsetBy: -min(radius, text.distance(from: text.startIndex, to: swiftRange.lowerBound)),
+            limitedBy: text.startIndex
+        ) ?? text.startIndex
+        let end = text.index(
+            swiftRange.upperBound,
+            offsetBy: min(radius, text.distance(from: swiftRange.upperBound, to: text.endIndex)),
+            limitedBy: text.endIndex
+        ) ?? text.endIndex
+
+        return String(text[start..<end])
+    }
+
+    private static func scoreErstzulassungContext(_ snippet: String) -> Int {
+        if isForbiddenErstzulassungContext(snippet) { return -1_000 }
+
+        let lowered = snippet.lowercased()
+        var score = 0
+
+        if lowered.contains("erstzulassung des fahrzeugs") {
+            score += 120
+        } else if lowered.contains("erstzulassung") {
+            score += 80
+        }
+        if lowered.contains("feld b") {
+            score += 60
+        }
+        if snippet.range(of: #"(?i)(?:^|[^\w])b(?:[^\w]|$)"#, options: .regularExpression) != nil {
+            score += 50
+        }
+        if lowered.contains("datum zu 4") || lowered.contains("baujahr") || lowered.contains("baudatum") {
+            score -= 200
+        }
+        if snippet.range(of: #"(?:^|\s)6\b"#, options: .regularExpression) != nil {
+            score -= 80
+        }
+
+        return score
     }
 
     private static func isForbiddenErstzulassungContext(_ snippet: String) -> Bool {

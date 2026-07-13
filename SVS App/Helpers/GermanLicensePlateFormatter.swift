@@ -5,29 +5,39 @@
 
 import Foundation
 
-/// Formatiert deutsche Kennzeichen, z. B. „HBBT174“ → „HB-BT 174“.
+/// Formatiert deutsche Kennzeichen im üblichen Stil: `HB-AB 1234`
+/// (Ortskürzel-Buchstaben Ziffern).
 enum GermanLicensePlateFormatter {
+    /// Beispiel für Platzhalter und Hinweise in der UI.
+    static let displayExample = "HB-AB 1234"
+
     static func format(_ input: String) -> String {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
 
-        if trimmed.contains("-") {
-            return normalizeSpacing(trimmed)
-        }
-
         let alphanumeric = trimmed
             .uppercased()
             .filter { $0.isLetter || $0.isNumber }
-        guard !alphanumeric.isEmpty else { return trimmed.uppercased() }
+        guard !alphanumeric.isEmpty else {
+            return normalizeSpacing(trimmed)
+        }
 
         let digitCount = alphanumeric.reversed().prefix(while: \.isNumber).count
-        guard (1...4).contains(digitCount) else { return trimmed.uppercased() }
+
+        // Noch keine Ziffern — Großschreibung/Abstände, Format nicht erzwingen.
+        if digitCount == 0 {
+            return normalizeSpacing(trimmed)
+        }
+
+        guard (1...4).contains(digitCount) else {
+            return normalizeSpacing(trimmed)
+        }
 
         let digits = String(alphanumeric.suffix(digitCount))
         let letters = String(alphanumeric.dropLast(digitCount))
         guard !letters.isEmpty, letters.allSatisfy(\.isLetter),
               let split = splitLicenseLetters(letters) else {
-            return trimmed.uppercased()
+            return normalizeSpacing(trimmed)
         }
 
         return "\(split.city)-\(split.series) \(digits)"
@@ -40,6 +50,7 @@ enum GermanLicensePlateFormatter {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Aufteilung der Buchstaben vor den Ziffern (Ortskürzel + Erkennungsbuchstaben).
     private static func splitLicenseLetters(_ letters: String) -> (city: String, series: String)? {
         let chars = Array(letters)
         let count = chars.count

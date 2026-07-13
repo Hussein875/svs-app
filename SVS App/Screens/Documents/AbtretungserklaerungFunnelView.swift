@@ -51,6 +51,7 @@ struct AbtretungserklaerungFunnelView: View {
         case clientLastName
         case clientFirstName
         case licensePlate
+        case vin
         case streetAndNumber
         case postalCodeAndCity
         case phoneOrEmail
@@ -303,9 +304,14 @@ struct AbtretungserklaerungFunnelView: View {
             if isRecognizingVehicle {
                 VehicleRegistrationRecognitionLoadingView()
             } else if let ocrNotice {
-                Text(ocrNotice)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Label {
+                    Text(ocrNotice)
+                        .font(.subheadline)
+                } icon: {
+                    Image(systemName: "checkmark.circle.fill")
+                }
+                .foregroundStyle(.green)
+                .padding(.vertical, 4)
             }
         } header: {
             Text("Optional")
@@ -316,6 +322,18 @@ struct AbtretungserklaerungFunnelView: View {
 
     private var clientIdentityStep: some View {
         Group {
+            if let ocrNotice {
+                Section {
+                    Label {
+                        Text(ocrNotice)
+                            .font(.subheadline)
+                    } icon: {
+                        Image(systemName: "checkmark.circle.fill")
+                    }
+                    .foregroundStyle(.green)
+                }
+            }
+
             Section {
                 configureFieldFocus(
                     TextField("Nachname", text: $form.clientLastName)
@@ -331,36 +349,72 @@ struct AbtretungserklaerungFunnelView: View {
                     field: .clientFirstName
                 )
                 configureFieldFocus(
-                    TextField("Amtliches Kennzeichen", text: $form.licensePlate)
+                    TextField(GermanLicensePlateFormatter.displayExample, text: $form.licensePlate)
                         .textInputAutocapitalization(.characters)
                         .onChange(of: form.licensePlate) { _, newValue in
                             applyLicensePlateFormatting(&form.licensePlate, newValue: newValue)
                         },
                     field: .licensePlate
                 )
+            }
 
-                if !form.vin.isEmpty {
-                    LabeledContent("FIN") {
-                        Text(form.vin)
-                            .font(.body.monospaced())
-                            .textSelection(.enabled)
-                    }
-                }
+            Section {
+                configureFieldFocus(
+                    TextField("FIN (17 Zeichen)", text: $form.vin)
+                        .font(.body.monospaced())
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .onChange(of: form.vin) { _, newValue in
+                            applyVinFormatting(newValue: newValue)
+                        },
+                    field: .vin
+                )
 
                 if let firstRegistrationDate = form.firstRegistrationDate {
-                    LabeledContent("Erstzulassung") {
-                        Text(VehicleIdentificationStore.formatFirstRegistrationDate(
-                            firstRegistrationDate
-                        ))
-                        .textSelection(.enabled)
+                    DatePicker(
+                        "Erstzulassung (Feld B)",
+                        selection: Binding(
+                            get: { firstRegistrationDate },
+                            set: { form.firstRegistrationDate = $0 }
+                        ),
+                        displayedComponents: .date
+                    )
+                    .onChange(of: form.firstRegistrationDate) { _, _ in
+                        rememberVehicleIdentificationFromForm()
+                    }
+
+                    Button("Erstzulassung entfernen", role: .destructive) {
+                        form.firstRegistrationDate = nil
+                        rememberVehicleIdentificationFromForm()
+                    }
+                    .font(.subheadline)
+                } else {
+                    Button {
+                        form.firstRegistrationDate = Date()
+                        rememberVehicleIdentificationFromForm()
+                    } label: {
+                        Label("Erstzulassung manuell eintragen", systemImage: "calendar.badge.plus")
                     }
                 }
-            } footer: {
-                if form.vin.isEmpty && form.firstRegistrationDate == nil {
-                    Text("Nach dem Fahrzeugschein-Scan sind diese Felder oft schon ausgefüllt.")
-                } else {
-                    Text("FIN und Erstzulassung werden lokal gespeichert und erscheinen nicht auf der Abtretungserklärung.")
+
+                Button {
+                    showVehicleScanner = true
+                } label: {
+                    Label("Fahrzeugschein erneut scannen", systemImage: "camera.viewfinder")
                 }
+                .disabled(isRecognizingVehicle)
+
+                if isRecognizingVehicle {
+                    VehicleRegistrationRecognitionLoadingView()
+                }
+            } header: {
+                Text("Fahrzeugdaten")
+            } footer: {
+                Text(
+                    "Nur lokal gespeichert – erscheinen nicht auf der Abtretungserklärung. "
+                    + "Bei falschem Scan: Werte hier korrigieren oder Schein erneut fotografieren "
+                    + "(Feld B = Erstzulassung, nicht Feld 6 / Baudatum)."
+                )
             }
 
             priorDamageCheckSection
@@ -496,7 +550,7 @@ struct AbtretungserklaerungFunnelView: View {
                 displayedComponents: .date
             )
             configureFieldFocus(
-                TextField("Kennzeichen des Unfallgegners", text: $form.opponentLicensePlate)
+                TextField(GermanLicensePlateFormatter.displayExample, text: $form.opponentLicensePlate)
                     .textInputAutocapitalization(.characters)
                     .onChange(of: form.opponentLicensePlate) { _, newValue in
                         applyLicensePlateFormatting(&form.opponentLicensePlate, newValue: newValue)
@@ -781,7 +835,7 @@ struct AbtretungserklaerungFunnelView: View {
         case .gutachtenNumber:
             return reservation == nil ? [.scanName] : []
         case .clientIdentity:
-            return [.clientLastName, .clientFirstName, .licensePlate]
+            return [.clientLastName, .clientFirstName, .licensePlate, .vin]
         case .clientAddress:
             return [.streetAndNumber, .postalCodeAndCity, .phoneOrEmail]
         case .accidentDetails:
@@ -1023,6 +1077,22 @@ struct AbtretungserklaerungFunnelView: View {
 
     // MARK: - OCR
 
+    private func handleVehicleScanSuccess(notice: String) async {
+        await MainActor.run {
+            ocrNotice = notice
+            isRecognizingVehicle = false
+        }
+
+        let shouldAdvance = await MainActor.run {
+            step == .vehicleRegistrationScan && !isRecognizingVehicle && !isAdvancing
+        }
+        if shouldAdvance {
+            await goForward()
+        }
+
+        _Concurrency.Task { await runPriorDamageCheckIfNeeded() }
+    }
+
     private func runOCR(on image: UIImage) async {
         await MainActor.run {
             isRecognizingVehicle = true
@@ -1034,10 +1104,10 @@ struct AbtretungserklaerungFunnelView: View {
             await MainActor.run {
                 result.apply(to: &form)
                 updateSuggestedScanNameIfNeeded()
-                ocrNotice = "Daten per DocuPipe übernommen – bitte in den nächsten Schritten prüfen."
-                isRecognizingVehicle = false
             }
-            await runPriorDamageCheckIfNeeded()
+            await handleVehicleScanSuccess(
+                notice: "Fahrzeugschein erkannt – Daten übernommen."
+            )
             return
         } catch let docuPipeError as VehicleRegistrationDocuPipeError {
             let fallbackReason = docuPipeError.localizedDescription
@@ -1054,10 +1124,10 @@ struct AbtretungserklaerungFunnelView: View {
                 await MainActor.run {
                     result.apply(to: &form)
                     updateSuggestedScanNameIfNeeded()
-                    ocrNotice = "DocuPipe: \(fallbackReason) – Daten lokal erkannt."
-                    isRecognizingVehicle = false
                 }
-                await runPriorDamageCheckIfNeeded()
+                await handleVehicleScanSuccess(
+                    notice: "Fahrzeugschein erkannt – Daten lokal gelesen."
+                )
             } catch {
                 await MainActor.run {
                     isRecognizingVehicle = false
@@ -1072,14 +1142,14 @@ struct AbtretungserklaerungFunnelView: View {
                 await MainActor.run {
                     result.apply(to: &form)
                     updateSuggestedScanNameIfNeeded()
-                    ocrNotice = "DocuPipe: \(fallbackReason) – Daten lokal erkannt."
-                    isRecognizingVehicle = false
                 }
-                await runPriorDamageCheckIfNeeded()
+                await handleVehicleScanSuccess(
+                    notice: "Fahrzeugschein erkannt – Daten lokal gelesen."
+                )
             } catch {
                 await MainActor.run {
                     isRecognizingVehicle = false
-                    errorMessage = error.localizedDescription
+                    errorMessage = fallbackReason
                 }
             }
             return
@@ -1168,6 +1238,28 @@ struct AbtretungserklaerungFunnelView: View {
         field = formatted
     }
 
+    private func applyVinFormatting(newValue: String) {
+        let normalized = VehicleIdentificationStore.normalizeVin(newValue)
+        guard normalized != newValue else {
+            rememberVehicleIdentificationFromForm()
+            _Concurrency.Task { await runPriorDamageCheckIfNeeded() }
+            return
+        }
+        form.vin = normalized
+        rememberVehicleIdentificationFromForm()
+        _Concurrency.Task { await runPriorDamageCheckIfNeeded() }
+    }
+
+    private func rememberVehicleIdentificationFromForm() {
+        guard !form.licensePlate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        VehicleIdentificationStore.remember(
+            licensePlate: form.licensePlate,
+            vin: form.vin.isEmpty ? nil : form.vin,
+            firstRegistrationDate: form.firstRegistrationDate
+        )
+        saveDraft()
+    }
+
     private func normalizeLicensePlatesInForm() {
         form.licensePlate = GermanLicensePlateFormatter.format(form.licensePlate)
         form.opponentLicensePlate = GermanLicensePlateFormatter.format(form.opponentLicensePlate)
@@ -1184,6 +1276,7 @@ struct AbtretungserklaerungFunnelView: View {
 
         step = restoredStep
         form = draft.form
+        normalizeLicensePlatesInForm()
         scanName = draft.scanName
         scanNameManuallyEdited = draft.scanNameManuallyEdited
         reservation = draft.reservation
@@ -1306,7 +1399,7 @@ struct AbtretungserklaerungFunnelView: View {
         await MainActor.run { isUploadingToDrive = true }
         defer { _Concurrency.Task { @MainActor in isUploadingToDrive = false } }
 
-        let fileName = "\(reservation.displayNumber.replacingOccurrences(of: "/", with: "-")) AE.pdf"
+        let fileName = "\(reservation.displayNumber) AE.pdf"
 
         do {
             let result = try await ScannerDriveUploadService.uploadPDF(

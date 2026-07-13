@@ -142,7 +142,106 @@ export function extractErstzulassungDateFromText(text: string): string | null {
     if (iso) return iso;
   }
 
-  return null;
+  return bestScoredErstzulassungDate(normalized);
+}
+
+/**
+ * Scores OCR context around a date candidate.
+ *
+ * @param {string} snippet Text around a date candidate.
+ * @return {number} Positive when likely field B.
+ */
+function scoreErstzulassungContext(snippet: string): number {
+  if (isForbiddenRegistrationDateContext(snippet)) return -1000;
+
+  const lowered = snippet.toLowerCase();
+  let score = 0;
+
+  if (lowered.includes("erstzulassung des fahrzeugs")) {
+    score += 120;
+  } else if (lowered.includes("erstzulassung")) {
+    score += 80;
+  }
+  if (lowered.includes("feld b")) {
+    score += 60;
+  }
+  if (/(?:^|[^\w])b(?:[^\w]|$)/i.test(snippet)) {
+    score += 50;
+  }
+  if (
+    lowered.includes("datum zu 4") ||
+    lowered.includes("baujahr") ||
+    lowered.includes("baudatum")
+  ) {
+    score -= 200;
+  }
+  if (/(?:^|\s)6\b/.test(snippet)) {
+    score -= 80;
+  }
+
+  return score;
+}
+
+/**
+ * Picks the best Erstzulassung date from all DD.MM.YYYY matches in text.
+ *
+ * @param {string} text Normalized OCR text.
+ * @return {string | null} ISO date or null.
+ */
+function bestScoredErstzulassungDate(text: string): string | null {
+  const datePattern = /\d{2}\.\d{2}\.\d{4}/g;
+  let best: {iso: string; score: number} | null = null;
+
+  for (const match of text.matchAll(datePattern)) {
+    const dateString = match[0];
+    const iso = parseFirstRegistrationDate(dateString);
+    if (!iso) continue;
+
+    const start = Math.max(0, (match.index ?? 0) - 90);
+    const end = Math.min(text.length, (match.index ?? 0) + dateString.length + 90);
+    const context = text.slice(start, end);
+    const score = scoreErstzulassungContext(context);
+    if (score <= 0) continue;
+
+    if (!best || score > best.score) {
+      best = {iso, score};
+    }
+  }
+
+  return best?.iso ?? null;
+}
+
+/**
+ * Returns true when a DocuPipe date appears near Erstzulassung / field B text.
+ *
+ * @param {string} isoDate ISO date from schema extraction.
+ * @param {string} text OCR corpus.
+ * @return {boolean} Whether the value is plausible.
+ */
+function isErstzulassungDatePlausibleInText(isoDate: string, text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  const german = isoDateToGerman(isoDate);
+  const needle = german ?? isoDate;
+  const index = trimmed.indexOf(needle);
+  if (index < 0) return false;
+
+  const start = Math.max(0, index - 90);
+  const end = Math.min(trimmed.length, index + needle.length + 90);
+  return scoreErstzulassungContext(trimmed.slice(start, end)) >= 40;
+}
+
+/**
+ * Converts ISO yyyy-mm-dd to German dd.mm.yyyy when possible.
+ *
+ * @param {string} isoDate ISO date string.
+ * @return {string | null} German date or null.
+ */
+function isoDateToGerman(isoDate: string): string | null {
+  const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return `${match[3]}.${match[2]}.${match[1]}`;
 }
 
 /**
@@ -163,7 +262,12 @@ function resolveFirstRegistrationDate(
   if (fromFieldB) {
     return fromFieldB;
   }
-  return docuPipeValue;
+  if (!docuPipeValue) {
+    return null;
+  }
+  return isErstzulassungDatePlausibleInText(docuPipeValue, corpus) ?
+    docuPipeValue :
+    null;
 }
 
 /**

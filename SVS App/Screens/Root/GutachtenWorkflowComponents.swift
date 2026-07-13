@@ -5,6 +5,60 @@
 
 import SwiftUI
 
+struct GutachtenAbtretungserklaerungEntryBar: View {
+    let accent: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: "list.bullet.rectangle.portrait.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(.white.opacity(0.2))
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Abtretungserklärung")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Kunde erfassen · unterschreiben · Drive")
+                        .font(.caption)
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.white)
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.white.opacity(0.95))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [accent, accent.opacity(0.78)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(accent.opacity(0.2), lineWidth: 1)
+            )
+            .shadow(color: accent.opacity(0.2), radius: 8, x: 0, y: 4)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 struct GutachtenWorkflowPicker: View {
     let accent: Color
     let onStartAbtretungserklaerung: () -> Void

@@ -125,14 +125,12 @@ enum VehicleRegistrationOCRService {
         var vin: String?
         var firstRegistrationDate: Date?
 
+        // Erstzulassung (Feld B): oben links — vor dem allgemeinen Zeilen-Scan.
+        firstRegistrationDate = parseFirstRegistrationDateSpatial(lines: lines)
+
         // 1) Feld-Codes C.1.1 / C.1.2 / C.1.3 (auch OCR-Varianten wie „C1.2 Vor“)
         for (index, line) in lines.enumerated() {
             let normalized = normalizedFieldCode(line.text)
-
-            if firstRegistrationDate == nil,
-               let parsedDate = matchFirstRegistrationDate(line.text) {
-                firstRegistrationDate = parsedDate
-            }
 
             if vin == nil, let parsedVin = matchVehicleIdentificationNumber(line.text) {
                 vin = parsedVin
@@ -185,7 +183,6 @@ enum VehicleRegistrationOCRService {
         vin = vin ?? lines.compactMap { matchVehicleIdentificationNumber($0.text) }.first
             ?? matchVehicleIdentificationNumber(rawText)
         firstRegistrationDate = firstRegistrationDate
-            ?? parseFirstRegistrationDateSpatial(lines: lines)
             ?? VehicleIdentificationStore.parseErstzulassungDateFromScheinText(rawText)
 
         let mergedName: String? = {
@@ -204,7 +201,7 @@ enum VehicleRegistrationOCRService {
             streetAndNumber: street,
             postalCode: plz,
             city: city,
-            licensePlate: plate,
+            licensePlate: plate.map(GermanLicensePlateFormatter.format),
             vin: vin,
             firstRegistrationDate: firstRegistrationDate,
             rawText: rawText
@@ -222,15 +219,19 @@ enum VehicleRegistrationOCRService {
     }
 
     private static func parseFirstRegistrationDateSpatial(lines: [OCRLine]) -> Date? {
-        let rightColumn = lines.filter { $0.box.midX > 0.35 }
+        // Feld B (Erstzulassung) steht oben links auf dem Schein — nicht rechts (Feld 6 / Baujahr).
+        let topLeftZone = lines.filter { $0.box.midX < 0.55 && $0.box.midY > 0.38 }
 
-        for line in rightColumn {
+        for line in topLeftZone {
+            if isForbiddenErstzulassungContext(line.text) { continue }
             if let date = matchFirstRegistrationDate(line.text) {
                 return date
             }
         }
 
-        for (index, line) in rightColumn.enumerated() {
+        for (index, line) in topLeftZone.enumerated() {
+            if isForbiddenErstzulassungContext(line.text) { continue }
+
             let normalized = normalizedFieldCode(line.text)
             let mentionsFieldB = normalized == "B"
                 || line.text.localizedCaseInsensitiveContains("erstzulassung")
@@ -240,11 +241,27 @@ enum VehicleRegistrationOCRService {
                 return date
             }
 
-            let neighbors = rightColumn[(index + 1)...].prefix(3)
+            let neighbors = topLeftZone[(index + 1)...].prefix(4)
             for neighbor in neighbors {
-                if abs(neighbor.box.midY - line.box.midY) > 0.05 { break }
-                if let date = extractGermanDate(from: neighbor.text),
-                   !isForbiddenErstzulassungContext(neighbor.text) {
+                if abs(neighbor.box.midY - line.box.midY) > 0.06 { break }
+                if isForbiddenErstzulassungContext(neighbor.text) { continue }
+                if let date = extractGermanDate(from: neighbor.text) {
+                    return date
+                }
+            }
+        }
+
+        if let fieldBLine = topLeftZone.first(where: { line in
+            let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return normalizedFieldCode(trimmed) == "B" || trimmed == "B"
+        }) {
+            for neighbor in topLeftZone {
+                guard abs(neighbor.box.midY - fieldBLine.box.midY) < 0.08
+                    || abs(neighbor.box.midX - fieldBLine.box.midX) < 0.18 else {
+                    continue
+                }
+                if isForbiddenErstzulassungContext(neighbor.text) { continue }
+                if let date = extractGermanDate(from: neighbor.text) {
                     return date
                 }
             }
@@ -257,6 +274,8 @@ enum VehicleRegistrationOCRService {
         let lowered = text.lowercased()
         if lowered.contains("datum zu 4") { return true }
         if lowered.contains("produktion") || lowered.contains("baudatum") { return true }
+        if lowered.contains("baujahr") { return true }
+        if lowered.contains("datum dieser zulassung") { return true }
         if text.range(of: #"(?:^|\s)6\b"#, options: .regularExpression) != nil,
            lowered.contains("datum") {
             return true

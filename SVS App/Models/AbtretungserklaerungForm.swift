@@ -171,10 +171,10 @@ struct VehicleRegistrationOCRResult: Equatable {
         if let vin, !vin.isEmpty {
             form.vin = VehicleIdentificationStore.normalizeVin(vin)
         }
-        let resolvedFirstRegistrationDate =
-            VehicleIdentificationStore.parseErstzulassungDateFromScheinText(rawText)
-            ?? firstRegistrationDate
-        if let resolvedFirstRegistrationDate {
+        if let resolvedFirstRegistrationDate = VehicleIdentificationStore.resolveErstzulassungDate(
+            parsedFromSchema: firstRegistrationDate,
+            rawText: rawText
+        ) {
             form.firstRegistrationDate = resolvedFirstRegistrationDate
         }
 

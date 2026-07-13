@@ -148,14 +148,6 @@ struct WorkHomeView: View {
     @ViewBuilder
     private var employeePrimarySection: some View {
         VStack(spacing: 12) {
-            AbtretungserklaerungLaunchButton {
-                WorkCard(
-                    title: "Abtretungserklärung",
-                    subtitle: "Kunde erfassen, unterschreiben, Drive",
-                    systemImage: "list.bullet.rectangle.portrait.fill"
-                )
-            }
-
             if showsCommissionTile {
                 NavigationLink {
                     ProvisionenView()
@@ -259,14 +251,6 @@ struct WorkHomeView: View {
                 )
             }
             .buttonStyle(.plain)
-
-            AbtretungserklaerungLaunchButton {
-                WorkCard(
-                    title: "Abtretungserklärung",
-                    subtitle: "Kunde erfassen, unterschreiben, Drive",
-                    systemImage: "list.bullet.rectangle.portrait.fill"
-                )
-            }
 
             NavigationLink {
                 ProvisionenView()
