@@ -106,6 +106,7 @@ struct ScannerScreen: View {
     @State private var reservedScan: ScannerReservationState? = nil
     @State private var driveUploadSuccessMessage: String? = nil
     @State private var driveUploadFeedback: DriveUploadFeedback? = nil
+    @State private var showAbtretungserklaerungFunnel = false
 
     private var userAccentColor: Color {
         Color.svsAccentColor(from: appState.currentUser?.colorName)
@@ -276,7 +277,7 @@ struct ScannerScreen: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(.tint)
 
-            Text("Scanner")
+            Text("Gutachten")
                 .font(.subheadline.weight(.semibold))
                 .foregroundColor(.secondary)
 
@@ -284,16 +285,32 @@ struct ScannerScreen: View {
         }
         .padding(.top, 8)
 
-        Text("Dokument scannen")
+        Text("Gutachten")
             .font(.largeTitle.bold())
 
         Text(
-            "Scanne Dokumente mit der Kamera, erstelle automatisch "
-              + "eine PDF und exportiere sie oder lege sie in Google Drive "
-              + "ab."
+            "Abtretungserklärung ausfüllen oder Dokumente scannen "
+              + "und in Google Drive ablegen."
         )
         .font(.subheadline)
         .foregroundColor(.secondary)
+    }
+
+    @ViewBuilder
+    private var scanWorkflowSectionHeader: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.2))
+                .frame(height: 1)
+            Text("Dokument scannen")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            Rectangle()
+                .fill(Color.secondary.opacity(0.2))
+                .frame(height: 1)
+        }
+        .padding(.top, 4)
     }
 
     @ViewBuilder
@@ -627,6 +644,19 @@ struct ScannerScreen: View {
                 VStack(alignment: .leading, spacing: 14) {
                     headerSection
 
+                    GutachtenWorkflowPicker(
+                        accent: userAccentColor,
+                        onStartAbtretungserklaerung: {
+                            if CompanyDocumentsCatalog.abtretungserklaerungPDFURL != nil {
+                                showAbtretungserklaerungFunnel = true
+                            } else {
+                                uiErrorMessage = "Die Abtretungserklärung konnte nicht geladen werden."
+                            }
+                        }
+                    )
+
+                    scanWorkflowSectionHeader
+
                     VStack(spacing: 12) {
                         numberFieldSection
                         scanButton
@@ -665,8 +695,13 @@ struct ScannerScreen: View {
             .onDisappear {
                 stopScannerSequenceListener()
             }
-            .navigationTitle("Scanner")
+            .navigationTitle("Gutachten")
             .navigationBarTitleDisplayMode(.inline)
+            .fullScreenCover(isPresented: $showAbtretungserklaerungFunnel) {
+                if let url = CompanyDocumentsCatalog.abtretungserklaerungPDFURL {
+                    AbtretungserklaerungFunnelView(sourcePDFURL: url)
+                }
+            }
             .sheet(isPresented: $isPresentingScanner) {
                 DocumentScanner { images in
                     isPresentingScanner = false

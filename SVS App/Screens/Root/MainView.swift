@@ -44,10 +44,10 @@ struct MainView: View {
                     .tag(MainTab.home)
             }
             
-            // Scanner
+            // Gutachten (Scanner + AE)
             ScannerScreen()
                 .tabItem {
-                    Label("Scanner", systemImage: "doc.viewfinder")
+                    Label("Gutachten", systemImage: "doc.viewfinder")
                 }
                 .tag(MainTab.scanner)
             

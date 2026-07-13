@@ -107,7 +107,7 @@ enum ScannerDriveUploadService {
     }
 
     private static func sanitizedStorageName(_ input: String) -> String {
-        let invalid = CharacterSet(charactersIn: "\\?%*|\"<>:")
+        let invalid = CharacterSet(charactersIn: "/\\?%*|\"<>:")
         let cleaned = input.components(separatedBy: invalid).joined(separator: "_")
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Dokument.pdf"

@@ -57,7 +57,7 @@ function mapDossierToMatch(item, base) {
     return null;
   }
 
-  const dossierId = item?.id ? String(item.id) : undefined;
+  const dossierId = extractDossierId(item);
   const dossierUrl = dossierId
     ? `${base}home/dossiers/edit/${dossierId}/order/general`
     : undefined;
@@ -67,4 +67,23 @@ function mapDossierToMatch(item, base) {
     dossierId,
     dossierUrl
   };
+}
+
+function extractDossierId(item) {
+  const candidates = [
+    item?.id,
+    item?.dossierId,
+    item?.dossier?.id,
+    item?.uuid,
+    item?.dossierUuid,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate ?? "").trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return undefined;
 }

@@ -44,6 +44,23 @@ struct AbtretungserklaerungFunnelView: View {
     @State private var isCheckingPriorDamage = false
     @State private var priorDamageCheckVin: String?
 
+    @FocusState private var focusedField: FunnelField?
+
+    private enum FunnelField: Hashable {
+        case scanName
+        case clientLastName
+        case clientFirstName
+        case licensePlate
+        case streetAndNumber
+        case postalCodeAndCity
+        case phoneOrEmail
+        case damageLocation
+        case opponentLicensePlate
+        case opponentName
+        case insuranceCompany
+        case claimOrPolicyNumber
+    }
+
     private var stepIndex: Int { step.rawValue }
     private var totalSteps: Int { AbtretungserklaerungFunnelStep.allCases.count }
 
@@ -79,6 +96,12 @@ struct AbtretungserklaerungFunnelView: View {
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
+                    if let current = focusedField, !isLastFormField(current) {
+                        Button("Weiter") {
+                            focusNext(after: current)
+                        }
+                        .fontWeight(.semibold)
+                    }
                     Button {
                         dismissKeyboard()
                     } label: {
@@ -238,11 +261,14 @@ struct AbtretungserklaerungFunnelView: View {
             }
 
             if reservation == nil {
-                TextField("Ordnername", text: $scanName)
-                    .textInputAutocapitalization(.words)
-                    .onChange(of: scanName) { _, _ in
-                        scanNameManuallyEdited = true
-                    }
+                configureFieldFocus(
+                    TextField("Ordnername", text: $scanName)
+                        .textInputAutocapitalization(.words)
+                        .onChange(of: scanName) { _, _ in
+                            scanNameManuallyEdited = true
+                        },
+                    field: .scanName
+                )
             }
         } footer: {
             VStack(alignment: .leading, spacing: 6) {
@@ -275,13 +301,8 @@ struct AbtretungserklaerungFunnelView: View {
             .disabled(isRecognizingVehicle)
 
             if isRecognizingVehicle {
-                HStack {
-                    ProgressView()
-                    Text("Fahrzeugschein wird erkannt …")
-                }
-            }
-
-            if let ocrNotice {
+                VehicleRegistrationRecognitionLoadingView()
+            } else if let ocrNotice {
                 Text(ocrNotice)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -296,18 +317,27 @@ struct AbtretungserklaerungFunnelView: View {
     private var clientIdentityStep: some View {
         Group {
             Section {
-                TextField("Nachname", text: $form.clientLastName)
-                    .textInputAutocapitalization(.words)
-                    .onChange(of: form.clientLastName) { _, _ in
-                        updateSuggestedScanNameIfNeeded()
-                    }
-                TextField("Vorname", text: $form.clientFirstName)
-                    .textInputAutocapitalization(.words)
-                TextField("Amtliches Kennzeichen", text: $form.licensePlate)
-                    .textInputAutocapitalization(.characters)
-                    .onChange(of: form.licensePlate) { _, newValue in
-                        applyLicensePlateFormatting(&form.licensePlate, newValue: newValue)
-                    }
+                configureFieldFocus(
+                    TextField("Nachname", text: $form.clientLastName)
+                        .textInputAutocapitalization(.words)
+                        .onChange(of: form.clientLastName) { _, _ in
+                            updateSuggestedScanNameIfNeeded()
+                        },
+                    field: .clientLastName
+                )
+                configureFieldFocus(
+                    TextField("Vorname", text: $form.clientFirstName)
+                        .textInputAutocapitalization(.words),
+                    field: .clientFirstName
+                )
+                configureFieldFocus(
+                    TextField("Amtliches Kennzeichen", text: $form.licensePlate)
+                        .textInputAutocapitalization(.characters)
+                        .onChange(of: form.licensePlate) { _, newValue in
+                            applyLicensePlateFormatting(&form.licensePlate, newValue: newValue)
+                        },
+                    field: .licensePlate
+                )
 
                 if !form.vin.isEmpty {
                     LabeledContent("FIN") {
@@ -343,61 +373,153 @@ struct AbtretungserklaerungFunnelView: View {
     @ViewBuilder
     private var priorDamageCheckSection: some View {
         if !form.vin.isEmpty {
-            Section {
+            Section("Vorschaden-Check") {
                 if isCheckingPriorDamage {
                     HStack(spacing: 10) {
                         ProgressView()
                         Text("Vorschäden werden geprüft …")
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
+                    }
+                } else if let result = priorDamageResult {
+                    if result.hasPriorReports {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label {
+                                Text("Achtung: Vorschäden vorhanden")
+                                    .font(.subheadline.weight(.semibold))
+                            } icon: {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                            }
+                            .foregroundStyle(.orange)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Gutachten:")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+
+                                ForEach(priorDamageRows(from: result)) { row in
+                                    if let url = row.url {
+                                        PriorDamageGutachtenLinkRow(
+                                            gutachtenNumber: row.gutachtenNumber,
+                                            url: url
+                                        )
+                                    } else {
+                                        Text(row.gutachtenNumber)
+                                            .font(.subheadline)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    } else {
+                        Label {
+                            Text("Kein Treffer für Vorschäden")
+                                .font(.subheadline)
+                        } icon: {
+                            Image(systemName: "checkmark.circle.fill")
+                        }
+                        .foregroundStyle(.secondary)
                     }
                 } else if let priorDamageNotice {
                     Text(priorDamageNotice)
                         .font(.caption)
-                        .foregroundStyle(
-                            priorDamageResult?.hasPriorReports == true ? .orange : .secondary
-                        )
+                        .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    private struct PriorDamageRow: Identifiable {
+        let id: String
+        let gutachtenNumber: String
+        let url: URL?
+    }
+
+    private func priorDamageRows(
+        from result: UltraExpertPriorDamageResult
+    ) -> [PriorDamageRow] {
+        let matches: [UltraExpertPriorDamageMatch] = result.matches.isEmpty
+            ? result.gutachtenNumbers.map {
+                UltraExpertPriorDamageMatch(
+                    gutachtenNumber: $0,
+                    dossierId: nil,
+                    dossierUrl: nil
+                )
+            }
+            : result.matches
+
+        return matches.enumerated().map { index, match in
+            let trimmedUrl = match.dossierUrl?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let url = trimmedUrl.isEmpty ? nil : URL(string: trimmedUrl)
+            return PriorDamageRow(
+                id: "\(index)-\(match.gutachtenNumber)",
+                gutachtenNumber: match.gutachtenNumber,
+                url: url
+            )
         }
     }
 
     @ViewBuilder
     private var clientAddressStep: some View {
         Section("Adresse") {
-            TextField("Straße und Hausnummer", text: $form.streetAndNumber)
-            TextField("PLZ / Ort", text: $form.postalCodeAndCity)
+            configureFieldFocus(
+                TextField("Straße und Hausnummer", text: $form.streetAndNumber),
+                field: .streetAndNumber
+            )
+            configureFieldFocus(
+                TextField("PLZ / Ort", text: $form.postalCodeAndCity),
+                field: .postalCodeAndCity
+            )
         }
 
         Section("Optional") {
-            TextField("Telefon / E-Mail", text: $form.phoneOrEmail)
-                .keyboardType(.emailAddress)
-                .textInputAutocapitalization(.never)
+            configureFieldFocus(
+                TextField("Telefon / E-Mail", text: $form.phoneOrEmail)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never),
+                field: .phoneOrEmail
+            )
         }
     }
 
     @ViewBuilder
     private var accidentDetailsStep: some View {
         Section {
-            TextField("Schadenort", text: $form.damageLocation)
+            configureFieldFocus(
+                TextField("Schadenort", text: $form.damageLocation),
+                field: .damageLocation
+            )
             DatePicker(
                 "Schadentag",
                 selection: $form.damageDate,
                 displayedComponents: .date
             )
-            TextField("Kennzeichen des Unfallgegners", text: $form.opponentLicensePlate)
-                .textInputAutocapitalization(.characters)
-                .onChange(of: form.opponentLicensePlate) { _, newValue in
-                    applyLicensePlateFormatting(&form.opponentLicensePlate, newValue: newValue)
-                }
+            configureFieldFocus(
+                TextField("Kennzeichen des Unfallgegners", text: $form.opponentLicensePlate)
+                    .textInputAutocapitalization(.characters)
+                    .onChange(of: form.opponentLicensePlate) { _, newValue in
+                        applyLicensePlateFormatting(&form.opponentLicensePlate, newValue: newValue)
+                    },
+                field: .opponentLicensePlate
+            )
         } footer: {
             Text("Die Felder in der nächsten Sektion sind optional.")
         }
 
         Section("Optional – kann leer bleiben") {
-            TextField("Unfallgegner", text: $form.opponentName)
-            TextField("Versicherung", text: $form.insuranceCompany)
-            TextField("Schaden-Nr. / Versicherungs-Nr.", text: $form.claimOrPolicyNumber)
+            configureFieldFocus(
+                TextField("Unfallgegner", text: $form.opponentName),
+                field: .opponentName
+            )
+            configureFieldFocus(
+                TextField("Versicherung", text: $form.insuranceCompany),
+                field: .insuranceCompany
+            )
+            configureFieldFocus(
+                TextField("Schaden-Nr. / Versicherungs-Nr.", text: $form.claimOrPolicyNumber),
+                field: .claimOrPolicyNumber
+            )
         }
         .id("ae-accident-optional-section")
         .onAppear {
@@ -558,8 +680,16 @@ struct AbtretungserklaerungFunnelView: View {
 
             Spacer(minLength: 8)
 
-            Button(primaryBottomActionTitle) {
+            Button {
                 _Concurrency.Task { await goForward() }
+            } label: {
+                HStack(spacing: 8) {
+                    if isRecognizingVehicle, step == .vehicleRegistrationScan {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(primaryBottomActionTitle)
+                }
             }
             .buttonStyle(.borderedProminent)
             .disabled(
@@ -567,6 +697,7 @@ struct AbtretungserklaerungFunnelView: View {
                     || isAdvancing
                     || isSigning
                     || isUploadingToDrive
+                    || isRecognizingVehicle
             )
         }
         .padding(.horizontal, 16)
@@ -584,7 +715,7 @@ struct AbtretungserklaerungFunnelView: View {
         case .signature:
             return "Unterschrift übernehmen"
         case .vehicleRegistrationScan:
-            return "Weiter"
+            return isRecognizingVehicle ? "Wird erkannt …" : "Weiter"
         case .gutachtenNumber:
             return reservation == nil ? "Reservieren & weiter" : "Weiter mit GA-Nr."
         default:
@@ -595,7 +726,7 @@ struct AbtretungserklaerungFunnelView: View {
     private var canContinue: Bool {
         switch step {
         case .vehicleRegistrationScan:
-            return true
+            return !isRecognizingVehicle
         case .clientIdentity:
             return !form.clientLastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 && !form.licensePlate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -636,12 +767,64 @@ struct AbtretungserklaerungFunnelView: View {
     }
 
     private func dismissKeyboard() {
+        focusedField = nil
         UIApplication.shared.sendAction(
             #selector(UIResponder.resignFirstResponder),
             to: nil,
             from: nil,
             for: nil
         )
+    }
+
+    private var orderedFormFields: [FunnelField] {
+        switch step {
+        case .gutachtenNumber:
+            return reservation == nil ? [.scanName] : []
+        case .clientIdentity:
+            return [.clientLastName, .clientFirstName, .licensePlate]
+        case .clientAddress:
+            return [.streetAndNumber, .postalCodeAndCity, .phoneOrEmail]
+        case .accidentDetails:
+            return [
+                .damageLocation,
+                .opponentLicensePlate,
+                .opponentName,
+                .insuranceCompany,
+                .claimOrPolicyNumber,
+            ]
+        default:
+            return []
+        }
+    }
+
+    private func isLastFormField(_ field: FunnelField) -> Bool {
+        orderedFormFields.last == field
+    }
+
+    private func focusNext(after field: FunnelField) {
+        guard let index = orderedFormFields.firstIndex(of: field),
+              index + 1 < orderedFormFields.count
+        else {
+            dismissKeyboard()
+            return
+        }
+        focusedField = orderedFormFields[index + 1]
+    }
+
+    private func configureFieldFocus<Content: View>(
+        _ content: Content,
+        field: FunnelField
+    ) -> some View {
+        content
+            .focused($focusedField, equals: field)
+            .submitLabel(isLastFormField(field) ? .done : .next)
+            .onSubmit {
+                if isLastFormField(field) {
+                    dismissKeyboard()
+                } else {
+                    focusNext(after: field)
+                }
+            }
     }
 
     private func goForward() async {
@@ -652,6 +835,10 @@ struct AbtretungserklaerungFunnelView: View {
         }
         guard shouldAdvance else { return }
         defer { _Concurrency.Task { @MainActor in isAdvancing = false } }
+
+        if await MainActor.run(body: { step == .vehicleRegistrationScan && isRecognizingVehicle }) {
+            return
+        }
 
         await MainActor.run {
             dismissKeyboard()
@@ -795,6 +982,10 @@ struct AbtretungserklaerungFunnelView: View {
                 reservation = result
                 form.gutachtenNumber = result.displayNumber
                 form.gutachtenReservationId = result.reservationId
+                currentSequence = ScannerSequenceInfo(
+                    nextNumber: result.number + 1,
+                    year2: result.year2
+                )
             }
             ScannerWidgetStore.publish(number: result.number, year2: result.year2, isReserved: true)
         } catch {
@@ -1027,7 +1218,7 @@ struct AbtretungserklaerungFunnelView: View {
 
         let shouldSkip = await MainActor.run {
             priorDamageCheckVin == vin &&
-            (priorDamageNotice != nil || isCheckingPriorDamage)
+            (priorDamageResult != nil || isCheckingPriorDamage)
         }
         if shouldSkip { return }
 
@@ -1043,7 +1234,7 @@ struct AbtretungserklaerungFunnelView: View {
                 priorDamageCheckVin = vin
                 priorDamageResult = result
                 isCheckingPriorDamage = false
-                priorDamageNotice = formatPriorDamageNotice(result)
+                priorDamageNotice = nil
             }
         } catch let error as UltraExpertPriorDamageError {
             await MainActor.run {
@@ -1062,27 +1253,6 @@ struct AbtretungserklaerungFunnelView: View {
                 priorDamageNotice = error.localizedDescription
             }
         }
-    }
-
-    private func formatPriorDamageNotice(
-        _ result: UltraExpertPriorDamageResult
-    ) -> String {
-        let numbers = result.gutachtenNumbers.isEmpty
-            ? result.matches.map(\.gutachtenNumber)
-            : result.gutachtenNumbers
-
-        if numbers.isEmpty {
-            return "Kein Treffer für Vorschäden"
-        }
-
-        let count = max(result.matchCount, numbers.count)
-        let list = numbers.joined(separator: ", ")
-
-        if count == 1 {
-            return "Ich habe 1 Treffer an Vorschäden für dieses Auto. Das dazugehörige Gutachten ist: \(list)"
-        }
-
-        return "Ich habe \(count) Treffer an Vorschäden für dieses Auto. Die dazugehörigen Gutachten sind: \(list)"
     }
 
     private func saveDraft() {
@@ -1107,6 +1277,23 @@ struct AbtretungserklaerungFunnelView: View {
         AbtretungserklaerungFunnelDraftStore.clear()
     }
 
+    /// Nach AE-Upload wie im Scanner: Reservierung in Widget/Anzeige beenden, nächste Nr. laden.
+    private func syncScannerAvailabilityAfterAE() async {
+        ScannerWidgetStore.endReservation()
+        do {
+            let sequence = try await ScannerReservationService.fetchCurrentSequence()
+            await MainActor.run {
+                currentSequence = sequence
+            }
+            ScannerWidgetStore.publishAvailable(
+                number: sequence.nextNumber,
+                year2: sequence.year2
+            )
+        } catch {
+            // Firestore-Listener im Scanner-Tab holt die Nummer nach; kein Blocker.
+        }
+    }
+
     private func uploadSignedPDFToDrive() async {
         guard let signedPDFURL else { return }
         guard let reservation, let reservationId = form.gutachtenReservationId else {
@@ -1119,7 +1306,7 @@ struct AbtretungserklaerungFunnelView: View {
         await MainActor.run { isUploadingToDrive = true }
         defer { _Concurrency.Task { @MainActor in isUploadingToDrive = false } }
 
-        let fileName = "\(reservation.displayNumber) AE.pdf"
+        let fileName = "\(reservation.displayNumber.replacingOccurrences(of: "/", with: "-")) AE.pdf"
 
         do {
             let result = try await ScannerDriveUploadService.uploadPDF(
@@ -1139,9 +1326,92 @@ struct AbtretungserklaerungFunnelView: View {
                 }
                 saveDraft()
             }
+            await syncScannerAvailabilityAfterAE()
         } catch {
             await MainActor.run {
                 errorMessage = "Drive-Upload fehlgeschlagen: \(error.localizedDescription)"
+            }
+        }
+    }
+}
+
+private struct PriorDamageGutachtenLinkRow: View {
+    let gutachtenNumber: String
+    let url: URL
+
+    var body: some View {
+        Button {
+            UIApplication.shared.open(url)
+        } label: {
+            HStack(spacing: 6) {
+                Text(gutachtenNumber)
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(.tint)
+    }
+}
+
+private struct VehicleRegistrationRecognitionLoadingView: View {
+    @State private var pulse = false
+    @State private var phaseIndex = 0
+
+    private let phases = [
+        "Fahrzeugschein wird hochgeladen …",
+        "DocuPipe erkennt die Felder …",
+        "Kennzeichen und Halter werden übernommen …",
+    ]
+
+    var body: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(pulse ? 0.18 : 0.10))
+                    .frame(width: 76, height: 76)
+                    .scaleEffect(pulse ? 1.06 : 0.94)
+
+                Image(systemName: "doc.text.viewfinder")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .symbolEffect(.pulse, options: .repeating)
+            }
+
+            ProgressView()
+                .controlSize(.regular)
+
+            Text(phases[phaseIndex])
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .animation(.easeInOut(duration: 0.35), value: phaseIndex)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.accentColor.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.16), lineWidth: 1)
+        )
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+        .task {
+            guard phases.count > 1 else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2.2))
+                phaseIndex = (phaseIndex + 1) % phases.count
             }
         }
     }

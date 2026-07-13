@@ -349,6 +349,15 @@ enum CompanyDocumentsCatalog {
         items.filter(\.supportsRemoteSigning)
     }
 
+    static var abtretungserklaerungDocument: CompanyDocument? {
+        items.first { $0.id == "ae" }
+    }
+
+    static var abtretungserklaerungPDFURL: URL? {
+        guard let document = abtretungserklaerungDocument else { return nil }
+        return bundleURL(for: document)
+    }
+
     static func bundleURL(for document: CompanyDocument) -> URL? {
         let searchDirectories: [String?] = [folderName, nil]
 
