@@ -6,6 +6,7 @@
 //
 import Foundation
 import SwiftUI
+import UIKit
 
 struct DayCellMarker: Identifiable, Hashable {
     let id: String
@@ -107,32 +108,112 @@ struct DayCell: View {
         let shown = Array(unique.prefix(maxShown))
         let hasMore = unique.count > maxShown
         let fontSize = max(8, min(11, cellSize * 0.18))
+        let horizontalPadding = max(2, cellSize * 0.06) * 2
+        let availableWidth = cellSize - horizontalPadding
+        let fittedLabels = fittedInitialsLabels(
+            markers: shown,
+            hasMoreCount: hasMore ? unique.count - maxShown : 0,
+            fontSize: fontSize,
+            availableWidth: availableWidth
+        )
 
         return HStack(spacing: 2) {
-            ForEach(shown) { marker in
-                Text(marker.initials)
+            ForEach(fittedLabels) { label in
+                Text(label.text)
                     .font(.system(size: fontSize, weight: .semibold))
-                    .foregroundColor(marker.color)
+                    .foregroundColor(label.marker.color)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
                     .padding(.horizontal, 2)
                     .padding(.vertical, 1)
-                    .background(marker.color.opacity(0.18))
+                    .background(label.marker.color.opacity(0.18))
                     .clipShape(RoundedRectangle(cornerRadius: 3))
             }
 
-            if hasMore {
-                Text("+\(unique.count - maxShown)")
+            if let moreText = fittedMoreLabel(
+                count: hasMore ? unique.count - maxShown : 0,
+                fontSize: fontSize,
+                availableWidth: remainingWidth(
+                    availableWidth: availableWidth,
+                    labels: fittedLabels,
+                    fontSize: fontSize
+                )
+            ) {
+                Text(moreText)
                     .font(.system(size: fontSize, weight: .medium))
                     .foregroundColor(.secondary)
             }
 
-            if shown.isEmpty && !hasMore {
+            if fittedLabels.isEmpty && !hasMore {
                 Spacer(minLength: 0)
             }
         }
         .frame(height: markerAreaHeight)
         .padding(.horizontal, max(2, cellSize * 0.06))
+    }
+
+    private struct FittedInitialsLabel: Identifiable {
+        let id: String
+        let marker: DayCellMarker
+        let text: String
+    }
+
+    private func fittedInitialsLabels(
+        markers: [DayCellMarker],
+        hasMoreCount: Int,
+        fontSize: CGFloat,
+        availableWidth: CGFloat
+    ) -> [FittedInitialsLabel] {
+        guard !markers.isEmpty else { return [] }
+
+        let spacing: CGFloat = 2
+        let badgeHorizontalPadding: CGFloat = 4
+        let moreText = hasMoreCount > 0 ? "+\(hasMoreCount)" : ""
+        let moreWidth = hasMoreCount > 0
+            ? textWidth(for: moreText, fontSize: fontSize, weight: .medium) + spacing
+            : 0
+        let widthForBadges = max(0, availableWidth - moreWidth - CGFloat(max(0, markers.count - 1)) * spacing)
+        let widthPerBadge = widthForBadges / CGFloat(markers.count)
+        let maxTextWidthPerBadge = max(0, widthPerBadge - badgeHorizontalPadding)
+
+        return markers.map { marker in
+            let fits = textWidth(for: marker.initials, fontSize: fontSize, weight: .semibold) <= maxTextWidthPerBadge
+            return FittedInitialsLabel(
+                id: marker.id,
+                marker: marker,
+                text: fits ? marker.initials : ""
+            )
+        }
+    }
+
+    private func remainingWidth(
+        availableWidth: CGFloat,
+        labels: [FittedInitialsLabel],
+        fontSize: CGFloat
+    ) -> CGFloat {
+        let spacing: CGFloat = 2
+        let badgeHorizontalPadding: CGFloat = 4
+        let used = labels.reduce(CGFloat(0)) { partial, label in
+            let textWidth = textWidth(for: label.text, fontSize: fontSize, weight: .semibold)
+            let badgeWidth = max(textWidth + badgeHorizontalPadding, badgeHorizontalPadding)
+            return partial + badgeWidth
+        }
+        let spacingWidth = CGFloat(max(0, labels.count - 1)) * spacing
+        return max(0, availableWidth - used - spacingWidth)
+    }
+
+    private func fittedMoreLabel(count: Int, fontSize: CGFloat, availableWidth: CGFloat) -> String? {
+        guard count > 0 else { return nil }
+        let text = "+\(count)"
+        guard textWidth(for: text, fontSize: fontSize, weight: .medium) <= availableWidth else {
+            return nil
+        }
+        return text
+    }
+
+    private func textWidth(for text: String, fontSize: CGFloat, weight: UIFont.Weight) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let font = UIFont.systemFont(ofSize: fontSize, weight: weight)
+        return ceil((text as NSString).size(withAttributes: [.font: font]).width)
     }
 
     private var dayNumberColor: Color {
