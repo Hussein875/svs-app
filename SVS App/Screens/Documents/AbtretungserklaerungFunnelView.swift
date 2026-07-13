@@ -1409,8 +1409,8 @@ private struct VehicleRegistrationRecognitionLoadingView: View {
         }
         .task {
             guard phases.count > 1 else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2.2))
+            while !_Concurrency.Task.isCancelled {
+                try? await _Concurrency.Task.sleep(for: .seconds(2.2))
                 phaseIndex = (phaseIndex + 1) % phases.count
             }
         }
