@@ -28,16 +28,18 @@ struct GutachtenYearProjection: Hashable {
     let year: Int
     let currentGutachtenNumber: Int
     let projectedYearEndGutachtenNumber: Int
+    let projectedYearEndLow: Int
+    let projectedYearEndHigh: Int
     let yearStartNumber: Int
     let producedThisYear: Int
-    let averagePerWeek: Double
+    let yearToDateWeeklyAverage: Double
+    let recentWeightedWeeklyAverage: Double
+    let blendedWeeklyPace: Double
     let adjustedWeeklyPace: Double
-    let dailyPace: Double
-    let linearProjection: Int
-    let momentumProjection: Int
-    let linearBlendWeight: Double
+    let yearBlendWeight: Double
+    let recentBlendWeight: Double
+    let trendSwingFactor: Double
     let trend: GutachtenProjectionTrend
-    let trendFactor: Double
     let trendRatio: Double
     let recentFourWeekAverage: Double
     let priorFourWeekAverage: Double
@@ -45,6 +47,7 @@ struct GutachtenYearProjection: Hashable {
     let weeksRemaining: Int
     let daysRemaining: Int
     let completedWeeksSampled: Int
+    let recentWeeksSampled: Int
     let latestCalendarWeek: Int?
     let methodSummary: String
 }
@@ -62,5 +65,17 @@ extension GutachtenYearProjection {
         let recent = String(format: "%.0f", recentFourWeekAverage)
         let prior = String(format: "%.0f", priorFourWeekAverage)
         return "Ø \(recent) vs. \(prior)"
+    }
+
+    var projectionRangeLabel: String {
+        "\(GutachtenYearBetFormatters.gutachtenNumber(projectedYearEndLow)) – \(GutachtenYearBetFormatters.gutachtenNumber(projectedYearEndHigh))"
+    }
+
+    var yearAverageLabel: String {
+        String(format: "%.1f / Woche", yearToDateWeeklyAverage)
+    }
+
+    var recentPaceLabel: String {
+        String(format: "%.1f / Woche", recentWeightedWeeklyAverage)
     }
 }

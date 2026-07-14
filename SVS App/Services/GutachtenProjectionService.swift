@@ -31,6 +31,8 @@ enum GutachtenProjectionService {
     private static let yearWeeklyBlendWeight = 0.70
     private static let recentWeeklyBlendWeight = 0.30
     private static let recentWeeksSampleSize = 8
+    private static let minVolatility = 0.05
+    private static let maxVolatility = 0.10
 
     private static var calendar: Calendar {
         var cal = Calendar(identifier: .iso8601)
@@ -68,55 +70,59 @@ enum GutachtenProjectionService {
 
         let currentNumber = currentGutachtenNumber(from: weeks) ?? 0
         let yearStartNumber = sortedAsc.first?.weekStartNumber ?? currentNumber
-
-        // A) Lineares Jahres-Tempo (Tag-basiert, gesamtes Jahr bis heute)
-        let elapsedDays = max(1, dayOfYear)
         let progressFromYearStart = max(0, currentNumber - yearStartNumber)
-        let dailyPace = Double(progressFromYearStart) / Double(elapsedDays)
-        let linearProjection = currentNumber + Int((dailyPace * Double(daysRemaining)).rounded())
 
-        // B) Wochenpace: 70 % Jahres-Ø aller abgeschlossenen Wochen, 30 % gewichtete letzte Wochen
+        // Jahres-Ø: einfacher Mittelwert aller abgeschlossenen Wochen (ohne Gewichtung).
         let recentSample = Array(completedDesc.prefix(recentWeeksSampleSize))
         let yearToDateWeeklyAverage = simpleWeeklyAverage(from: completedDesc)
-        let recentWeightedWeeklyPace = exponentialWeightedWeeklyAverage(from: recentSample)
+        let recentWeightedWeeklyAverage = exponentialWeightedWeeklyAverage(from: recentSample)
+
+        // Prognose-Tempo: 70 % Jahres-Ø + 30 % gewichtete letzte Wochen (Wachstum).
         let blendedWeeklyPace =
             yearWeeklyBlendWeight * yearToDateWeeklyAverage
-            + recentWeeklyBlendWeight * recentWeightedWeeklyPace
+            + recentWeeklyBlendWeight * recentWeightedWeeklyAverage
+
         let trendRatio = weeklyTrend(from: completedDesc)
         let (recentFourWeekAverage, priorFourWeekAverage) = weeklyTrendAverages(from: completedDesc)
-        let trendFactor = min(max(trendRatio, 0.88), 1.12)
-        let adjustedWeeklyPace = blendedWeeklyPace * trendFactor
-        let momentumProjection = currentNumber + Int((adjustedWeeklyPace * Double(weeksRemaining)).rounded())
+        let trend = trendDirection(for: trendRatio)
+        let trendSwingFactor = trendSwingFactor(for: trendRatio, trend: trend)
+        let adjustedWeeklyPace = blendedWeeklyPace * trendSwingFactor
 
-        // C) Mischung: früh im Jahr mehr linear, später mehr Momentum
-        let linearWeight = min(0.55, max(0.25, 0.55 - Double(weekOfYear - 1) / 80.0))
-        let blended = Int(
-            (Double(linearProjection) * linearWeight + Double(momentumProjection) * (1 - linearWeight))
-                .rounded()
+        let remainingProduction = adjustedWeeklyPace * Double(weeksRemaining)
+        let baseRemainingProduction = blendedWeeklyPace * Double(weeksRemaining)
+        let projectedYearEnd = max(currentNumber, currentNumber + Int(remainingProduction.rounded()))
+        let projectedYearEndLow = max(
+            currentNumber,
+            currentNumber + Int((baseRemainingProduction * (1 - maxVolatility)).rounded())
         )
-        let projectedYearEnd = max(currentNumber, blended)
+        let projectedYearEndHigh = max(
+            currentNumber,
+            currentNumber + Int((baseRemainingProduction * (1 + maxVolatility)).rounded())
+        )
 
         let methodSummary = projectionMethodSummary(
-            linearWeight: linearWeight,
             completedWeeks: completedDesc.count,
             recentWeeks: recentSample.count,
-            trend: trendDirection(for: trendRatio)
+            trend: trend,
+            trendSwingPercent: Int((abs(trendSwingFactor - 1) * 100).rounded())
         )
 
         return GutachtenYearProjection(
             year: year,
             currentGutachtenNumber: currentNumber,
             projectedYearEndGutachtenNumber: projectedYearEnd,
+            projectedYearEndLow: projectedYearEndLow,
+            projectedYearEndHigh: projectedYearEndHigh,
             yearStartNumber: yearStartNumber,
             producedThisYear: progressFromYearStart,
-            averagePerWeek: blendedWeeklyPace,
+            yearToDateWeeklyAverage: yearToDateWeeklyAverage,
+            recentWeightedWeeklyAverage: recentWeightedWeeklyAverage,
+            blendedWeeklyPace: blendedWeeklyPace,
             adjustedWeeklyPace: adjustedWeeklyPace,
-            dailyPace: dailyPace,
-            linearProjection: linearProjection,
-            momentumProjection: momentumProjection,
-            linearBlendWeight: linearWeight,
-            trend: trendDirection(for: trendRatio),
-            trendFactor: trendFactor,
+            yearBlendWeight: yearWeeklyBlendWeight,
+            recentBlendWeight: recentWeeklyBlendWeight,
+            trendSwingFactor: trendSwingFactor,
+            trend: trend,
             trendRatio: trendRatio,
             recentFourWeekAverage: recentFourWeekAverage,
             priorFourWeekAverage: priorFourWeekAverage,
@@ -124,6 +130,7 @@ enum GutachtenProjectionService {
             weeksRemaining: weeksRemaining,
             daysRemaining: daysRemaining,
             completedWeeksSampled: completedDesc.count,
+            recentWeeksSampled: recentSample.count,
             latestCalendarWeek: latestWeek?.calendarWeek,
             methodSummary: methodSummary
         )
@@ -222,16 +229,40 @@ enum GutachtenProjectionService {
         return .stable
     }
 
+    /// Trend-Richtung in eine Schwankung von 5–10 % übersetzen.
+    private static func trendSwingFactor(
+        for ratio: Double,
+        trend: GutachtenProjectionTrend
+    ) -> Double {
+        switch trend {
+        case .stable:
+            return 1.0
+        case .growing:
+            let strength = min(max(ratio - 1, minVolatility), maxVolatility)
+            return 1.0 + strength
+        case .shrinking:
+            let strength = min(max(1 - ratio, minVolatility), maxVolatility)
+            return 1.0 - strength
+        }
+    }
+
     private static func projectionMethodSummary(
-        linearWeight: Double,
         completedWeeks: Int,
         recentWeeks: Int,
-        trend: GutachtenProjectionTrend
+        trend: GutachtenProjectionTrend,
+        trendSwingPercent: Int
     ) -> String {
-        let linearPercent = Int((linearWeight * 100).rounded())
-        let momentumPercent = 100 - linearPercent
         let yearPercent = Int((yearWeeklyBlendWeight * 100).rounded())
         let recentPercent = Int((recentWeeklyBlendWeight * 100).rounded())
-        return "Mischung: \(linearPercent) % Jahres-Tempo, \(momentumPercent) % Wochenpace (\(yearPercent) % Ø \(completedWeeks) Wochen, \(recentPercent) % letzte \(recentWeeks), \(trend.label))."
+        let swingText: String
+        switch trend {
+        case .stable:
+            swingText = "Band ±5–10 % um das Tempo"
+        case .growing:
+            swingText = "+\(max(trendSwingPercent, 5)) % Anpassung (Trend \(trend.label)), Band ±5–10 %"
+        case .shrinking:
+            swingText = "−\(max(trendSwingPercent, 5)) % Anpassung (Trend \(trend.label)), Band ±5–10 %"
+        }
+        return "Prognose = aktuelle Nr. + Restwochen × (\(yearPercent) % Jahres-Ø \(completedWeeks) Wochen + \(recentPercent) % letzte \(recentWeeks) gewichtet). \(swingText)."
     }
 }

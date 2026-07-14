@@ -136,6 +136,10 @@ struct GutachtenYearBetView: View {
                 )
             }
 
+            Text("Band \(projection.projectionRangeLabel)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
@@ -144,8 +148,12 @@ struct GutachtenYearBetView: View {
                     value: formatGutachtenNumber(projection.producedThisYear)
                 )
                 detailRow(
-                    title: "Ø \(projection.completedWeeksSampled) Wochen (70/30)",
-                    value: String(format: "%.1f / Woche", projection.averagePerWeek)
+                    title: "Jahres-Ø (\(projection.completedWeeksSampled) Wochen)",
+                    value: projection.yearAverageLabel
+                )
+                detailRow(
+                    title: "Letzte \(projection.recentWeeksSampled) Wochen (gew.)",
+                    value: projection.recentPaceLabel
                 )
                 detailRow(
                     title: "Trend",
