@@ -79,6 +79,7 @@ final class WeeklyStatsViewModel: ObservableObject {
             lastFetchAt = Date()
             lastFetchError = ""
         } catch {
+            guard !WeeklyStatsError.isIgnorableCancellation(error) else { return }
             lastFetchError = WeeklyStatsError.message(for: error, timeout: fetchTimeout)
         }
     }
@@ -165,6 +166,10 @@ enum WeeklyStatsError: LocalizedError {
     case invalidResponse
 
     static func message(for error: Error, timeout: TimeInterval) -> String {
+        if isIgnorableCancellation(error) {
+            return ""
+        }
+
         if let urlError = error as? URLError, urlError.code == .timedOut {
             return "Timeout nach \(Int(timeout))s"
         }
@@ -181,6 +186,15 @@ enum WeeklyStatsError: LocalizedError {
         }
 
         return error.localizedDescription
+    }
+
+    static func isIgnorableCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if _Concurrency.Task.isCancelled { return true }
+        if let urlError = error as? URLError, urlError.code == .cancelled { return true }
+
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
     }
 }
 

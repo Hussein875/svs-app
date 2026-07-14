@@ -621,6 +621,24 @@ match /meetingMeta/{id} {
   allow write: if isAdmin();
 }
 
+match /gutachtenYearBets/_settings {
+  allow read, write: if isAdmin();
+}
+
+match /gutachtenYearBets/{year} {
+  allow read: if isAdmin();
+  allow create, update: if isAdmin();
+
+  match /predictions/{predictionId} {
+    allow read, delete: if isAdmin();
+    allow create, update: if isAdmin()
+      && request.resource.data.displayName is string
+      && request.resource.data.displayName.size() > 0
+      && request.resource.data.predictedTotal is int
+      && request.resource.data.predictedTotal > 0;
+  }
+}
+
 
   }
 }

@@ -11,7 +11,6 @@ import FirebaseFirestore
 struct AdminPushDestination: Identifiable, Hashable {
     enum Kind: Hashable {
         case requests
-        case onCallSaturdays
         case commissions
     }
 
@@ -59,7 +58,6 @@ struct AdminConsoleView: View {
                     }
                     .padding(.horizontal, 18)
 
-
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Übersicht")
                             .font(.headline)
@@ -89,15 +87,6 @@ struct AdminConsoleView: View {
                             }
 
                             NavigationLink {
-                                AdminOnCallSaturdaysScreen()
-                                    .environmentObject(appState)
-                            } label: {
-                                AdminNavRow(title: "Samstags-Bereitschaft",
-                                            subtitle: "Samstage zuweisen",
-                                            systemImage: "person.badge.clock", accent: appState.currentUser?.color ?? .secondary)
-                            }
-
-                            NavigationLink {
                                 AdminCommissionsScreen()
                                     .environmentObject(appState)
                             } label: {
@@ -110,12 +99,12 @@ struct AdminConsoleView: View {
                             }
 
                             NavigationLink {
-                                AdminWeeklyStatsScreen()
+                                AdminStatisticsScreen()
                                     .environmentObject(appState)
                             } label: {
                                 AdminNavRow(
-                                    title: "Wochenstatistik",
-                                    subtitle: "Gutachten pro Kalenderwoche",
+                                    title: "Statistik",
+                                    subtitle: "Wochenwerte & Jahreswette",
                                     systemImage: "chart.bar.doc.horizontal",
                                     accent: appState.currentUser?.color ?? .secondary
                                 )
@@ -142,9 +131,6 @@ struct AdminConsoleView: View {
                 switch destination.kind {
                 case .requests:
                     AdminRequestsScreen()
-                        .environmentObject(appState)
-                case .onCallSaturdays:
-                    AdminOnCallSaturdaysScreen()
                         .environmentObject(appState)
                 case .commissions:
                     AdminCommissionsScreen()
@@ -236,17 +222,6 @@ struct AdminConsoleView: View {
         return Set(todays.map { $0.user.id }).count
     }
 
-    private var upcomingOnCallCount: Int {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        return appState.leaveRequests
-            .filter {
-                $0.type == .onCallSaturday && $0.status != .rejected
-            }
-            .filter { cal.startOfDay(for: $0.startDate) >= today }
-            .count
-    }
-
     private var openCommissionsCount: Int {
         // Treat anything that is not paid as open.
         appState.commissions.filter { $0.status != .paid }.count
@@ -258,7 +233,7 @@ struct AdminCommissionsScreen: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
-        ProvisionenView(showsAdminTeamInsights: true)
+        ProvisionenView(showsAdminTeamInsights: true, showsLinkGenerator: false)
             .environmentObject(appState)
             .navigationTitle("Prämien")
             .navigationBarTitleDisplayMode(.inline)

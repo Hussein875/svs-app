@@ -16,6 +16,38 @@ struct AdminWeeklyStatsScreen: View {
     }
 
     var body: some View {
+        AdminWeeklyStatsContent(viewModel: viewModel, accent: accent)
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("Wochenstatistik")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if viewModel.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button {
+                            _Concurrency.Task { await viewModel.refresh(force: true) }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                }
+            }
+            .task {
+                await viewModel.refresh(force: true)
+            }
+            .refreshable {
+                await viewModel.refresh(force: true)
+            }
+    }
+}
+
+struct AdminWeeklyStatsContent: View {
+    @ObservedObject var viewModel: WeeklyStatsViewModel
+    let accent: Color
+
+    var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 if !viewModel.lastFetchError.isEmpty {
@@ -31,26 +63,6 @@ struct AdminWeeklyStatsScreen: View {
             .padding(.horizontal, 18)
             .padding(.top, 14)
             .padding(.bottom, 28)
-        }
-        .background(Color(.systemGroupedBackground))
-        .navigationTitle("Wochenstatistik")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if viewModel.isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Button {
-                        _Concurrency.Task { await viewModel.refresh(force: true) }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                }
-            }
-        }
-        .task {
-            await viewModel.refresh(force: true)
         }
         .refreshable {
             await viewModel.refresh(force: true)
