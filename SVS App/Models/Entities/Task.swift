@@ -13,6 +13,7 @@ struct Task: Identifiable, Codable, Equatable, Hashable {
     var details: String
     var dueDate: Date?
     var status: TaskStatus
+    var kind: TaskKind
     var assignedUserId: String
     var creatorUserId: String
     var createdAt: Date

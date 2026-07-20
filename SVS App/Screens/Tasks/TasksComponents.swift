@@ -25,7 +25,7 @@ struct TaskRow: View {
         let accent: Color = {
             if task.status == .done { return .green }
             if let due = task.dueDate, due < Date() { return .red }
-            return .blue
+            return task.kind == .order ? .orange : .blue
         }()
 
         HStack(alignment: .top, spacing: 12) {
@@ -42,19 +42,34 @@ struct TaskRow: View {
             }
             .buttonStyle(.plain)
             .padding(.top, 2)
+            .accessibilityLabel(task.status == .done ? "Erledigt" : "Offen")
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(task.title)
-                    .font(.body.weight(.semibold))
-                    .foregroundColor(.primary)
-                    .strikethrough(task.status == .done, color: .secondary)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(task.title)
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(.primary)
+                        .strikethrough(task.status == .done, color: .secondary)
+
+                    if task.kind == .order {
+                        Text("Bestellung")
+                            .font(.caption2.weight(.bold))
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(Color.orange.opacity(0.14))
+                            )
+                    }
+                }
 
                 let detailsText = task.details
                 if !detailsText.isEmpty {
                     Text(detailsText)
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(3)
                 }
 
                 LazyVGrid(
@@ -153,6 +168,7 @@ struct NewTaskView: View {
 
     let mode: Mode
     let task: Task?
+    let kind: TaskKind
 
     @State private var title: String = ""
     @State private var details: String = ""
@@ -160,7 +176,8 @@ struct NewTaskView: View {
     @State private var hasDueDate: Bool = false
     @State private var assignedUserId: String = ""
     @State private var status: TaskStatus = .open
-    
+    @State private var missingOfficerWarning: Bool = false
+
     private enum Field: Hashable {
         case title
         case details
@@ -169,6 +186,9 @@ struct NewTaskView: View {
     @FocusState private var focusedField: Field?
 
     private var isEditing: Bool { task != nil }
+    private var isOrder: Bool { (task?.kind ?? kind) == .order }
+    private var isEmployee: Bool { appState.currentUser?.role == .employee }
+
     private var isFormValid: Bool {
         !title.trimmingCharacters(in: .whitespaces).isEmpty && appState.currentUser != nil
     }
@@ -181,55 +201,87 @@ struct NewTaskView: View {
         return list
     }
 
+    private var procurementOfficerName: String {
+        if let officer = appState.procurementOfficerUser() {
+            return officer.name
+        }
+        return "Bestellungen"
+    }
+
     var body: some View {
         Form {
+            if isOrder {
+                Section {
+                    Text("Beschreibe, was benötigt wird – z. B. Visitenkarten, Büromaterial oder Drucksachen. \(procurementOfficerName) kümmert sich um die Bestellung.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+
             Section {
-                TextField("Titel", text: $title)
+                TextField(isOrder ? "Was wird benötigt?" : "Titel", text: $title)
                     .textInputAutocapitalization(.sentences)
                     .submitLabel(.next)
                     .focused($focusedField, equals: .title)
                     .onSubmit { focusedField = .details }
-                TextField("Details (optional)", text: $details, axis: .vertical)
-                    .lineLimit(2...6)
-                    .textInputAutocapitalization(.sentences)
-                    .focused($focusedField, equals: .details)
+                TextField(
+                    isOrder ? "Details (Menge, Format, Hinweise …)" : "Details (optional)",
+                    text: $details,
+                    axis: .vertical
+                )
+                .lineLimit(2...6)
+                .textInputAutocapitalization(.sentences)
+                .focused($focusedField, equals: .details)
             } header: {
-                Label("Aufgabe", systemImage: "text.badge.checkmark")
+                Label(isOrder ? "Bestellung" : "Aufgabe", systemImage: isOrder ? "cart" : "text.badge.checkmark")
             }
 
-            Section {
-                Toggle("Fälligkeitsdatum setzen", isOn: $hasDueDate.animation(.easeInOut(duration: 0.2)))
+            if !isOrder {
+                Section {
+                    Toggle("Fälligkeitsdatum setzen", isOn: $hasDueDate.animation(.easeInOut(duration: 0.2)))
 
-                if hasDueDate {
-                    DatePicker("Fällig am", selection: $dueDate, displayedComponents: .date)
-                        .datePickerStyle(.compact)
+                    if hasDueDate {
+                        DatePicker("Fällig am", selection: $dueDate, displayedComponents: .date)
+                            .datePickerStyle(.compact)
+                    }
+                } header: {
+                    Label("Fälligkeit", systemImage: "calendar")
+                } footer: {
+                    Text(hasDueDate
+                         ? "Wird in der Liste als Fälligkeitsdatum angezeigt."
+                         : "Ohne Fälligkeitsdatum erscheint die Aufgabe nur als offen/erledigt.")
                 }
-            } header: {
-                Label("Fälligkeit", systemImage: "calendar")
-            } footer: {
-                Text(hasDueDate
-                     ? "Wird in der Aufgabenliste als Fälligkeitsdatum angezeigt."
-                     : "Ohne Fälligkeitsdatum erscheint die Aufgabe nur als offen/erledigt.")
             }
 
             if let current = appState.currentUser {
                 Section {
-                    Picker("Zuständig", selection: $assignedUserId) {
-                        ForEach(assignableUsers) { user in
-                            Text(user.name).tag(user.id)
+                    if isOrder && (isEmployee || mode == .new) {
+                        LabeledContent("Zuständig", value: procurementOfficerName)
+                        if appState.procurementOfficerUser() == nil {
+                            Text("Keine Bestellungs-Verantwortliche gefunden. Bitte Admin informieren.")
+                                .font(.caption)
+                                .foregroundColor(.orange)
                         }
-                    }
-                    .pickerStyle(.menu)
-
-                    if assignedUserId != current.id,
-                       let name = assignableUsers.first(where: { $0.id == assignedUserId })?.name {
-                        Text("Die Aufgabe wird \(name) zugeteilt.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     } else {
-                        Text("Die Aufgabe wird Ihnen selbst zugeteilt.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        Picker("Zuständig", selection: $assignedUserId) {
+                            ForEach(assignableUsers) { user in
+                                Text(user.name).tag(user.id)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        if assignedUserId != current.id,
+                           let name = assignableUsers.first(where: { $0.id == assignedUserId })?.name {
+                            Text(isOrder
+                                 ? "Die Bestellung geht an \(name)."
+                                 : "Die Aufgabe wird \(name) zugeteilt.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Die Aufgabe wird Ihnen selbst zugeteilt.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 } header: {
                     Label("Zuständigkeit", systemImage: "person")
@@ -239,8 +291,8 @@ struct NewTaskView: View {
             if isEditing {
                 Section {
                     Picker("Status", selection: $status) {
-                        Text("Offen").tag(TaskStatus.open)
-                        Text("Erledigt").tag(TaskStatus.done)
+                        Text(isOrder ? "Offen" : "Offen").tag(TaskStatus.open)
+                        Text(isOrder ? "Bestellt / erledigt" : "Erledigt").tag(TaskStatus.done)
                     }
                     .pickerStyle(.segmented)
                 } header: {
@@ -254,8 +306,8 @@ struct NewTaskView: View {
                         save()
                     } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("Aufgabe anlegen")
+                            Image(systemName: isOrder ? "cart.badge.plus" : "plus.circle.fill")
+                            Text(isOrder ? "Bestellung aufgeben" : "Aufgabe anlegen")
                                 .font(.subheadline.weight(.semibold))
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
@@ -263,11 +315,11 @@ struct NewTaskView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.capsule)
-                    .disabled(!isFormValid)
+                    .disabled(!isFormValid || (isOrder && appState.procurementOfficerUser() == nil))
                 }
             }
         }
-        .navigationTitle(isEditing ? "Aufgabe bearbeiten" : "Neue Aufgabe")
+        .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if isEditing {
@@ -284,11 +336,20 @@ struct NewTaskView: View {
         }
         .onAppear { configureInitialState() }
         .onChange(of: assignableUsers.count) { _, _ in
-            guard let current = appState.currentUser else { return }
-            if assignedUserId.isEmpty || !assignableUsers.contains(where: { $0.id == assignedUserId }) {
-                assignedUserId = current.id
-            }
+            applyDefaultAssigneeIfNeeded()
         }
+        .alert("Zuständige Person fehlt", isPresented: $missingOfficerWarning) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("Es ist keine Person für Bestellungen hinterlegt. Bitte den Admin bitten, Yasmin als zuständig zu markieren.")
+        }
+    }
+
+    private var navigationTitle: String {
+        if isEditing {
+            return isOrder ? "Bestellung bearbeiten" : "Aufgabe bearbeiten"
+        }
+        return isOrder ? "Neue Bestellung" : "Neue Aufgabe"
     }
 
     private func configureInitialState() {
@@ -306,38 +367,71 @@ struct NewTaskView: View {
             assignedUserId = task.assignedUserId
             status = task.status
         } else {
-            // Neue Aufgabe
             title = ""
             details = ""
             hasDueDate = false
             dueDate = Date()
-            assignedUserId = current.id
             status = .open
+            applyDefaultAssigneeIfNeeded()
+        }
+    }
+
+    private func applyDefaultAssigneeIfNeeded() {
+        guard let current = appState.currentUser else { return }
+        guard task == nil else { return }
+
+        if isOrder {
+            if let officer = appState.procurementOfficerUser() {
+                assignedUserId = officer.id
+            } else {
+                assignedUserId = current.id
+            }
+        } else if assignedUserId.isEmpty || !assignableUsers.contains(where: { $0.id == assignedUserId }) {
+            assignedUserId = current.id
         }
     }
 
     private func save() {
         dismissKeyboard()
         guard let current = appState.currentUser else { return }
-        let assigned = assignableUsers.first(where: { $0.id == assignedUserId }) ?? current
-        let due: Date? = hasDueDate ? dueDate : nil
+
+        let taskKind = task?.kind ?? kind
+        let assigned: User
+
+        if taskKind == .order {
+            guard let officer = appState.procurementOfficerUser() else {
+                missingOfficerWarning = true
+                return
+            }
+            assigned = officer
+        } else {
+            assigned = assignableUsers.first(where: { $0.id == assignedUserId }) ?? current
+        }
+
+        let due: Date? = (taskKind == .order || !hasDueDate) ? nil : dueDate
 
         switch mode {
         case .new:
-            appState.createTask(title: title,
-                                details: details,
-                                dueDate: due,
-                                assignedUser: assigned,
-                                creator: current)
-            // Push-Notification (Best Effort): Cloud Function kann auf pushQueue reagieren.
+            appState.createTask(
+                title: title,
+                details: details,
+                dueDate: due,
+                assignedUser: assigned,
+                creator: current,
+                kind: taskKind
+            )
             if assigned.id != current.id {
                 let db = Firestore.firestore()
+                let pushTitle = taskKind == .order ? "Neue Bestellung" : "Neue Aufgabe"
+                let pushBody = taskKind == .order
+                    ? "\(current.name) hat eine Bestellung aufgegeben: \(title)"
+                    : "\(current.name) hat dir eine Aufgabe zugeteilt: \(title)"
                 db.collection("pushQueue").addDocument(data: [
                     "type": "task_assigned",
                     "toUserId": assigned.id,
                     "fromUserId": current.id,
-                    "title": "Neue Aufgabe",
-                    "body": "\(current.name) hat dir eine Aufgabe zugeteilt: \(title)",
+                    "title": pushTitle,
+                    "body": pushBody,
                     "createdAt": FieldValue.serverTimestamp()
                 ])
             }

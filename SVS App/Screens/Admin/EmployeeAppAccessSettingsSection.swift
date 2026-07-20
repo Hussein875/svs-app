@@ -6,11 +6,20 @@
 import SwiftUI
 
 struct EmployeeAppAccessSettingsSection: View {
+    let showsEmployeeTemplatePicker: Bool
+
     @Binding var scannerOnlyMode: Bool
     @Binding var documentsAccessEnabled: Bool
     @Binding var myUploadsAccessEnabled: Bool
     @Binding var stargutachterAccessEnabled: Bool
     @Binding var commissionAccessEnabled: Bool
+    @Binding var dashboardAccessEnabled: Bool
+    @Binding var requestsAccessEnabled: Bool
+    @Binding var tasksAccessEnabled: Bool
+    @Binding var meetingAccessEnabled: Bool
+    @Binding var onCallAccessEnabled: Bool
+    @Binding var ordersPlacementAccessEnabled: Bool
+    @Binding var accidentSketchAccessEnabled: Bool
     @Binding var allowedLawyerPowerIds: [String]
     @Binding var selectedTemplate: EmployeeAppAccessTemplate?
 
@@ -19,27 +28,38 @@ struct EmployeeAppAccessSettingsSection: View {
     }
 
     var body: some View {
-        Section(
-            header: Text("Vorlage"),
-            footer: Text("Neue Mitarbeiter starten standardmäßig mit „Alles aus“. Passe die Vorlage an oder stelle die Kacheln einzeln ein.")
-        ) {
-            Picker("App-Zugang", selection: templateBinding) {
-                Text("Benutzerdefiniert").tag(Optional<EmployeeAppAccessTemplate>.none)
-                ForEach(EmployeeAppAccessTemplate.allCases) { template in
-                    Text(template.rawValue).tag(Optional(template))
+        if showsEmployeeTemplatePicker {
+            Section(
+                header: Text("Vorlage"),
+                footer: Text("Neue Mitarbeiter starten standardmäßig mit „Alles aus“. Passe die Vorlage an oder stelle die Kacheln einzeln ein.")
+            ) {
+                Picker("App-Zugang", selection: templateBinding) {
+                    Text("Benutzerdefiniert").tag(Optional<EmployeeAppAccessTemplate>.none)
+                    ForEach(EmployeeAppAccessTemplate.allCases) { template in
+                        Text(template.rawValue).tag(Optional(template))
+                    }
                 }
             }
         }
 
         Section(
-            header: Text("Bereiche"),
-            footer: Text("„Nur Scanner“ blendet Mein Bereich aus. Dokumente umfasst AE/BD und freigeschaltete Vollmachten.")
+            header: Text("Kacheln in Mein Bereich"),
+            footer: Text("Steuert, welche Bereiche der Nutzer sieht. „Offene Bestellungen“ erscheint zusätzlich für Admins und unter „Zuständig für Bestellungen“ freigeschaltete Personen.")
         ) {
-            Toggle("Nur Scanner (ohne Mein Bereich)", isOn: manualBinding($scannerOnlyMode))
-            Toggle("Dokumente anzeigen", isOn: manualBinding($documentsAccessEnabled))
-            Toggle("Meine Gutachten anzeigen", isOn: manualBinding($myUploadsAccessEnabled))
-            Toggle("Stargutachter anzeigen", isOn: manualBinding($stargutachterAccessEnabled))
-            Toggle("Prämie anzeigen", isOn: manualBinding($commissionAccessEnabled))
+            if showsEmployeeTemplatePicker {
+                Toggle("Nur Scanner (ohne Mein Bereich)", isOn: manualBinding($scannerOnlyMode))
+            }
+            Toggle("Dashboard", isOn: manualBinding($dashboardAccessEnabled))
+            Toggle("Prämie", isOn: manualBinding($commissionAccessEnabled))
+            Toggle("Dokumente", isOn: manualBinding($documentsAccessEnabled))
+            Toggle("Meine Gutachten", isOn: manualBinding($myUploadsAccessEnabled))
+            Toggle("Abwesenheiten", isOn: manualBinding($requestsAccessEnabled))
+            Toggle("Aufgaben", isOn: manualBinding($tasksAccessEnabled))
+            Toggle("Meeting", isOn: manualBinding($meetingAccessEnabled))
+            Toggle("Bereitschaft", isOn: manualBinding($onCallAccessEnabled))
+            Toggle("Bestellungen aufgeben", isOn: manualBinding($ordersPlacementAccessEnabled))
+            Toggle("Schadenhergang", isOn: manualBinding($accidentSketchAccessEnabled))
+            Toggle("Stargutachter", isOn: manualBinding($stargutachterAccessEnabled))
         }
 
         Section {
@@ -68,23 +88,45 @@ struct EmployeeAppAccessSettingsSection: View {
             set: { newValue in
                 selectedTemplate = newValue
                 guard let template = newValue else { return }
-                var draft = EmployeeAccessDraft(
-                    scannerOnlyMode: scannerOnlyMode,
-                    documentsAccessEnabled: documentsAccessEnabled,
-                    myUploadsAccessEnabled: myUploadsAccessEnabled,
-                    stargutachterAccessEnabled: stargutachterAccessEnabled,
-                    commissionAccessEnabled: commissionAccessEnabled,
-                    allowedLawyerPowerIds: allowedLawyerPowerIds
-                )
+                var draft = currentDraft
                 draft.apply(template: template)
-                scannerOnlyMode = draft.scannerOnlyMode
-                documentsAccessEnabled = draft.documentsAccessEnabled
-                myUploadsAccessEnabled = draft.myUploadsAccessEnabled
-                stargutachterAccessEnabled = draft.stargutachterAccessEnabled
-                commissionAccessEnabled = draft.commissionAccessEnabled
-                allowedLawyerPowerIds = draft.allowedLawyerPowerIds
+                applyDraft(draft)
             }
         )
+    }
+
+    private var currentDraft: EmployeeAccessDraft {
+        EmployeeAccessDraft(
+            scannerOnlyMode: scannerOnlyMode,
+            documentsAccessEnabled: documentsAccessEnabled,
+            myUploadsAccessEnabled: myUploadsAccessEnabled,
+            stargutachterAccessEnabled: stargutachterAccessEnabled,
+            commissionAccessEnabled: commissionAccessEnabled,
+            dashboardAccessEnabled: dashboardAccessEnabled,
+            requestsAccessEnabled: requestsAccessEnabled,
+            tasksAccessEnabled: tasksAccessEnabled,
+            meetingAccessEnabled: meetingAccessEnabled,
+            onCallAccessEnabled: onCallAccessEnabled,
+            ordersPlacementAccessEnabled: ordersPlacementAccessEnabled,
+            accidentSketchAccessEnabled: accidentSketchAccessEnabled,
+            allowedLawyerPowerIds: allowedLawyerPowerIds
+        )
+    }
+
+    private func applyDraft(_ draft: EmployeeAccessDraft) {
+        scannerOnlyMode = draft.scannerOnlyMode
+        documentsAccessEnabled = draft.documentsAccessEnabled
+        myUploadsAccessEnabled = draft.myUploadsAccessEnabled
+        stargutachterAccessEnabled = draft.stargutachterAccessEnabled
+        commissionAccessEnabled = draft.commissionAccessEnabled
+        dashboardAccessEnabled = draft.dashboardAccessEnabled
+        requestsAccessEnabled = draft.requestsAccessEnabled
+        tasksAccessEnabled = draft.tasksAccessEnabled
+        meetingAccessEnabled = draft.meetingAccessEnabled
+        onCallAccessEnabled = draft.onCallAccessEnabled
+        ordersPlacementAccessEnabled = draft.ordersPlacementAccessEnabled
+        accidentSketchAccessEnabled = draft.accidentSketchAccessEnabled
+        allowedLawyerPowerIds = draft.allowedLawyerPowerIds
     }
 
     private func manualBinding(_ value: Binding<Bool>) -> Binding<Bool> {
@@ -122,6 +164,13 @@ private extension EmployeeAccessDraft {
         myUploadsAccessEnabled: Bool,
         stargutachterAccessEnabled: Bool,
         commissionAccessEnabled: Bool,
+        dashboardAccessEnabled: Bool,
+        requestsAccessEnabled: Bool,
+        tasksAccessEnabled: Bool,
+        meetingAccessEnabled: Bool,
+        onCallAccessEnabled: Bool,
+        ordersPlacementAccessEnabled: Bool,
+        accidentSketchAccessEnabled: Bool,
         allowedLawyerPowerIds: [String]
     ) {
         self.scannerOnlyMode = scannerOnlyMode
@@ -129,6 +178,13 @@ private extension EmployeeAccessDraft {
         self.myUploadsAccessEnabled = myUploadsAccessEnabled
         self.stargutachterAccessEnabled = stargutachterAccessEnabled
         self.commissionAccessEnabled = commissionAccessEnabled
+        self.dashboardAccessEnabled = dashboardAccessEnabled
+        self.requestsAccessEnabled = requestsAccessEnabled
+        self.tasksAccessEnabled = tasksAccessEnabled
+        self.meetingAccessEnabled = meetingAccessEnabled
+        self.onCallAccessEnabled = onCallAccessEnabled
+        self.ordersPlacementAccessEnabled = ordersPlacementAccessEnabled
+        self.accidentSketchAccessEnabled = accidentSketchAccessEnabled
         self.allowedLawyerPowerIds = allowedLawyerPowerIds
     }
 }

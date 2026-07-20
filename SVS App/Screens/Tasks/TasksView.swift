@@ -26,7 +26,12 @@ struct TasksView: View {
     }
 
     @State private var showNewTaskNav = false
+    @State private var newTaskKind: TaskKind = .general
     @State private var editingTask: Task? = nil
+
+    private var isEmployee: Bool {
+        appState.currentUser?.role == .employee
+    }
 
     private enum TaskScope: String, CaseIterable {
         case assignedToMe = "Für mich"
@@ -123,13 +128,15 @@ struct TasksView: View {
             if visibleTasks.isEmpty {
                 ScrollView {
                     VStack(spacing: 14) {
-                        Text("Keine Aufgaben")
+                        Text("Keine Einträge")
                             .font(.title3)
                             .fontWeight(.semibold)
 
                         Text(statusFilter == .open
-                             ? "Erstelle eine neue Aufgabe mit dem Plus-Button oben rechts."
-                             : "Es gibt aktuell keine erledigten Aufgaben in diesem Bereich.")
+                             ? (isEmployee
+                                ? "Erstelle eine Bestellung mit dem Plus-Button oben rechts – z. B. Visitenkarten oder Büromaterial."
+                                : "Erstelle eine Aufgabe oder Bestellung mit dem Plus-Button oben rechts.")
+                             : "Es gibt aktuell keine erledigten Einträge in diesem Bereich.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
@@ -189,11 +196,11 @@ struct TasksView: View {
         )
         .background(Color(.systemGroupedBackground))
         .navigationDestination(isPresented: $showNewTaskNav) {
-            NewTaskView(mode: .new, task: nil)
+            NewTaskView(mode: .new, task: nil, kind: newTaskKind)
                 .environmentObject(appState)
         }
         .navigationDestination(item: $editingTask) { task in
-            NewTaskView(mode: .edit, task: task)
+            NewTaskView(mode: .edit, task: task, kind: task.kind)
                 .environmentObject(appState)
         }
         .navigationTitle("Aufgaben")
@@ -219,12 +226,34 @@ struct TasksView: View {
             }
 
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showNewTaskNav = true
-                } label: {
-                    Image(systemName: "plus")
+                if isEmployee {
+                    Button {
+                        newTaskKind = .order
+                        showNewTaskNav = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Neue Bestellung")
+                } else {
+                    Menu {
+                        Button {
+                            newTaskKind = .order
+                            showNewTaskNav = true
+                        } label: {
+                            Label("Bestellung aufgeben", systemImage: "cart.badge.plus")
+                        }
+
+                        Button {
+                            newTaskKind = .general
+                            showNewTaskNav = true
+                        } label: {
+                            Label("Aufgabe anlegen", systemImage: "checklist")
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Neu")
                 }
-                .accessibilityLabel("Neue Aufgabe")
             }
         }
     }

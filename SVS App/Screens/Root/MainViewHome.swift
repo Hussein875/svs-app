@@ -28,24 +28,45 @@ struct WorkHomeView: View {
         appState.currentUser?.role == .employee
     }
 
-    private var showsDocumentsTile: Bool {
-        guard isEmployeeRole else { return true }
-        return appState.currentUser?.documentsAccessEnabled ?? false
+    private var tileAccess: HomeTileAccess {
+        HomeTileAccess(user: appState.currentUser ?? User(
+            id: "",
+            name: "",
+            role: .employee,
+            colorName: "blue",
+            annualLeaveDays: 0,
+            email: ""
+        ))
     }
 
-    private var showsMyUploadsTile: Bool {
-        guard isEmployeeRole else { return true }
-        return appState.currentUser?.myUploadsAccessEnabled ?? false
+    private var openOrdersInboxCount: Int {
+        guard let current = appState.currentUser else { return 0 }
+        let open = appState.tasks.filter { $0.kind == .order && $0.status == .open }
+        if current.role == .admin {
+            return open.count
+        }
+        let uid = current.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        return open.filter {
+            $0.assignedUserId.trimmingCharacters(in: .whitespacesAndNewlines) == uid
+        }.count
     }
 
-    private var showsCommissionTile: Bool {
-        guard isEmployeeRole else { return false }
-        return appState.currentUser?.commissionAccessEnabled ?? false
+    private var hasAnyPrimaryTile: Bool {
+        tileAccess.showsCommission
+            || tileAccess.showsDocuments
+            || tileAccess.showsMyUploads
+            || tileAccess.showsDashboard
+            || tileAccess.showsProcurementInbox
     }
 
-    private var showsStargutachterTile: Bool {
-        guard isEmployeeRole else { return false }
-        return appState.currentUser?.stargutachterAccessEnabled ?? false
+    private var hasAnyAdditionalTile: Bool {
+        tileAccess.showsRequests
+            || tileAccess.showsTasks
+            || tileAccess.showsMeeting
+            || tileAccess.showsOnCall
+            || tileAccess.showsOrdersPlacement
+            || tileAccess.showsAccidentSketch
+            || tileAccess.showsStargutachter
     }
 
     var body: some View {
@@ -86,7 +107,9 @@ struct WorkHomeView: View {
                     } else {
                         VStack(alignment: .leading, spacing: 20) {
                             primaryToolsSection
-                            additionalToolsSection
+                            if hasAnyAdditionalTile {
+                                additionalToolsSection
+                            }
                         }
                         .padding(.horizontal, 18)
                         .padding(.bottom, 18)
@@ -130,16 +153,15 @@ struct WorkHomeView: View {
     @ViewBuilder
     private var employeeToolsSection: some View {
         VStack(alignment: .leading, spacing: 20) {
-            if showsDocumentsTile || showsMyUploadsTile || showsCommissionTile {
+            if hasAnyPrimaryTile {
                 employeePrimarySection
             }
 
-            employeeAdditionalSection
+            if hasAnyAdditionalTile {
+                employeeAdditionalSection
+            }
 
-            if !showsDocumentsTile,
-               !showsMyUploadsTile,
-               !showsStargutachterTile,
-               !showsCommissionTile {
+            if !hasAnyPrimaryTile, !hasAnyAdditionalTile {
                 employeeAccessHint
             }
         }
@@ -148,7 +170,7 @@ struct WorkHomeView: View {
     @ViewBuilder
     private var employeePrimarySection: some View {
         VStack(spacing: 12) {
-            if showsCommissionTile {
+            if tileAccess.showsCommission {
                 NavigationLink {
                     ProvisionenView()
                 } label: {
@@ -161,7 +183,7 @@ struct WorkHomeView: View {
                 .buttonStyle(.plain)
             }
 
-            if showsDocumentsTile {
+            if tileAccess.showsDocuments {
                 NavigationLink {
                     CompanyDocumentsView()
                 } label: {
@@ -174,7 +196,7 @@ struct WorkHomeView: View {
                 .buttonStyle(.plain)
             }
 
-            if showsMyUploadsTile {
+            if tileAccess.showsMyUploads {
                 NavigationLink {
                     MyScannerUploadsView()
                 } label: {
@@ -186,6 +208,10 @@ struct WorkHomeView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            if tileAccess.showsProcurementInbox {
+                procurementInboxLink
+            }
         }
     }
 
@@ -195,8 +221,36 @@ struct WorkHomeView: View {
             homeSectionHeader("Weitere Bereiche")
 
             VStack(spacing: 12) {
-                compactToolRow {
-                    if showsStargutachterTile {
+                if tileAccess.showsOrdersPlacement || tileAccess.showsAccidentSketch {
+                    compactToolRow {
+                        if tileAccess.showsOrdersPlacement {
+                            NavigationLink {
+                                TasksView()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Bestellungen",
+                                    systemImage: "cart"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if tileAccess.showsAccidentSketch {
+                            NavigationLink {
+                                AccidentSketchGalleryView()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Schadenhergang",
+                                    systemImage: "pencil.and.scribble"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                if tileAccess.showsStargutachter {
+                    compactToolRow {
                         NavigationLink {
                             StargutachterView()
                         } label: {
@@ -207,16 +261,6 @@ struct WorkHomeView: View {
                         }
                         .buttonStyle(.plain)
                     }
-
-                    NavigationLink {
-                        AccidentSketchGalleryView()
-                    } label: {
-                        CompactWorkCard(
-                            title: "Schadenhergang",
-                            systemImage: "pencil.and.scribble"
-                        )
-                    }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -226,7 +270,7 @@ struct WorkHomeView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Weitere Bereiche")
                 .font(.headline)
-            Text("Dein Admin kann dir in der Nutzerverwaltung Dokumente, Uploads und weitere Kacheln freischalten.")
+            Text("Dein Admin kann dir in der Nutzerverwaltung einzelne Kacheln freischalten.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
@@ -240,51 +284,83 @@ struct WorkHomeView: View {
 
     @ViewBuilder
     private var primaryToolsSection: some View {
-        VStack(spacing: 12) {
-            NavigationLink {
-                DashboardView()
-            } label: {
-                WorkCard(
-                    title: "Dashboard",
-                    subtitle: "Übersicht und Kennzahlen",
-                    systemImage: "chart.bar.xaxis"
-                )
+        if hasAnyPrimaryTile {
+            VStack(spacing: 12) {
+            if tileAccess.showsDashboard {
+                NavigationLink {
+                    DashboardView()
+                } label: {
+                    WorkCard(
+                        title: "Dashboard",
+                        subtitle: "Übersicht und Kennzahlen",
+                        systemImage: "chart.bar.xaxis"
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
-            NavigationLink {
-                ProvisionenView()
-            } label: {
-                WorkCard(
-                    title: "Prämie",
-                    subtitle: "Vermittlungsprämie und Links",
-                    systemImage: "eurosign.circle"
-                )
+            if tileAccess.showsCommission {
+                NavigationLink {
+                    ProvisionenView()
+                } label: {
+                    WorkCard(
+                        title: "Prämie",
+                        subtitle: "Vermittlungsprämie und Links",
+                        systemImage: "eurosign.circle"
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
-            NavigationLink {
-                CompanyDocumentsView()
-            } label: {
-                WorkCard(
-                    title: "Dokumente",
-                    subtitle: "Unterlagen und Vollmachten",
-                    systemImage: "folder.fill"
-                )
+            if tileAccess.showsDocuments {
+                NavigationLink {
+                    CompanyDocumentsView()
+                } label: {
+                    WorkCard(
+                        title: "Dokumente",
+                        subtitle: "Unterlagen und Vollmachten",
+                        systemImage: "folder.fill"
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
-            NavigationLink {
-                MyScannerUploadsView()
-            } label: {
-                WorkCard(
-                    title: "Meine Gutachten",
-                    subtitle: "Gutachten-Ordner in Google Drive",
-                    systemImage: "icloud.and.arrow.up.fill"
-                )
+            if tileAccess.showsMyUploads {
+                NavigationLink {
+                    MyScannerUploadsView()
+                } label: {
+                    WorkCard(
+                        title: "Meine Gutachten",
+                        subtitle: "Gutachten-Ordner in Google Drive",
+                        systemImage: "icloud.and.arrow.up.fill"
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+
+            if tileAccess.showsProcurementInbox {
+                procurementInboxLink
+            }
+            }
         }
+    }
+
+    private var procurementInboxLink: some View {
+        NavigationLink {
+            AdminOpenOrdersScreen(
+                scope: tileAccess.procurementInboxShowsAllOrders ? .all : .assignedToCurrentUser
+            )
+            .environmentObject(appState)
+        } label: {
+            WorkCard(
+                title: "Offene Bestellungen",
+                subtitle: openOrdersInboxCount == 0
+                    ? "Keine offenen Aufträge"
+                    : "\(openOrdersInboxCount) offen – jetzt bearbeiten",
+                systemImage: "cart.fill"
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -293,70 +369,88 @@ struct WorkHomeView: View {
             homeSectionHeader("Weitere Bereiche")
 
             VStack(spacing: 12) {
-                compactToolRow {
-                    NavigationLink {
-                        MyRequestsScreen()
-                    } label: {
-                        CompactWorkCard(
-                            title: "Abwesenheiten",
-                            systemImage: "doc.text"
-                        )
-                    }
-                    .buttonStyle(.plain)
+                if tileAccess.showsRequests || tileAccess.showsTasks {
+                    compactToolRow {
+                        if tileAccess.showsRequests {
+                            NavigationLink {
+                                MyRequestsScreen()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Abwesenheiten",
+                                    systemImage: "doc.text"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
 
-                    NavigationLink {
-                        TasksView()
-                    } label: {
-                        CompactWorkCard(
-                            title: "Aufgaben",
-                            systemImage: "checklist"
-                        )
+                        if tileAccess.showsTasks {
+                            NavigationLink {
+                                TasksView()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Aufgaben",
+                                    systemImage: "checklist"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
 
-                compactToolRow {
-                    NavigationLink {
-                        MeetingTopicsView()
-                    } label: {
-                        CompactWorkCard(
-                            title: "Meeting",
-                            systemImage: "person.3.fill"
-                        )
-                    }
-                    .buttonStyle(.plain)
+                if tileAccess.showsMeeting || tileAccess.showsStargutachter {
+                    compactToolRow {
+                        if tileAccess.showsMeeting {
+                            NavigationLink {
+                                MeetingTopicsView()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Meeting",
+                                    systemImage: "person.3.fill"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
 
-                    NavigationLink {
-                        StargutachterView()
-                    } label: {
-                        CompactWorkCard(
-                            title: "Stargutachter",
-                            systemImage: "star.fill"
-                        )
+                        if tileAccess.showsStargutachter {
+                            NavigationLink {
+                                StargutachterView()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Stargutachter",
+                                    systemImage: "star.fill"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
 
-                compactToolRow {
-                    NavigationLink {
-                        MyOnCallSaturdaysScreen()
-                    } label: {
-                        CompactWorkCard(
-                            title: "Bereitschaft",
-                            systemImage: "calendar"
-                        )
-                    }
-                    .buttonStyle(.plain)
+                if tileAccess.showsOnCall || tileAccess.showsAccidentSketch {
+                    compactToolRow {
+                        if tileAccess.showsOnCall {
+                            NavigationLink {
+                                MyOnCallSaturdaysScreen()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Bereitschaft",
+                                    systemImage: "calendar"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
 
-                    NavigationLink {
-                        AccidentSketchGalleryView()
-                    } label: {
-                        CompactWorkCard(
-                            title: "Schadenhergang",
-                            systemImage: "pencil.and.scribble"
-                        )
+                        if tileAccess.showsAccidentSketch {
+                            NavigationLink {
+                                AccidentSketchGalleryView()
+                            } label: {
+                                CompactWorkCard(
+                                    title: "Schadenhergang",
+                                    systemImage: "pencil.and.scribble"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }

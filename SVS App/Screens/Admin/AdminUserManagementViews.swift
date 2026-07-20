@@ -179,11 +179,9 @@ struct AdminUsersScreen: View {
                         }
                     }
 
-                    if user.role == .employee {
-                        EmployeeAppAccessChipRow(
-                            chips: EmployeeAppAccessSummary.chips(for: user)
-                        )
-                    }
+                    EmployeeAppAccessChipRow(
+                        chips: UserHomeAccessSummary.chips(for: user)
+                    )
                 }
             }
             .padding(14)
@@ -240,6 +238,14 @@ struct EditUserView: View {
         let myUploadsAccessEnabled: Bool
         let commissionAccessEnabled: Bool
         let stargutachterAccessEnabled: Bool
+        let dashboardAccessEnabled: Bool
+        let requestsAccessEnabled: Bool
+        let tasksAccessEnabled: Bool
+        let meetingAccessEnabled: Bool
+        let onCallAccessEnabled: Bool
+        let ordersPlacementAccessEnabled: Bool
+        let accidentSketchAccessEnabled: Bool
+        let isProcurementOfficer: Bool
         let allowedLawyerPowerIds: [String]
     }
 
@@ -261,6 +267,14 @@ struct EditUserView: View {
             myUploadsAccessEnabled: user.myUploadsAccessEnabled,
             commissionAccessEnabled: user.commissionAccessEnabled,
             stargutachterAccessEnabled: user.stargutachterAccessEnabled,
+            dashboardAccessEnabled: user.dashboardAccessEnabled,
+            requestsAccessEnabled: user.requestsAccessEnabled,
+            tasksAccessEnabled: user.tasksAccessEnabled,
+            meetingAccessEnabled: user.meetingAccessEnabled,
+            onCallAccessEnabled: user.onCallAccessEnabled,
+            ordersPlacementAccessEnabled: user.ordersPlacementAccessEnabled,
+            accidentSketchAccessEnabled: user.accidentSketchAccessEnabled,
+            isProcurementOfficer: user.isProcurementOfficer,
             allowedLawyerPowerIds: user.allowedLawyerPowerIds
         )
     }
@@ -276,9 +290,14 @@ struct EditUserView: View {
                 }
                 .pickerStyle(.segmented)
                 .onChange(of: user.role) { oldRole, newRole in
-                    if oldRole != .employee && newRole == .employee {
-                        user.applyDefaultEmployeeAccess()
-                        selectedAccessTemplate = .allOff
+                    if oldRole != newRole {
+                        if newRole == .employee {
+                            user.applyDefaultEmployeeAccess()
+                            selectedAccessTemplate = .allOff
+                        } else {
+                            user.applyDefaultHomeAccessForRole()
+                            selectedAccessTemplate = nil
+                        }
                     }
                 }
             }
@@ -323,17 +342,32 @@ struct EditUserView: View {
                 .datePickerStyle(.compact)
             }
 
-            if user.role == .employee {
-                EmployeeAppAccessSettingsSection(
-                    scannerOnlyMode: binding(for: \.scannerOnlyMode),
-                    documentsAccessEnabled: binding(for: \.documentsAccessEnabled),
-                    myUploadsAccessEnabled: binding(for: \.myUploadsAccessEnabled),
-                    stargutachterAccessEnabled: binding(for: \.stargutachterAccessEnabled),
-                    commissionAccessEnabled: binding(for: \.commissionAccessEnabled),
-                    allowedLawyerPowerIds: binding(for: \.allowedLawyerPowerIds),
-                    selectedTemplate: $selectedAccessTemplate
-                )
+            if user.role != .employee {
+                Section(header: Text("Bestellungen")) {
+                    Toggle("Zuständig für Bestellungen", isOn: binding(for: \.isProcurementOfficer))
+                    Text("Erhält Bestellanfragen von Mitarbeitern und sieht „Offene Bestellungen“ in Mein Bereich — z. B. Yasmin.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
+
+            EmployeeAppAccessSettingsSection(
+                showsEmployeeTemplatePicker: user.role == .employee,
+                scannerOnlyMode: binding(for: \.scannerOnlyMode),
+                documentsAccessEnabled: binding(for: \.documentsAccessEnabled),
+                myUploadsAccessEnabled: binding(for: \.myUploadsAccessEnabled),
+                stargutachterAccessEnabled: binding(for: \.stargutachterAccessEnabled),
+                commissionAccessEnabled: binding(for: \.commissionAccessEnabled),
+                dashboardAccessEnabled: binding(for: \.dashboardAccessEnabled),
+                requestsAccessEnabled: binding(for: \.requestsAccessEnabled),
+                tasksAccessEnabled: binding(for: \.tasksAccessEnabled),
+                meetingAccessEnabled: binding(for: \.meetingAccessEnabled),
+                onCallAccessEnabled: binding(for: \.onCallAccessEnabled),
+                ordersPlacementAccessEnabled: binding(for: \.ordersPlacementAccessEnabled),
+                accidentSketchAccessEnabled: binding(for: \.accidentSketchAccessEnabled),
+                allowedLawyerPowerIds: binding(for: \.allowedLawyerPowerIds),
+                selectedTemplate: $selectedAccessTemplate
+            )
 
             Section {
                 Button("Mitarbeiter löschen", role: .destructive) {
@@ -359,6 +393,14 @@ struct EditUserView: View {
                         myUploadsAccessEnabled: user.myUploadsAccessEnabled,
                         commissionAccessEnabled: user.commissionAccessEnabled,
                         stargutachterAccessEnabled: user.stargutachterAccessEnabled,
+                        dashboardAccessEnabled: user.dashboardAccessEnabled,
+                        requestsAccessEnabled: user.requestsAccessEnabled,
+                        tasksAccessEnabled: user.tasksAccessEnabled,
+                        meetingAccessEnabled: user.meetingAccessEnabled,
+                        onCallAccessEnabled: user.onCallAccessEnabled,
+                        ordersPlacementAccessEnabled: user.ordersPlacementAccessEnabled,
+                        accidentSketchAccessEnabled: user.accidentSketchAccessEnabled,
+                        isProcurementOfficer: user.isProcurementOfficer,
                         allowedLawyerPowerIds: user.allowedLawyerPowerIds
                     )
                     dismiss()
@@ -444,6 +486,14 @@ struct EditUserView: View {
                     myUploadsAccessEnabled: user.myUploadsAccessEnabled,
                     commissionAccessEnabled: user.commissionAccessEnabled,
                     stargutachterAccessEnabled: user.stargutachterAccessEnabled,
+                    dashboardAccessEnabled: user.dashboardAccessEnabled,
+                    requestsAccessEnabled: user.requestsAccessEnabled,
+                    tasksAccessEnabled: user.tasksAccessEnabled,
+                    meetingAccessEnabled: user.meetingAccessEnabled,
+                    onCallAccessEnabled: user.onCallAccessEnabled,
+                    ordersPlacementAccessEnabled: user.ordersPlacementAccessEnabled,
+                    accidentSketchAccessEnabled: user.accidentSketchAccessEnabled,
+                    isProcurementOfficer: user.isProcurementOfficer,
                     allowedLawyerPowerIds: user.allowedLawyerPowerIds
                 )
             }
@@ -530,6 +580,25 @@ struct AddUserView: View {
                     Text("SV").tag(UserRole.expert)
                 }
                 .pickerStyle(.segmented)
+                .onChange(of: role) { oldRole, newRole in
+                    guard oldRole != newRole else { return }
+                    if newRole == .employee {
+                        employeeAccess.apply(template: .allOff)
+                        selectedAccessTemplate = .allOff
+                    } else {
+                        var draftUser = User(
+                            id: "draft",
+                            name: "",
+                            role: newRole,
+                            colorName: "blue",
+                            annualLeaveDays: 0,
+                            email: ""
+                        )
+                        draftUser.applyDefaultHomeAccessForRole()
+                        employeeAccess = EmployeeAccessDraft(from: draftUser)
+                        selectedAccessTemplate = nil
+                    }
+                }
             }
 
             Section(header: Text("Urlaub")) {
@@ -556,17 +625,23 @@ struct AddUserView: View {
                 .datePickerStyle(.compact)
             }
 
-            if role == .employee {
-                EmployeeAppAccessSettingsSection(
-                    scannerOnlyMode: $employeeAccess.scannerOnlyMode,
-                    documentsAccessEnabled: $employeeAccess.documentsAccessEnabled,
-                    myUploadsAccessEnabled: $employeeAccess.myUploadsAccessEnabled,
-                    stargutachterAccessEnabled: $employeeAccess.stargutachterAccessEnabled,
-                    commissionAccessEnabled: $employeeAccess.commissionAccessEnabled,
-                    allowedLawyerPowerIds: $employeeAccess.allowedLawyerPowerIds,
-                    selectedTemplate: $selectedAccessTemplate
-                )
-            }
+            EmployeeAppAccessSettingsSection(
+                showsEmployeeTemplatePicker: role == .employee,
+                scannerOnlyMode: $employeeAccess.scannerOnlyMode,
+                documentsAccessEnabled: $employeeAccess.documentsAccessEnabled,
+                myUploadsAccessEnabled: $employeeAccess.myUploadsAccessEnabled,
+                stargutachterAccessEnabled: $employeeAccess.stargutachterAccessEnabled,
+                commissionAccessEnabled: $employeeAccess.commissionAccessEnabled,
+                dashboardAccessEnabled: $employeeAccess.dashboardAccessEnabled,
+                requestsAccessEnabled: $employeeAccess.requestsAccessEnabled,
+                tasksAccessEnabled: $employeeAccess.tasksAccessEnabled,
+                meetingAccessEnabled: $employeeAccess.meetingAccessEnabled,
+                onCallAccessEnabled: $employeeAccess.onCallAccessEnabled,
+                ordersPlacementAccessEnabled: $employeeAccess.ordersPlacementAccessEnabled,
+                accidentSketchAccessEnabled: $employeeAccess.accidentSketchAccessEnabled,
+                allowedLawyerPowerIds: $employeeAccess.allowedLawyerPowerIds,
+                selectedTemplate: $selectedAccessTemplate
+            )
 
             Section {
                 Button {
@@ -586,7 +661,7 @@ struct AddUserView: View {
                             colorName: colorName,
                             annualLeaveDays: annualLeaveDays,
                             birthday: birthday.map { Calendar.current.startOfDay(for: $0) },
-                            employeeAccess: role == .employee ? employeeAccess : nil
+                            employeeAccess: employeeAccess
                         )
 
                         isCreating = false

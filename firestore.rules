@@ -59,6 +59,14 @@ service cloud.firestore {
         "stargutachterAccessEnabled",
         "documentsAccessEnabled",
         "myUploadsAccessEnabled",
+        "dashboardAccessEnabled",
+        "requestsAccessEnabled",
+        "tasksAccessEnabled",
+        "meetingAccessEnabled",
+        "onCallAccessEnabled",
+        "ordersPlacementAccessEnabled",
+        "accidentSketchAccessEnabled",
+        "isProcurementOfficer",
         "scannerOnlyMode",
         "allowedLawyerPowerIds"
       ]) &&
@@ -76,6 +84,14 @@ service cloud.firestore {
       (!("stargutachterAccessEnabled" in data) || data.stargutachterAccessEnabled is bool) &&
       (!("documentsAccessEnabled" in data) || data.documentsAccessEnabled is bool) &&
       (!("myUploadsAccessEnabled" in data) || data.myUploadsAccessEnabled is bool) &&
+      (!("dashboardAccessEnabled" in data) || data.dashboardAccessEnabled is bool) &&
+      (!("requestsAccessEnabled" in data) || data.requestsAccessEnabled is bool) &&
+      (!("tasksAccessEnabled" in data) || data.tasksAccessEnabled is bool) &&
+      (!("meetingAccessEnabled" in data) || data.meetingAccessEnabled is bool) &&
+      (!("onCallAccessEnabled" in data) || data.onCallAccessEnabled is bool) &&
+      (!("ordersPlacementAccessEnabled" in data) || data.ordersPlacementAccessEnabled is bool) &&
+      (!("accidentSketchAccessEnabled" in data) || data.accidentSketchAccessEnabled is bool) &&
+      (!("isProcurementOfficer" in data) || data.isProcurementOfficer is bool) &&
       (!("scannerOnlyMode" in data) || data.scannerOnlyMode is bool) &&
       (!("allowedLawyerPowerIds" in data) || data.allowedLawyerPowerIds is list);
     }
@@ -188,6 +204,7 @@ service cloud.firestore {
         "title",
         "details",
         "statusRaw",
+        "kindRaw",
         "assignedUserId",
         "creatorUserId",
         "createdAt"
@@ -197,6 +214,7 @@ service cloud.firestore {
         "details",
         "dueDate",
         "statusRaw",
+        "kindRaw",
         "assignedUserId",
         "creatorUserId",
         "createdAt",
@@ -206,6 +224,7 @@ service cloud.firestore {
       data.details is string &&
       data.statusRaw is string &&
       (data.statusRaw == "open" || data.statusRaw == "done") &&
+      (!("kindRaw" in data) || data.kindRaw in ["general", "order"]) &&
       data.assignedUserId is string &&
       data.creatorUserId is string &&
       data.createdAt is timestamp &&
@@ -375,6 +394,7 @@ function isValidTaskCreate(data) {
       "details",
       "dueDate",
       "statusRaw",
+      "kindRaw",
       "assignedUserId",
       "creatorUserId",
       "createdAt",
@@ -385,6 +405,7 @@ function isValidTaskCreate(data) {
     && data.title.size() > 0
     && data.details is string
     && data.statusRaw in ["open", "done"]
+    && (!("kindRaw" in data) || data.kindRaw in ["general", "order"])
     && data.assignedUserId is string
     && data.assignedUserId.size() > 0
     && data.creatorUserId == myUid()
@@ -400,6 +421,7 @@ function isValidTaskUpdate() {
       "details",
       "dueDate",
       "statusRaw",
+      "kindRaw",
       "assignedUserId",
       "updatedAt",
       "updatedByUserId"

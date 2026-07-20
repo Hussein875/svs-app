@@ -124,11 +124,19 @@ struct MainView: View {
         switch route.type {
         case .leaveRequestNew:
             if appState.currentUser?.role == .admin {
-                selectedTab = .admin
-                adminPushDestination = AdminPushDestination(
-                    kind: isOnCallRequest(route.leaveTypeRaw) ? .onCallSaturdays : .requests,
-                    entityId: asUUID(route.entityId)
-                )
+                if isOnCallRequest(route.leaveTypeRaw) {
+                    selectedTab = .home
+                    homePushDestination = HomePushDestination(
+                        kind: .myOnCallSaturdays,
+                        entityId: asUUID(route.entityId)
+                    )
+                } else {
+                    selectedTab = .admin
+                    adminPushDestination = AdminPushDestination(
+                        kind: .requests,
+                        entityId: asUUID(route.entityId)
+                    )
+                }
             } else if isEmployeeRole {
                 selectedTab = .scanner
             } else {
@@ -159,7 +167,11 @@ struct MainView: View {
 
         case .taskAssigned:
             if isEmployeeRole {
-                selectedTab = .scanner
+                selectedTab = .home
+                homePushDestination = HomePushDestination(
+                    kind: .tasksAssigned,
+                    entityId: asUUID(route.entityId)
+                )
             } else {
                 selectedTab = .home
                 homePushDestination = HomePushDestination(
@@ -170,7 +182,11 @@ struct MainView: View {
 
         case .taskCompleted:
             if isEmployeeRole {
-                selectedTab = .scanner
+                selectedTab = .home
+                homePushDestination = HomePushDestination(
+                    kind: .tasksCompleted,
+                    entityId: asUUID(route.entityId)
+                )
             } else {
                 selectedTab = .home
                 homePushDestination = HomePushDestination(

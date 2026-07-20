@@ -24,6 +24,14 @@ struct UserProfile: Codable {
     var documentsAccessEnabled: Bool
     var myUploadsAccessEnabled: Bool
     var scannerOnlyMode: Bool
+    var isProcurementOfficer: Bool
+    var dashboardAccessEnabled: Bool
+    var requestsAccessEnabled: Bool
+    var tasksAccessEnabled: Bool
+    var meetingAccessEnabled: Bool
+    var onCallAccessEnabled: Bool
+    var ordersPlacementAccessEnabled: Bool
+    var accidentSketchAccessEnabled: Bool
     var allowedLawyerPowerIds: [String]
 
     init(name: String,
@@ -41,6 +49,14 @@ struct UserProfile: Codable {
          documentsAccessEnabled: Bool = false,
          myUploadsAccessEnabled: Bool = false,
          scannerOnlyMode: Bool = true,
+         isProcurementOfficer: Bool = false,
+         dashboardAccessEnabled: Bool = true,
+         requestsAccessEnabled: Bool = true,
+         tasksAccessEnabled: Bool = true,
+         meetingAccessEnabled: Bool = true,
+         onCallAccessEnabled: Bool = true,
+         ordersPlacementAccessEnabled: Bool = true,
+         accidentSketchAccessEnabled: Bool = true,
          allowedLawyerPowerIds: [String] = []) {
         self.name = name
         self.roleRaw = roleRaw
@@ -57,6 +73,14 @@ struct UserProfile: Codable {
         self.documentsAccessEnabled = documentsAccessEnabled
         self.myUploadsAccessEnabled = myUploadsAccessEnabled
         self.scannerOnlyMode = scannerOnlyMode
+        self.isProcurementOfficer = isProcurementOfficer
+        self.dashboardAccessEnabled = dashboardAccessEnabled
+        self.requestsAccessEnabled = requestsAccessEnabled
+        self.tasksAccessEnabled = tasksAccessEnabled
+        self.meetingAccessEnabled = meetingAccessEnabled
+        self.onCallAccessEnabled = onCallAccessEnabled
+        self.ordersPlacementAccessEnabled = ordersPlacementAccessEnabled
+        self.accidentSketchAccessEnabled = accidentSketchAccessEnabled
         self.allowedLawyerPowerIds = allowedLawyerPowerIds
     }
 
@@ -76,6 +100,14 @@ struct UserProfile: Codable {
         self.documentsAccessEnabled = user.documentsAccessEnabled
         self.myUploadsAccessEnabled = user.myUploadsAccessEnabled
         self.scannerOnlyMode = user.scannerOnlyMode
+        self.isProcurementOfficer = user.isProcurementOfficer
+        self.dashboardAccessEnabled = user.dashboardAccessEnabled
+        self.requestsAccessEnabled = user.requestsAccessEnabled
+        self.tasksAccessEnabled = user.tasksAccessEnabled
+        self.meetingAccessEnabled = user.meetingAccessEnabled
+        self.onCallAccessEnabled = user.onCallAccessEnabled
+        self.ordersPlacementAccessEnabled = user.ordersPlacementAccessEnabled
+        self.accidentSketchAccessEnabled = user.accidentSketchAccessEnabled
         self.allowedLawyerPowerIds = user.allowedLawyerPowerIds
     }
 
@@ -99,16 +131,34 @@ struct UserProfile: Codable {
         self.receiveAdminPushes = (data["receiveAdminPushes"] as? Bool) ?? false
         self.meetingSchedulePushEnabled =
             (data["meetingSchedulePushEnabled"] as? Bool) ?? true
+        let role = UserRole(rawValue: roleRaw) ?? .employee
+        let defaults = HomeTileAccessDefaults.forRole(role)
         self.commissionAccessEnabled =
-            (data["commissionAccessEnabled"] as? Bool) ?? false
+            (data["commissionAccessEnabled"] as? Bool) ?? defaults.commissionAccessEnabled
         self.stargutachterAccessEnabled =
-            (data["stargutachterAccessEnabled"] as? Bool) ?? false
+            (data["stargutachterAccessEnabled"] as? Bool) ?? defaults.stargutachterAccessEnabled
         self.documentsAccessEnabled =
-            (data["documentsAccessEnabled"] as? Bool) ?? false
+            (data["documentsAccessEnabled"] as? Bool) ?? defaults.documentsAccessEnabled
         self.myUploadsAccessEnabled =
-            (data["myUploadsAccessEnabled"] as? Bool) ?? false
+            (data["myUploadsAccessEnabled"] as? Bool) ?? defaults.myUploadsAccessEnabled
         self.scannerOnlyMode =
-            (data["scannerOnlyMode"] as? Bool) ?? true
+            (data["scannerOnlyMode"] as? Bool) ?? defaults.scannerOnlyMode
+        self.isProcurementOfficer =
+            (data["isProcurementOfficer"] as? Bool) ?? false
+        self.dashboardAccessEnabled =
+            (data["dashboardAccessEnabled"] as? Bool) ?? defaults.dashboardAccessEnabled
+        self.requestsAccessEnabled =
+            (data["requestsAccessEnabled"] as? Bool) ?? defaults.requestsAccessEnabled
+        self.tasksAccessEnabled =
+            (data["tasksAccessEnabled"] as? Bool) ?? defaults.tasksAccessEnabled
+        self.meetingAccessEnabled =
+            (data["meetingAccessEnabled"] as? Bool) ?? defaults.meetingAccessEnabled
+        self.onCallAccessEnabled =
+            (data["onCallAccessEnabled"] as? Bool) ?? defaults.onCallAccessEnabled
+        self.ordersPlacementAccessEnabled =
+            (data["ordersPlacementAccessEnabled"] as? Bool) ?? defaults.ordersPlacementAccessEnabled
+        self.accidentSketchAccessEnabled =
+            (data["accidentSketchAccessEnabled"] as? Bool) ?? defaults.accidentSketchAccessEnabled
         self.allowedLawyerPowerIds = (data["allowedLawyerPowerIds"] as? [String]) ?? []
         if let ts = data["birthday"] as? Timestamp {
             self.birthday = ts.dateValue()
@@ -135,6 +185,14 @@ struct UserProfile: Codable {
             "documentsAccessEnabled": documentsAccessEnabled,
             "myUploadsAccessEnabled": myUploadsAccessEnabled,
             "scannerOnlyMode": scannerOnlyMode,
+            "isProcurementOfficer": isProcurementOfficer,
+            "dashboardAccessEnabled": dashboardAccessEnabled,
+            "requestsAccessEnabled": requestsAccessEnabled,
+            "tasksAccessEnabled": tasksAccessEnabled,
+            "meetingAccessEnabled": meetingAccessEnabled,
+            "onCallAccessEnabled": onCallAccessEnabled,
+            "ordersPlacementAccessEnabled": ordersPlacementAccessEnabled,
+            "accidentSketchAccessEnabled": accidentSketchAccessEnabled,
             "allowedLawyerPowerIds": allowedLawyerPowerIds
         ]
         // Keep this dictionary compatible with current Firestore rules.
@@ -165,6 +223,14 @@ struct UserProfile: Codable {
             stargutachterAccessEnabled: stargutachterAccessEnabled,
             documentsAccessEnabled: documentsAccessEnabled,
             myUploadsAccessEnabled: myUploadsAccessEnabled,
+            dashboardAccessEnabled: dashboardAccessEnabled,
+            requestsAccessEnabled: requestsAccessEnabled,
+            tasksAccessEnabled: tasksAccessEnabled,
+            meetingAccessEnabled: meetingAccessEnabled,
+            onCallAccessEnabled: onCallAccessEnabled,
+            ordersPlacementAccessEnabled: ordersPlacementAccessEnabled,
+            accidentSketchAccessEnabled: accidentSketchAccessEnabled,
+            isProcurementOfficer: isProcurementOfficer,
             scannerOnlyMode: scannerOnlyMode,
             allowedLawyerPowerIds: allowedLawyerPowerIds
         )
@@ -303,6 +369,7 @@ struct TaskDTO {
     var details: String
     var dueDate: Timestamp?
     var statusRaw: String
+    var kindRaw: String?
     var assignedUserId: String
     var creatorUserId: String
     var createdAt: Timestamp
@@ -323,6 +390,8 @@ struct TaskDTO {
         self.title = title
         self.details = details
         self.statusRaw = statusRaw
+        self.kindRaw = (data["kindRaw"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         self.assignedUserId = assignedUserId.trimmingCharacters(in: .whitespacesAndNewlines)
         self.creatorUserId = creatorUserId.trimmingCharacters(in: .whitespacesAndNewlines)
         self.createdAt = createdAt
@@ -337,6 +406,7 @@ struct TaskDTO {
         self.title = task.title
         self.details = task.details
         self.statusRaw = task.status.rawValue
+        self.kindRaw = task.kind.rawValue
         self.assignedUserId = task.assignedUserId.trimmingCharacters(in: .whitespacesAndNewlines)
         self.creatorUserId = task.creatorUserId.trimmingCharacters(in: .whitespacesAndNewlines)
         self.createdAt = Timestamp(date: task.createdAt)
@@ -351,6 +421,7 @@ struct TaskDTO {
             "title": title,
             "details": details,
             "statusRaw": statusRaw,
+            "kindRaw": kindRaw ?? TaskKind.general.rawValue,
             "assignedUserId": assignedUserId,
             "creatorUserId": creatorUserId,
             "createdAt": createdAt

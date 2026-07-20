@@ -175,6 +175,14 @@ extension AppState {
                     a.documentsAccessEnabled != b.documentsAccessEnabled ||
                     a.myUploadsAccessEnabled != b.myUploadsAccessEnabled ||
                     a.scannerOnlyMode != b.scannerOnlyMode ||
+                    a.isProcurementOfficer != b.isProcurementOfficer ||
+                    a.dashboardAccessEnabled != b.dashboardAccessEnabled ||
+                    a.requestsAccessEnabled != b.requestsAccessEnabled ||
+                    a.tasksAccessEnabled != b.tasksAccessEnabled ||
+                    a.meetingAccessEnabled != b.meetingAccessEnabled ||
+                    a.onCallAccessEnabled != b.onCallAccessEnabled ||
+                    a.ordersPlacementAccessEnabled != b.ordersPlacementAccessEnabled ||
+                    a.accidentSketchAccessEnabled != b.accidentSketchAccessEnabled ||
                     a.allowedLawyerPowerIds != b.allowedLawyerPowerIds {
                     same = false
                     break

@@ -6,11 +6,16 @@ import FirebaseFunctions
 extension AppState {
     // MARK: - Task Management
 
+    func procurementOfficerUser() -> User? {
+        TaskProcurement.resolveOfficer(in: users)
+    }
+
     func createTask(title: String,
                     details: String,
                     dueDate: Date?,
                     assignedUser: User,
-                    creator: User) {
+                    creator: User,
+                    kind: TaskKind = .general) {
         let creatorUid = canonicalCurrentUid(fallback: creator) ?? creator.id
         let assignedUid = normalizedIdentity(assignedUser.id)
 
@@ -20,6 +25,7 @@ extension AppState {
             details: details,
             dueDate: dueDate,
             status: .open,
+            kind: kind,
             assignedUserId: assignedUid.isEmpty ? assignedUser.id : assignedUid,
             creatorUserId: normalizedIdentity(creatorUid),
             createdAt: Date(),
@@ -514,6 +520,7 @@ extension AppState {
             guard let uuid = UUID(uuidString: dto.id) else { return nil }
 
             let status = TaskStatus(rawValue: dto.statusRaw) ?? .open
+            let kind = TaskKind(rawValue: dto.kindRaw ?? "") ?? .general
 
             return Task(
                 id: uuid,
@@ -521,6 +528,7 @@ extension AppState {
                 details: dto.details,
                 dueDate: dto.dueDate?.dateValue(),
                 status: status,
+                kind: kind,
                 assignedUserId: normalizedIdentity(dto.assignedUserId),
                 creatorUserId: normalizedIdentity(dto.creatorUserId),
                 createdAt: dto.createdAt.dateValue(),

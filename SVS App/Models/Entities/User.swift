@@ -28,6 +28,22 @@ struct User: Identifiable, Hashable, Codable {
     var documentsAccessEnabled: Bool = false
     /// Kachel „Meine Gutachten“ in Mein Bereich.
     var myUploadsAccessEnabled: Bool = false
+    /// Kachel „Dashboard“ in Mein Bereich.
+    var dashboardAccessEnabled: Bool = true
+    /// Kachel „Abwesenheiten“ in Mein Bereich.
+    var requestsAccessEnabled: Bool = true
+    /// Kachel „Aufgaben“ in Mein Bereich.
+    var tasksAccessEnabled: Bool = true
+    /// Kachel „Meeting“ in Mein Bereich.
+    var meetingAccessEnabled: Bool = true
+    /// Kachel „Bereitschaft“ in Mein Bereich.
+    var onCallAccessEnabled: Bool = true
+    /// Kachel „Bestellungen aufgeben“ in Mein Bereich.
+    var ordersPlacementAccessEnabled: Bool = true
+    /// Kachel „Schadenhergang“ in Mein Bereich.
+    var accidentSketchAccessEnabled: Bool = true
+    /// Erhält Bestellanfragen von Mitarbeitern (Büromaterial etc.).
+    var isProcurementOfficer: Bool = false
     /// Versteckt „Mein Bereich“ – nur Scanner und Menü.
     var scannerOnlyMode: Bool = true
     /// Opt-in-Liste der sichtbaren Anwaltsvollmachten (leer = keine).
@@ -59,5 +75,9 @@ struct User: Identifiable, Hashable, Codable {
 
     mutating func applyDefaultEmployeeAccess() {
         EmployeeAppAccessTemplate.allOff.apply(to: &self)
+    }
+
+    mutating func applyDefaultHomeAccessForRole() {
+        HomeTileAccessDefaults.forRole(role).apply(to: &self)
     }
 }

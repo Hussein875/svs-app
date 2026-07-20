@@ -122,8 +122,7 @@ extension AppState {
             let result = try await functions.httpsCallable("adminCreateUserInvite").call(payload)
             
             if let data = result.data as? [String: Any], (data["ok"] as? Bool) == true {
-                if role == .employee,
-                   let uid = data["uid"] as? String,
+                if let uid = data["uid"] as? String,
                    let employeeAccess {
                     var newUser = User(
                         id: uid,
@@ -134,7 +133,12 @@ extension AppState {
                         email: email,
                         birthday: birthday
                     )
-                    newUser = employeeAccess.merged(into: newUser)
+                    if role == .employee {
+                        newUser = employeeAccess.merged(into: newUser)
+                    } else {
+                        newUser.applyDefaultHomeAccessForRole()
+                        newUser = employeeAccess.merged(into: newUser)
+                    }
                     updateUser(newUser)
                 }
 
