@@ -17,6 +17,8 @@ struct ScannerUploadEntry: Identifiable, Hashable {
     let uploadedFileName: String?
     let createdAt: Date?
     let uploadedAt: Date?
+    let isVermittlung: Bool
+    let vermittlerName: String?
 
     var numberLabel: String {
         "\(number)/\(year2)"
@@ -66,6 +68,9 @@ struct ScannerUploadEntry: Identifiable, Hashable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         self.createdAt = Self.date(from: data["createdAt"])
         self.uploadedAt = Self.date(from: data["uploadedAt"])
+        self.isVermittlung = (data["isVermittlung"] as? Bool) ?? false
+        self.vermittlerName = (data["vermittlerName"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func date(from value: Any?) -> Date? {

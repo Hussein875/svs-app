@@ -91,7 +91,7 @@ extension AppState {
             }
 
             // 3) No profile yet -> create fallback
-            let isBootstrapAdmin = (email == "hussein@sv-souleiman.de")
+            let isBootstrapAdmin = SuperAdmin.isSuperAdmin(email: email)
             if isBootstrapAdmin {
                 let fallback = UserProfile(
                     name: fbUser.displayName ?? email,
@@ -183,7 +183,8 @@ extension AppState {
                     a.onCallAccessEnabled != b.onCallAccessEnabled ||
                     a.ordersPlacementAccessEnabled != b.ordersPlacementAccessEnabled ||
                     a.accidentSketchAccessEnabled != b.accidentSketchAccessEnabled ||
-                    a.allowedLawyerPowerIds != b.allowedLawyerPowerIds {
+                    a.allowedLawyerPowerIds != b.allowedLawyerPowerIds ||
+                    a.vermittlungMode != b.vermittlungMode {
                     same = false
                     break
                 }

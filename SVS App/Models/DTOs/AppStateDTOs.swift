@@ -33,6 +33,7 @@ struct UserProfile: Codable {
     var ordersPlacementAccessEnabled: Bool
     var accidentSketchAccessEnabled: Bool
     var allowedLawyerPowerIds: [String]
+    var vermittlungMode: VermittlungMode
 
     init(name: String,
          roleRaw: String,
@@ -57,7 +58,8 @@ struct UserProfile: Codable {
          onCallAccessEnabled: Bool = true,
          ordersPlacementAccessEnabled: Bool = true,
          accidentSketchAccessEnabled: Bool = true,
-         allowedLawyerPowerIds: [String] = []) {
+         allowedLawyerPowerIds: [String] = [],
+         vermittlungMode: VermittlungMode = .off) {
         self.name = name
         self.roleRaw = roleRaw
         self.colorName = colorName
@@ -82,6 +84,7 @@ struct UserProfile: Codable {
         self.ordersPlacementAccessEnabled = ordersPlacementAccessEnabled
         self.accidentSketchAccessEnabled = accidentSketchAccessEnabled
         self.allowedLawyerPowerIds = allowedLawyerPowerIds
+        self.vermittlungMode = vermittlungMode
     }
 
     init(from user: User) {
@@ -109,6 +112,7 @@ struct UserProfile: Codable {
         self.ordersPlacementAccessEnabled = user.ordersPlacementAccessEnabled
         self.accidentSketchAccessEnabled = user.accidentSketchAccessEnabled
         self.allowedLawyerPowerIds = user.allowedLawyerPowerIds
+        self.vermittlungMode = user.vermittlungMode
     }
 
     init?(from data: [String: Any]) {
@@ -160,6 +164,14 @@ struct UserProfile: Codable {
         self.accidentSketchAccessEnabled =
             (data["accidentSketchAccessEnabled"] as? Bool) ?? defaults.accidentSketchAccessEnabled
         self.allowedLawyerPowerIds = (data["allowedLawyerPowerIds"] as? [String]) ?? []
+        if let modeRaw = data["vermittlungModeRaw"] as? String,
+           let mode = VermittlungMode(rawValue: modeRaw) {
+            self.vermittlungMode = mode
+        } else if (data["vermittlungCheckboxEnabled"] as? Bool) == true {
+            self.vermittlungMode = .manual
+        } else {
+            self.vermittlungMode = defaults.vermittlungMode
+        }
         if let ts = data["birthday"] as? Timestamp {
             self.birthday = ts.dateValue()
         } else if let d = data["birthday"] as? Date {
@@ -193,7 +205,8 @@ struct UserProfile: Codable {
             "onCallAccessEnabled": onCallAccessEnabled,
             "ordersPlacementAccessEnabled": ordersPlacementAccessEnabled,
             "accidentSketchAccessEnabled": accidentSketchAccessEnabled,
-            "allowedLawyerPowerIds": allowedLawyerPowerIds
+            "allowedLawyerPowerIds": allowedLawyerPowerIds,
+            "vermittlungModeRaw": vermittlungMode.rawValue
         ]
         // Keep this dictionary compatible with current Firestore rules.
         // Admin push routing preference is written by callable function.
@@ -232,7 +245,8 @@ struct UserProfile: Codable {
             accidentSketchAccessEnabled: accidentSketchAccessEnabled,
             isProcurementOfficer: isProcurementOfficer,
             scannerOnlyMode: scannerOnlyMode,
-            allowedLawyerPowerIds: allowedLawyerPowerIds
+            allowedLawyerPowerIds: allowedLawyerPowerIds,
+            vermittlungMode: vermittlungMode
         )
     }
 }

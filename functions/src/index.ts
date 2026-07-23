@@ -95,6 +95,27 @@ async function ensureCallerIsAdmin(callerUid: string): Promise<void> {
   }
 }
 
+const SUPER_ADMIN_EMAIL = "hussein.souleiman@sv-souleiman.de";
+
+/**
+ * Ensures the caller is the designated super admin (Hussein).
+ *
+ * @param {string} callerUid Auth uid of the callable invoker.
+ * @return {Promise<void>} Resolves for super admin, throws otherwise.
+ */
+async function ensureCallerIsSuperAdmin(callerUid: string): Promise<void> {
+  await ensureCallerIsAdmin(callerUid);
+
+  const callerRecord = await admin.auth().getUser(callerUid);
+  const email = normalizeEmail(callerRecord.email ?? "");
+  if (email !== SUPER_ADMIN_EMAIL) {
+    throw new HttpsError(
+      "permission-denied",
+      "Nur der Superadmin darf Passwörter setzen."
+    );
+  }
+}
+
 /**
  * Callable Function (Admin-only):
  * - Checks caller is authenticated and has roleRaw==admin in Firestore/<uid>
@@ -239,6 +260,78 @@ export const adminDeleteUser = onCall(async (request) => {
   }
 
   return {ok: true, uid};
+});
+
+/**
+ * Callable Function (Admin-only):
+ * Sets a new Firebase Auth password for a user by uid or email.
+ * Existing passwords cannot be read — only replaced.
+ */
+export const adminSetUserPassword = onCall(async (request) => {
+  const callerUid = request.auth?.uid;
+  if (!callerUid) {
+    throw new HttpsError("unauthenticated", "Not signed in.");
+  }
+
+  await ensureCallerIsSuperAdmin(callerUid);
+
+  const data = request.data ?? {};
+  const password = String(data.password ?? "");
+  let uid = String(data.uid ?? "").trim();
+  const email = normalizeEmail(data.email);
+
+  if (!password || password.length < 6) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Das Passwort muss mindestens 6 Zeichen haben."
+    );
+  }
+  if (password.length > 128) {
+    throw new HttpsError(
+      "invalid-argument",
+      "Das Passwort darf maximal 128 Zeichen lang sein."
+    );
+  }
+
+  let userRecord: admin.auth.UserRecord;
+  try {
+    if (uid && !uid.startsWith("invite:")) {
+      userRecord = await admin.auth().getUser(uid);
+    } else if (email) {
+      userRecord = await admin.auth().getUserByEmail(email);
+      uid = userRecord.uid;
+    } else {
+      throw new HttpsError(
+        "invalid-argument",
+        "uid oder E-Mail erforderlich."
+      );
+    }
+  } catch (e: unknown) {
+    const code = String((e as {code?: unknown})?.code ?? "");
+    if (code === "auth/user-not-found") {
+      throw new HttpsError(
+        "not-found",
+        "Kein Login-Account für diese E-Mail. " +
+        "Bitte Nutzer zuerst vollständig anlegen."
+      );
+    }
+    if (e instanceof HttpsError) {
+      throw e;
+    }
+    const message = e instanceof Error ? e.message : String(e);
+    throw new HttpsError(
+      "internal",
+      "Passwort konnte nicht gesetzt werden: " + message
+    );
+  }
+
+  await admin.auth().updateUser(uid, {password});
+
+  return {
+    ok: true,
+    uid,
+    email: userRecord.email ?? email,
+  };
 });
 
 /**
@@ -1872,6 +1965,7 @@ type UploadScanToDriveBody = {
   fileName: string;
   reservationId?: string;
   useReservationFolder?: boolean;
+  isVermittlung?: boolean;
 };
 
 const SCANS_DRIVE_UPLOAD_FOLDER_ID = "19n1REUlYfwdzrj3NntMqgzoQ05jg2T9f";
@@ -3254,6 +3348,7 @@ export const uploadScanToDrive = onRequest(
       const reservationId = String(body.reservationId ?? "").trim();
       const fileName = String(body.fileName ?? "").trim();
       const useReservationFolder = body.useReservationFolder === true;
+      const isVermittlung = body.isVermittlung === true;
 
       if (!storagePath) {
         res.status(400).json({ok: false, error: "storagePath required"});
@@ -3351,7 +3446,7 @@ export const uploadScanToDrive = onRequest(
       }
 
       if (reservationRef) {
-        await reservationRef.set({
+        const uploadPatch: Record<string, unknown> = {
           uploadFolderId: targetFolderId,
           driveFolderReady: true,
           status: "uploaded",
@@ -3359,7 +3454,25 @@ export const uploadScanToDrive = onRequest(
           uploadedFileName: fileName,
           uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        }, {merge: true});
+          isVermittlung,
+        };
+
+        if (isVermittlung) {
+          const userSnap = await admin.firestore()
+            .collection("users")
+            .doc(callerUid)
+            .get();
+          const userData = userSnap.data() ?? {};
+          uploadPatch.vermittlerUid = callerUid;
+          uploadPatch.vermittlerName = String(userData.name ?? "").trim();
+          uploadPatch.vermittlerEmail = normalizeEmail(
+            String(userData.email ?? "")
+          );
+          uploadPatch.vermittlungMarkedAt =
+            admin.firestore.FieldValue.serverTimestamp();
+        }
+
+        await reservationRef.set(uploadPatch, {merge: true});
       }
 
       try {

@@ -48,6 +48,8 @@ struct User: Identifiable, Hashable, Codable {
     var scannerOnlyMode: Bool = true
     /// Opt-in-Liste der sichtbaren Anwaltsvollmachten (leer = keine).
     var allowedLawyerPowerIds: [String] = []
+    /// Wie Vermittlungen beim Gutachten-Upload erfasst werden.
+    var vermittlungMode: VermittlungMode = .off
 
     var color: Color {
         Color.svsAccentColor(from: colorName)

@@ -218,7 +218,7 @@ struct MenuView: View {
                     Text(user.name)
                         .font(.headline)
                         .foregroundColor(.primary)
-                    Text(germanRoleName(user.role))
+                    Text(SuperAdmin.displayRoleTitle(for: user))
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -489,17 +489,6 @@ struct MenuView: View {
                     }
                 }
             }
-        }
-    }
-
-    private func germanRoleName(_ role: UserRole) -> String {
-        switch role {
-        case .admin:
-            return "Administrator"
-        case .employee:
-            return "Mitarbeiter"
-        case .expert:
-            return "Sachverständiger"
         }
     }
 

@@ -107,6 +107,26 @@ struct ScannerScreen: View {
     @State private var driveUploadSuccessMessage: String? = nil
     @State private var driveUploadFeedback: DriveUploadFeedback? = nil
     @State private var showAbtretungserklaerungFunnel = false
+    @State private var isVermittlungCase = false
+
+    private var vermittlungMode: VermittlungMode {
+        appState.currentUser?.vermittlungMode ?? .off
+    }
+
+    private var showsVermittlungCheckbox: Bool {
+        vermittlungMode == .manual
+    }
+
+    private var shouldMarkVermittlungOnUpload: Bool {
+        switch vermittlungMode {
+        case .off:
+            return false
+        case .manual:
+            return isVermittlungCase
+        case .automatic:
+            return true
+        }
+    }
 
     private var userAccentColor: Color {
         Color.svsAccentColor(from: appState.currentUser?.colorName)
@@ -201,7 +221,9 @@ struct ScannerScreen: View {
         let numberPart = normalizedScanNumber ?? "none"
         let namePart = normalizedScanName ?? "none"
         let userPart = normalizedScannerUserName ?? "none"
-        return "scan__nr_\(numberPart)__jahr_\(activeYear2)__name_\(namePart)__user_\(userPart)"
+        let vermittlungPart =
+            shouldMarkVermittlungOnUpload ? "__vermittlung_ja" : ""
+        return "scan__nr_\(numberPart)__jahr_\(activeYear2)__name_\(namePart)__user_\(userPart)\(vermittlungPart)"
     }
 
     private var scannerDisplayFileName: String {
@@ -397,6 +419,44 @@ struct ScannerScreen: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
                 )
+
+            if showsVermittlungCheckbox {
+                Toggle(isOn: $isVermittlungCase) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Meine Vermittlung")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Haken setzen, wenn dies dein vermittelter Kunde ist.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(userAccentColor.opacity(0.18), lineWidth: 1)
+                )
+                .disabled(reservedScan == nil && trimmedScanName.isEmpty)
+                .opacity(reservedScan == nil && trimmedScanName.isEmpty ? 0.55 : 1.0)
+            } else if vermittlungMode == .automatic {
+                HStack(spacing: 8) {
+                    Image(systemName: "person.crop.circle.badge.checkmark")
+                        .foregroundColor(userAccentColor)
+                    Text("Eigene Vermittlung wird beim Upload automatisch erfasst.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(userAccentColor.opacity(0.08))
+                )
+            }
 
             if let reservedScan {
                 VStack(alignment: .leading, spacing: 10) {
@@ -923,7 +983,8 @@ struct ScannerScreen: View {
                 idToken: idToken,
                 storagePath: storagePath,
                 reservationId: reservedScan.reservationId,
-                fileName: finalName
+                fileName: finalName,
+                isVermittlung: shouldMarkVermittlungOnUpload
             )
 
             let fotosFolderURL = uploadResult.fotosFolderURL
@@ -960,7 +1021,8 @@ struct ScannerScreen: View {
         idToken: String,
         storagePath: String,
         reservationId: String?,
-        fileName: String
+        fileName: String,
+        isVermittlung: Bool = false
     ) async throws -> DriveUploadResult {
         guard let uploadScanToDriveEndpoint else {
             throw NSError(
@@ -981,11 +1043,14 @@ struct ScannerScreen: View {
             forHTTPHeaderField: "Content-Type"
         )
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "storagePath": storagePath,
             "reservationId": reservationId as Any,
             "fileName": fileName,
         ]
+        if isVermittlung {
+            body["isVermittlung"] = true
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -1051,6 +1116,7 @@ struct ScannerScreen: View {
         scannedImages = []
         scannedPDFURL = nil
         scanName = ""
+        isVermittlungCase = false
         reservedScan = nil
         isPresentingShare = false
         syncScannerWidgetDisplay()

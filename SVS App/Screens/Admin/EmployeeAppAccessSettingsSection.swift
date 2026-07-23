@@ -21,6 +21,7 @@ struct EmployeeAppAccessSettingsSection: View {
     @Binding var ordersPlacementAccessEnabled: Bool
     @Binding var accidentSketchAccessEnabled: Bool
     @Binding var allowedLawyerPowerIds: [String]
+    @Binding var vermittlungMode: VermittlungMode
     @Binding var selectedTemplate: EmployeeAppAccessTemplate?
 
     private var lawyerPowerDocuments: [CompanyDocument] {
@@ -60,6 +61,17 @@ struct EmployeeAppAccessSettingsSection: View {
             Toggle("Bestellungen aufgeben", isOn: manualBinding($ordersPlacementAccessEnabled))
             Toggle("Schadenhergang", isOn: manualBinding($accidentSketchAccessEnabled))
             Toggle("Stargutachter", isOn: manualBinding($stargutachterAccessEnabled))
+        }
+
+        Section(
+            header: Text("Scanner – Vermittlung"),
+            footer: Text(vermittlungMode.germanDescription)
+        ) {
+            Picker("Vermittlung", selection: manualBinding($vermittlungMode)) {
+                ForEach(VermittlungMode.allCases) { mode in
+                    Text(mode.germanTitle).tag(mode)
+                }
+            }
         }
 
         Section {
@@ -109,7 +121,8 @@ struct EmployeeAppAccessSettingsSection: View {
             onCallAccessEnabled: onCallAccessEnabled,
             ordersPlacementAccessEnabled: ordersPlacementAccessEnabled,
             accidentSketchAccessEnabled: accidentSketchAccessEnabled,
-            allowedLawyerPowerIds: allowedLawyerPowerIds
+            allowedLawyerPowerIds: allowedLawyerPowerIds,
+            vermittlungMode: vermittlungMode
         )
     }
 
@@ -127,6 +140,17 @@ struct EmployeeAppAccessSettingsSection: View {
         ordersPlacementAccessEnabled = draft.ordersPlacementAccessEnabled
         accidentSketchAccessEnabled = draft.accidentSketchAccessEnabled
         allowedLawyerPowerIds = draft.allowedLawyerPowerIds
+        vermittlungMode = draft.vermittlungMode
+    }
+
+    private func manualBinding(_ value: Binding<VermittlungMode>) -> Binding<VermittlungMode> {
+        Binding(
+            get: { value.wrappedValue },
+            set: { newValue in
+                selectedTemplate = nil
+                value.wrappedValue = newValue
+            }
+        )
     }
 
     private func manualBinding(_ value: Binding<Bool>) -> Binding<Bool> {
@@ -171,7 +195,8 @@ private extension EmployeeAccessDraft {
         onCallAccessEnabled: Bool,
         ordersPlacementAccessEnabled: Bool,
         accidentSketchAccessEnabled: Bool,
-        allowedLawyerPowerIds: [String]
+        allowedLawyerPowerIds: [String],
+        vermittlungMode: VermittlungMode
     ) {
         self.scannerOnlyMode = scannerOnlyMode
         self.documentsAccessEnabled = documentsAccessEnabled
@@ -186,6 +211,7 @@ private extension EmployeeAccessDraft {
         self.ordersPlacementAccessEnabled = ordersPlacementAccessEnabled
         self.accidentSketchAccessEnabled = accidentSketchAccessEnabled
         self.allowedLawyerPowerIds = allowedLawyerPowerIds
+        self.vermittlungMode = vermittlungMode
     }
 }
 

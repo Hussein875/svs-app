@@ -73,6 +73,9 @@ struct MyScannerUploadsView: View {
                                 .foregroundColor(.primary)
 
                             statusBadge(for: upload)
+                            if upload.isVermittlung {
+                                vermittlungBadge(for: upload)
+                            }
                         }
 
                         Text(upload.subtitle)
@@ -98,6 +101,20 @@ struct MyScannerUploadsView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    @ViewBuilder
+    private func vermittlungBadge(for upload: ScannerUploadEntry) -> some View {
+        let name = upload.vermittlerName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        Text(name.isEmpty ? "Vermittlung" : "Vermittlung · \(name)")
+            .font(.caption2.weight(.semibold))
+            .foregroundColor(accent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule()
+                    .fill(accent.opacity(0.12))
+            )
     }
 
     @ViewBuilder

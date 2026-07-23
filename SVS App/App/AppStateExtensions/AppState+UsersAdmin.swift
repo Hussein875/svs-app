@@ -97,6 +97,40 @@ extension AppState {
     }
 
     @MainActor
+    func adminSetUserPassword(uid: String?, email: String, password: String) async -> String? {
+        guard SuperAdmin.isSuperAdmin(user: currentUser) else {
+            return "Nur der Superadmin darf Passwörter setzen."
+        }
+
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard trimmedPassword.count >= 6 else {
+            return "Das Passwort muss mindestens 6 Zeichen haben."
+        }
+
+        var payload: [String: Any] = [
+            "email": cleanEmail,
+            "password": trimmedPassword
+        ]
+        if let uid, !uid.hasPrefix("invite:") {
+            payload["uid"] = uid
+        }
+
+        do {
+            let functions = Functions.functions(region: "us-central1")
+            let result = try await functions.httpsCallable("adminSetUserPassword").call(payload)
+            guard let data = result.data as? [String: Any], (data["ok"] as? Bool) == true else {
+                return "Passwort konnte nicht gesetzt werden."
+            }
+            uiErrorMessage = nil
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    @MainActor
     func adminCreateUserViaFunction(name: String,
                                     email: String,
                                     role: UserRole,

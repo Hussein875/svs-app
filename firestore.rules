@@ -29,7 +29,7 @@ service cloud.firestore {
 
     // Optionaler Bootstrap-Admin (nur behalten, wenn du das wirklich willst)
     function isBootstrapAdminEmail() {
-      return myEmail() == "hussein@sv-souleiman.de";
+      return myEmail() == "hussein.souleiman@sv-souleiman.de";
     }
 
     function invitePathForMe() {
@@ -68,7 +68,8 @@ service cloud.firestore {
         "accidentSketchAccessEnabled",
         "isProcurementOfficer",
         "scannerOnlyMode",
-        "allowedLawyerPowerIds"
+        "allowedLawyerPowerIds",
+        "vermittlungModeRaw"
       ]) &&
       data.name is string &&
       data.roleRaw is string &&
@@ -93,7 +94,8 @@ service cloud.firestore {
       (!("accidentSketchAccessEnabled" in data) || data.accidentSketchAccessEnabled is bool) &&
       (!("isProcurementOfficer" in data) || data.isProcurementOfficer is bool) &&
       (!("scannerOnlyMode" in data) || data.scannerOnlyMode is bool) &&
-      (!("allowedLawyerPowerIds" in data) || data.allowedLawyerPowerIds is list);
+      (!("allowedLawyerPowerIds" in data) || data.allowedLawyerPowerIds is list) &&
+      (!("vermittlungModeRaw" in data) || data.vermittlungModeRaw is string);
     }
 
     function userDocHasCompleteProfileCore(data) {

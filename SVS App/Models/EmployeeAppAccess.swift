@@ -81,6 +81,7 @@ struct EmployeeAccessDraft: Equatable {
     var ordersPlacementAccessEnabled: Bool = true
     var accidentSketchAccessEnabled: Bool = true
     var allowedLawyerPowerIds: [String] = []
+    var vermittlungMode: VermittlungMode = .off
 
     init() {}
 
@@ -98,6 +99,7 @@ struct EmployeeAccessDraft: Equatable {
         ordersPlacementAccessEnabled = user.ordersPlacementAccessEnabled
         accidentSketchAccessEnabled = user.accidentSketchAccessEnabled
         allowedLawyerPowerIds = user.allowedLawyerPowerIds
+        vermittlungMode = user.vermittlungMode
     }
 
     mutating func apply(template: EmployeeAppAccessTemplate) {
@@ -128,6 +130,7 @@ struct EmployeeAccessDraft: Equatable {
         updated.ordersPlacementAccessEnabled = ordersPlacementAccessEnabled
         updated.accidentSketchAccessEnabled = accidentSketchAccessEnabled
         updated.allowedLawyerPowerIds = allowedLawyerPowerIds
+        updated.vermittlungMode = vermittlungMode
         return updated
     }
 }
@@ -171,6 +174,7 @@ struct HomeTileAccessDefaults {
     var ordersPlacementAccessEnabled: Bool
     var accidentSketchAccessEnabled: Bool
     var scannerOnlyMode: Bool
+    var vermittlungMode: VermittlungMode
 
     static func forRole(_ role: UserRole) -> HomeTileAccessDefaults {
         switch role {
@@ -187,7 +191,8 @@ struct HomeTileAccessDefaults {
                 onCallAccessEnabled: false,
                 ordersPlacementAccessEnabled: true,
                 accidentSketchAccessEnabled: true,
-                scannerOnlyMode: true
+                scannerOnlyMode: true,
+                vermittlungMode: .automatic
             )
         case .admin, .expert:
             return HomeTileAccessDefaults(
@@ -202,7 +207,8 @@ struct HomeTileAccessDefaults {
                 onCallAccessEnabled: true,
                 ordersPlacementAccessEnabled: true,
                 accidentSketchAccessEnabled: true,
-                scannerOnlyMode: false
+                scannerOnlyMode: false,
+                vermittlungMode: role == .admin ? .manual : .automatic
             )
         }
     }
@@ -220,6 +226,7 @@ struct HomeTileAccessDefaults {
         user.ordersPlacementAccessEnabled = ordersPlacementAccessEnabled
         user.accidentSketchAccessEnabled = accidentSketchAccessEnabled
         user.scannerOnlyMode = scannerOnlyMode
+        user.vermittlungMode = vermittlungMode
     }
 }
 

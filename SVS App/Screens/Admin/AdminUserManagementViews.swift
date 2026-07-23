@@ -136,7 +136,7 @@ struct AdminUsersScreen: View {
 
                         Spacer()
 
-                        Text(roleText(for: user.role))
+                        Text(SuperAdmin.displayRoleTitle(for: user))
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -191,14 +191,6 @@ struct AdminUsersScreen: View {
                     .stroke((warning ? Color.red : user.color).opacity(0.12), lineWidth: 1)
             )
         }
-
-        private func roleText(for role: UserRole) -> String {
-            switch role {
-            case .admin: return "Admin"
-            case .employee: return "Mitarbeiter"
-            case .expert: return "Sachverständiger"
-            }
-        }
     }
 }
 
@@ -216,6 +208,7 @@ struct EditUserView: View {
     @State private var showNewRequest: Bool = false
     @State private var showPinResetAlert: Bool = false
     @State private var showLoginAlert: Bool = false
+    @State private var showSetPasswordSheet: Bool = false
     @State private var showDeleteConfirm: Bool = false
     @State private var showDeleteSuccess: Bool = false
     @State private var isDeletingUser: Bool = false
@@ -247,6 +240,7 @@ struct EditUserView: View {
         let accidentSketchAccessEnabled: Bool
         let isProcurementOfficer: Bool
         let allowedLawyerPowerIds: [String]
+        let vermittlungMode: VermittlungMode
     }
 
     private func normalizedBirthday(_ date: Date?) -> Date? {
@@ -275,7 +269,8 @@ struct EditUserView: View {
             ordersPlacementAccessEnabled: user.ordersPlacementAccessEnabled,
             accidentSketchAccessEnabled: user.accidentSketchAccessEnabled,
             isProcurementOfficer: user.isProcurementOfficer,
-            allowedLawyerPowerIds: user.allowedLawyerPowerIds
+            allowedLawyerPowerIds: user.allowedLawyerPowerIds,
+            vermittlungMode: user.vermittlungMode
         )
     }
 
@@ -302,10 +297,21 @@ struct EditUserView: View {
                 }
             }
 
-            Section(header: Text("Login"), footer: Text("Passwörter werden über Firebase Auth verwaltet.")) {
+            Section(
+                header: Text("Login"),
+                footer: Text("Bestehende Passwörter können nicht angezeigt werden. Du kannst ein neues Passwort setzen und es einmalig kopieren — oder eine Reset-E-Mail senden.")
+            ) {
                 Text(user.email)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
+
+                if SuperAdmin.isSuperAdmin(user: appState.currentUser) {
+                    Button {
+                        showSetPasswordSheet = true
+                    } label: {
+                        Label("Passwort setzen", systemImage: "key.fill")
+                    }
+                }
 
                 Button {
                     appState.sendPasswordReset(to: user.email)
@@ -366,6 +372,7 @@ struct EditUserView: View {
                 ordersPlacementAccessEnabled: binding(for: \.ordersPlacementAccessEnabled),
                 accidentSketchAccessEnabled: binding(for: \.accidentSketchAccessEnabled),
                 allowedLawyerPowerIds: binding(for: \.allowedLawyerPowerIds),
+                vermittlungMode: binding(for: \.vermittlungMode),
                 selectedTemplate: $selectedAccessTemplate
             )
 
@@ -401,7 +408,8 @@ struct EditUserView: View {
                         ordersPlacementAccessEnabled: user.ordersPlacementAccessEnabled,
                         accidentSketchAccessEnabled: user.accidentSketchAccessEnabled,
                         isProcurementOfficer: user.isProcurementOfficer,
-                        allowedLawyerPowerIds: user.allowedLawyerPowerIds
+                        allowedLawyerPowerIds: user.allowedLawyerPowerIds,
+                        vermittlungMode: user.vermittlungMode
                     )
                     dismiss()
                 }
@@ -436,6 +444,13 @@ struct EditUserView: View {
                 NewLeaveRequestView(preselectedUserId: user.id)
                     .environmentObject(appState)
             }
+        }
+        .sheet(isPresented: $showSetPasswordSheet) {
+            AdminSetPasswordSheet(
+                userEmail: user.email,
+                userUid: user.id.hasPrefix("invite:") ? nil : user.id
+            )
+            .environmentObject(appState)
         }
         .alert("Passwort-Reset", isPresented: $showLoginAlert) {
             Button("OK", role: .cancel) { }
@@ -494,7 +509,8 @@ struct EditUserView: View {
                     ordersPlacementAccessEnabled: user.ordersPlacementAccessEnabled,
                     accidentSketchAccessEnabled: user.accidentSketchAccessEnabled,
                     isProcurementOfficer: user.isProcurementOfficer,
-                    allowedLawyerPowerIds: user.allowedLawyerPowerIds
+                    allowedLawyerPowerIds: user.allowedLawyerPowerIds,
+                    vermittlungMode: user.vermittlungMode
                 )
             }
         }
@@ -640,6 +656,7 @@ struct AddUserView: View {
                 ordersPlacementAccessEnabled: $employeeAccess.ordersPlacementAccessEnabled,
                 accidentSketchAccessEnabled: $employeeAccess.accidentSketchAccessEnabled,
                 allowedLawyerPowerIds: $employeeAccess.allowedLawyerPowerIds,
+                vermittlungMode: $employeeAccess.vermittlungMode,
                 selectedTemplate: $selectedAccessTemplate
             )
 
@@ -738,5 +755,132 @@ struct AddUserView: View {
             from: nil,
             for: nil
         )
+    }
+}
+
+// MARK: - Admin Set Password Sheet
+
+struct AdminSetPasswordSheet: View {
+    let userEmail: String
+    let userUid: String?
+
+    @EnvironmentObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var password = ""
+    @State private var showPassword = false
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    @State private var showSuccessAlert = false
+    @State private var savedPassword = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        Group {
+                            if showPassword {
+                                TextField("Neues Passwort", text: $password)
+                                    .textContentType(.newPassword)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                            } else {
+                                SecureField("Neues Passwort", text: $password)
+                                    .textContentType(.newPassword)
+                            }
+                        }
+
+                        Button {
+                            showPassword.toggle()
+                        } label: {
+                            Image(systemName: showPassword ? "eye.slash" : "eye")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(showPassword ? "Passwort verbergen" : "Passwort anzeigen")
+                    }
+
+                    Button("Zufälliges Passwort erzeugen") {
+                        password = Self.generatePassword()
+                        showPassword = true
+                    }
+                } footer: {
+                    Text("Mindestens 6 Zeichen. Das Passwort wird nach dem Speichern einmalig angezeigt, damit du es kopieren kannst.")
+                }
+
+                if let errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundColor(.red)
+                            .font(.subheadline)
+                    }
+                }
+            }
+            .navigationTitle("Passwort setzen")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") {
+                        dismiss()
+                    }
+                    .disabled(isSaving)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Speichern") {
+                        _Concurrency.Task { await savePassword() }
+                    }
+                    .disabled(isSaving || password.trimmingCharacters(in: .whitespacesAndNewlines).count < 6)
+                }
+            }
+            .overlay {
+                if isSaving {
+                    ProgressView("Wird gespeichert …")
+                        .padding()
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                }
+            }
+            .alert("Passwort gesetzt", isPresented: $showSuccessAlert) {
+                Button("Kopieren & schließen") {
+                    UIPasteboard.general.string = savedPassword
+                    dismiss()
+                }
+                Button("Schließen", role: .cancel) {
+                    dismiss()
+                }
+            } message: {
+                Text("Neues Passwort für \(userEmail):\n\n\(savedPassword)\n\nTeile es sicher mit der Person. Es wird nur jetzt einmal angezeigt.")
+            }
+        }
+    }
+
+    private func savePassword() async {
+        let trimmed = password.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 6 else {
+            errorMessage = "Das Passwort muss mindestens 6 Zeichen haben."
+            return
+        }
+
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+
+        if let error = await appState.adminSetUserPassword(
+            uid: userUid,
+            email: userEmail,
+            password: trimmed
+        ) {
+            errorMessage = error
+            return
+        }
+
+        savedPassword = trimmed
+        showSuccessAlert = true
+    }
+
+    private static func generatePassword() -> String {
+        let letters = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"
+        let core = String((0..<10).compactMap { _ in letters.randomElement() })
+        return "Svs\(core)!"
     }
 }
