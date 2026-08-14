@@ -339,16 +339,18 @@ struct ScannerScreen: View {
         VStack(alignment: .leading, spacing: 12) {
             compactGutachtenHeader
 
-            GutachtenAbtretungserklaerungEntryBar(
-                accent: userAccentColor,
-                action: {
-                    if CompanyDocumentsCatalog.abtretungserklaerungPDFURL != nil {
-                        showAbtretungserklaerungFunnel = true
-                    } else {
-                        uiErrorMessage = "Die Abtretungserklärung konnte nicht geladen werden."
+            if appState.currentUser?.digitalAeAccessEnabled == true {
+                GutachtenAbtretungserklaerungEntryBar(
+                    accent: userAccentColor,
+                    action: {
+                        if CompanyDocumentsCatalog.abtretungserklaerungPDFURL != nil {
+                            showAbtretungserklaerungFunnel = true
+                        } else {
+                            uiErrorMessage = "Die Abtretungserklärung konnte nicht geladen werden."
+                        }
                     }
-                }
-            )
+                )
+            }
 
             scanWorkflowSectionHeader
 

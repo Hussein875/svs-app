@@ -39,24 +39,11 @@ struct WorkHomeView: View {
         ))
     }
 
-    private var openOrdersInboxCount: Int {
-        guard let current = appState.currentUser else { return 0 }
-        let open = appState.tasks.filter { $0.kind == .order && $0.status == .open }
-        if current.role == .admin {
-            return open.count
-        }
-        let uid = current.id.trimmingCharacters(in: .whitespacesAndNewlines)
-        return open.filter {
-            $0.assignedUserId.trimmingCharacters(in: .whitespacesAndNewlines) == uid
-        }.count
-    }
-
     private var hasAnyPrimaryTile: Bool {
         tileAccess.showsCommission
             || tileAccess.showsDocuments
             || tileAccess.showsMyUploads
             || tileAccess.showsDashboard
-            || tileAccess.showsProcurementInbox
     }
 
     private var hasAnyAdditionalTile: Bool {
@@ -67,6 +54,15 @@ struct WorkHomeView: View {
             || tileAccess.showsOrdersPlacement
             || tileAccess.showsAccidentSketch
             || tileAccess.showsStargutachter
+            || showsProcurementInboxCompactTile
+    }
+
+    private var showsProcurementInboxCompactTile: Bool {
+        guard let user = appState.currentUser else { return false }
+        return user.isProcurementOfficer
+            && user.role == .employee
+            && !tileAccess.showsOrdersPlacement
+            && !tileAccess.showsTasks
     }
 
     var body: some View {
@@ -121,16 +117,15 @@ struct WorkHomeView: View {
                 case .tasksAssigned:
                     TasksView()
                 case .tasksCompleted:
-                    TasksView(
-                        startInAssignedByMe: true,
-                        startInDoneFilter: true
-                    )
+                    TasksView(startInDoneFilter: true)
                 case .myRequests:
                     MyRequestsScreen()
                 case .myOnCallSaturdays:
                     MyOnCallSaturdaysScreen()
                 case .dashboard:
                     DashboardView()
+                case .signedDocuments:
+                    SignedDocumentsArchiveView()
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -208,10 +203,6 @@ struct WorkHomeView: View {
                 }
                 .buttonStyle(.plain)
             }
-
-            if tileAccess.showsProcurementInbox {
-                procurementInboxLink
-            }
         }
     }
 
@@ -221,6 +212,12 @@ struct WorkHomeView: View {
             homeSectionHeader("Weitere Bereiche")
 
             VStack(spacing: 12) {
+                if showsProcurementInboxCompactTile {
+                    compactToolRow {
+                        procurementInboxCompactLink
+                    }
+                }
+
                 if tileAccess.showsOrdersPlacement || tileAccess.showsAccidentSketch {
                     compactToolRow {
                         if tileAccess.showsOrdersPlacement {
@@ -337,26 +334,17 @@ struct WorkHomeView: View {
                 }
                 .buttonStyle(.plain)
             }
-
-            if tileAccess.showsProcurementInbox {
-                procurementInboxLink
-            }
             }
         }
     }
 
-    private var procurementInboxLink: some View {
+    private var procurementInboxCompactLink: some View {
         NavigationLink {
-            AdminOpenOrdersScreen(
-                scope: tileAccess.procurementInboxShowsAllOrders ? .all : .assignedToCurrentUser
-            )
-            .environmentObject(appState)
+            AdminOpenOrdersScreen(scope: .assignedToCurrentUser)
+                .environmentObject(appState)
         } label: {
-            WorkCard(
+            CompactWorkCard(
                 title: "Offene Bestellungen",
-                subtitle: openOrdersInboxCount == 0
-                    ? "Keine offenen Aufträge"
-                    : "\(openOrdersInboxCount) offen – jetzt bearbeiten",
                 systemImage: "cart.fill"
             )
         }

@@ -29,6 +29,7 @@ enum EmployeeAppAccessTemplate: String, CaseIterable, Identifiable {
             user.ordersPlacementAccessEnabled = false
             user.accidentSketchAccessEnabled = false
             user.allowedLawyerPowerIds = []
+            user.digitalAeAccessEnabled = false
         case .scannerAndWessels:
             user.scannerOnlyMode = false
             user.documentsAccessEnabled = true
@@ -80,6 +81,7 @@ struct EmployeeAccessDraft: Equatable {
     var onCallAccessEnabled: Bool = false
     var ordersPlacementAccessEnabled: Bool = true
     var accidentSketchAccessEnabled: Bool = true
+    var digitalAeAccessEnabled: Bool = false
     var allowedLawyerPowerIds: [String] = []
     var vermittlungMode: VermittlungMode = .off
 
@@ -98,6 +100,7 @@ struct EmployeeAccessDraft: Equatable {
         onCallAccessEnabled = user.onCallAccessEnabled
         ordersPlacementAccessEnabled = user.ordersPlacementAccessEnabled
         accidentSketchAccessEnabled = user.accidentSketchAccessEnabled
+        digitalAeAccessEnabled = user.digitalAeAccessEnabled
         allowedLawyerPowerIds = user.allowedLawyerPowerIds
         vermittlungMode = user.vermittlungMode
     }
@@ -129,6 +132,7 @@ struct EmployeeAccessDraft: Equatable {
         updated.onCallAccessEnabled = onCallAccessEnabled
         updated.ordersPlacementAccessEnabled = ordersPlacementAccessEnabled
         updated.accidentSketchAccessEnabled = accidentSketchAccessEnabled
+        updated.digitalAeAccessEnabled = digitalAeAccessEnabled
         updated.allowedLawyerPowerIds = allowedLawyerPowerIds
         updated.vermittlungMode = vermittlungMode
         return updated
@@ -173,6 +177,7 @@ struct HomeTileAccessDefaults {
     var onCallAccessEnabled: Bool
     var ordersPlacementAccessEnabled: Bool
     var accidentSketchAccessEnabled: Bool
+    var digitalAeAccessEnabled: Bool
     var scannerOnlyMode: Bool
     var vermittlungMode: VermittlungMode
 
@@ -191,6 +196,7 @@ struct HomeTileAccessDefaults {
                 onCallAccessEnabled: false,
                 ordersPlacementAccessEnabled: true,
                 accidentSketchAccessEnabled: true,
+                digitalAeAccessEnabled: false,
                 scannerOnlyMode: true,
                 vermittlungMode: .automatic
             )
@@ -207,6 +213,7 @@ struct HomeTileAccessDefaults {
                 onCallAccessEnabled: true,
                 ordersPlacementAccessEnabled: true,
                 accidentSketchAccessEnabled: true,
+                digitalAeAccessEnabled: true,
                 scannerOnlyMode: false,
                 vermittlungMode: role == .admin ? .manual : .automatic
             )
@@ -225,6 +232,7 @@ struct HomeTileAccessDefaults {
         user.onCallAccessEnabled = onCallAccessEnabled
         user.ordersPlacementAccessEnabled = ordersPlacementAccessEnabled
         user.accidentSketchAccessEnabled = accidentSketchAccessEnabled
+        user.digitalAeAccessEnabled = digitalAeAccessEnabled
         user.scannerOnlyMode = scannerOnlyMode
         user.vermittlungMode = vermittlungMode
     }
@@ -249,6 +257,7 @@ enum UserHomeAccessSummary {
         if access.showsOnCall { chips.append("Bereitschaft") }
         if access.showsOrdersPlacement { chips.append("Bestellen") }
         if access.showsAccidentSketch { chips.append("Schadenhergang") }
+        if user.digitalAeAccessEnabled { chips.append("AE digital") }
         if access.showsProcurementInbox { chips.append("Bestell-Inbox") }
 
         for document in CompanyDocumentsCatalog.lawyerPowerItems

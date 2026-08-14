@@ -46,6 +46,8 @@ struct User: Identifiable, Hashable, Codable {
     var isProcurementOfficer: Bool = false
     /// Versteckt „Mein Bereich“ – nur Scanner und Menü.
     var scannerOnlyMode: Bool = true
+    /// Abtretungserklärung digital im Gutachten-Tab.
+    var digitalAeAccessEnabled: Bool = false
     /// Opt-in-Liste der sichtbaren Anwaltsvollmachten (leer = keine).
     var allowedLawyerPowerIds: [String] = []
     /// Wie Vermittlungen beim Gutachten-Upload erfasst werden.

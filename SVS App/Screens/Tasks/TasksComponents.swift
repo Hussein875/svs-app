@@ -21,6 +21,32 @@ struct TaskRow: View {
     let onToggleStatus: () -> Void
     let onDelete: () -> Void
 
+    private func normalizedIdentity(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isAssignedToCurrentUser: Bool {
+        guard let currentId = appState.currentUser?.id else { return false }
+        return normalizedIdentity(task.assignedUserId) == normalizedIdentity(currentId)
+    }
+
+    private var isCreatedByCurrentUser: Bool {
+        guard let current = appState.currentUser else { return false }
+        let creator = normalizedIdentity(task.creatorUserId)
+        if creator == normalizedIdentity(current.id) { return true }
+        let email = normalizedIdentity(current.email).lowercased()
+        if email.isEmpty { return false }
+        return creator.lowercased() == email || creator.lowercased() == "invite:\(email)"
+    }
+
+    private var creatorDisplayName: String {
+        isCreatedByCurrentUser ? "Ich" : creatorName
+    }
+
+    private var assigneeDisplayName: String {
+        isAssignedToCurrentUser ? "Ich" : assignedUserName
+    }
+
     var body: some View {
         let accent: Color = {
             if task.status == .done { return .green }
@@ -64,6 +90,15 @@ struct TaskRow: View {
                     }
                 }
 
+                HStack(spacing: 8) {
+                    partyChip(prefix: "Von", name: creatorDisplayName)
+                    Image(systemName: "arrow.right")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.tertiary)
+                    partyChip(prefix: "An", name: assigneeDisplayName)
+                }
+                .padding(.top, 2)
+
                 let detailsText = task.details
                 if !detailsText.isEmpty {
                     Text(detailsText)
@@ -79,12 +114,6 @@ struct TaskRow: View {
                 ) {
                     if let due = task.dueDate {
                         metaBadge(icon: "calendar", text: "Fällig: \(formattedShort(due))")
-                    }
-
-                    metaBadge(icon: "person.crop.circle", text: "Von: \(creatorName)")
-
-                    if let current = appState.currentUser, task.assignedUserId != current.id {
-                        metaBadge(icon: "person", text: "An: \(assignedUserName)")
                     }
                 }
                 .padding(.top, 2)
@@ -123,6 +152,23 @@ struct TaskRow: View {
                 Label("Löschen", systemImage: "trash")
             }
         }
+    }
+
+    private func partyChip(prefix: String, name: String) -> some View {
+        HStack(spacing: 4) {
+            Text("\(prefix):")
+                .foregroundStyle(.secondary)
+            Text(name)
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
+        }
+        .font(.caption)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(.tertiarySystemBackground))
+        )
     }
 
     private func formattedShort(_ date: Date) -> String {

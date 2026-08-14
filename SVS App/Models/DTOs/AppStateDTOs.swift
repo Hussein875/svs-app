@@ -32,6 +32,7 @@ struct UserProfile: Codable {
     var onCallAccessEnabled: Bool
     var ordersPlacementAccessEnabled: Bool
     var accidentSketchAccessEnabled: Bool
+    var digitalAeAccessEnabled: Bool
     var allowedLawyerPowerIds: [String]
     var vermittlungMode: VermittlungMode
 
@@ -58,6 +59,7 @@ struct UserProfile: Codable {
          onCallAccessEnabled: Bool = true,
          ordersPlacementAccessEnabled: Bool = true,
          accidentSketchAccessEnabled: Bool = true,
+         digitalAeAccessEnabled: Bool = false,
          allowedLawyerPowerIds: [String] = [],
          vermittlungMode: VermittlungMode = .off) {
         self.name = name
@@ -83,6 +85,7 @@ struct UserProfile: Codable {
         self.onCallAccessEnabled = onCallAccessEnabled
         self.ordersPlacementAccessEnabled = ordersPlacementAccessEnabled
         self.accidentSketchAccessEnabled = accidentSketchAccessEnabled
+        self.digitalAeAccessEnabled = digitalAeAccessEnabled
         self.allowedLawyerPowerIds = allowedLawyerPowerIds
         self.vermittlungMode = vermittlungMode
     }
@@ -111,6 +114,7 @@ struct UserProfile: Codable {
         self.onCallAccessEnabled = user.onCallAccessEnabled
         self.ordersPlacementAccessEnabled = user.ordersPlacementAccessEnabled
         self.accidentSketchAccessEnabled = user.accidentSketchAccessEnabled
+        self.digitalAeAccessEnabled = user.digitalAeAccessEnabled
         self.allowedLawyerPowerIds = user.allowedLawyerPowerIds
         self.vermittlungMode = user.vermittlungMode
     }
@@ -163,6 +167,8 @@ struct UserProfile: Codable {
             (data["ordersPlacementAccessEnabled"] as? Bool) ?? defaults.ordersPlacementAccessEnabled
         self.accidentSketchAccessEnabled =
             (data["accidentSketchAccessEnabled"] as? Bool) ?? defaults.accidentSketchAccessEnabled
+        self.digitalAeAccessEnabled =
+            (data["digitalAeAccessEnabled"] as? Bool) ?? defaults.digitalAeAccessEnabled
         self.allowedLawyerPowerIds = (data["allowedLawyerPowerIds"] as? [String]) ?? []
         if let modeRaw = data["vermittlungModeRaw"] as? String,
            let mode = VermittlungMode(rawValue: modeRaw) {
@@ -205,6 +211,7 @@ struct UserProfile: Codable {
             "onCallAccessEnabled": onCallAccessEnabled,
             "ordersPlacementAccessEnabled": ordersPlacementAccessEnabled,
             "accidentSketchAccessEnabled": accidentSketchAccessEnabled,
+            "digitalAeAccessEnabled": digitalAeAccessEnabled,
             "allowedLawyerPowerIds": allowedLawyerPowerIds,
             "vermittlungModeRaw": vermittlungMode.rawValue
         ]
@@ -245,6 +252,7 @@ struct UserProfile: Codable {
             accidentSketchAccessEnabled: accidentSketchAccessEnabled,
             isProcurementOfficer: isProcurementOfficer,
             scannerOnlyMode: scannerOnlyMode,
+            digitalAeAccessEnabled: digitalAeAccessEnabled,
             allowedLawyerPowerIds: allowedLawyerPowerIds,
             vermittlungMode: vermittlungMode
         )

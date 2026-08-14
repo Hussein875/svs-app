@@ -276,16 +276,47 @@ struct CommissionCreatorStats: Identifiable {
 
 enum CommissionCreatorStatsBuilder {
     static func build(from documents: [QueryDocumentSnapshot], users: [User]) -> [CommissionCreatorStats] {
+        build(from: buildRows(from: documents), users: users)
+    }
+
+    static func buildRows(from documents: [QueryDocumentSnapshot]) -> [CommissionRow] {
+        documents.map { doc in
+            let data = doc.data()
+            func clean(_ s: String?) -> String? {
+                guard let s else { return nil }
+                let v = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                return v.isEmpty ? nil : v
+            }
+
+            let ts = data["acceptedAtServer"] as? Timestamp
+            return CommissionRow(
+                id: doc.documentID,
+                recommenderName: (data["recommenderName"] as? String) ?? "—",
+                recommenderStreet: clean(data["recommenderStreet"] as? String),
+                recommenderZip: clean(data["recommenderZip"] as? String),
+                recommenderCity: clean(data["recommenderCity"] as? String),
+                payoutMethod: (data["payoutMethod"] as? String) ?? "—",
+                payoutIban: clean(data["payoutIban"] as? String),
+                payoutPaypal: clean(data["payoutPaypal"] as? String),
+                amount: data["amount"] as? Double,
+                notes: clean(data["notes"] as? String),
+                gutachtenNumber: clean(data["gutachtenNumber"] as? String),
+                status: (data["status"] as? String) ?? "submitted",
+                createdAt: ts?.dateValue(),
+                createdByUid: clean(data["createdByUid"] as? String)
+            )
+        }
+    }
+
+    static func build(from rows: [CommissionRow], users: [User]) -> [CommissionCreatorStats] {
         var buckets: [String: (count: Int, total: Double, open: Int, paid: Int)] = [:]
 
-        for doc in documents {
-            let data = doc.data()
-            let uid = (data["createdByUid"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        for row in rows {
+            let uid = row.createdByUid?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             guard !uid.isEmpty else { continue }
 
-            let amount = data["amount"] as? Double ?? 0
-            let status = (data["status"] as? String) ?? ""
-            let isPaid = status == "paid"
+            let amount = row.amount ?? 0
+            let isPaid = row.status == "paid"
 
             var bucket = buckets[uid] ?? (0, 0, 0, 0)
             bucket.count += 1
@@ -325,12 +356,197 @@ enum CommissionCreatorStatsBuilder {
     }
 }
 
+enum CommissionMonthFilter {
+    static var calendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.locale = Locale(identifier: "de_DE")
+        return cal
+    }
+
+    static func startOfMonth(for date: Date) -> Date {
+        let comps = calendar.dateComponents([.year, .month], from: date)
+        return calendar.date(from: comps) ?? date
+    }
+
+    static func previousMonth(from monthStart: Date) -> Date {
+        calendar.date(byAdding: .month, value: -1, to: monthStart) ?? monthStart
+    }
+
+    static func nextMonth(from monthStart: Date) -> Date {
+        calendar.date(byAdding: .month, value: 1, to: monthStart) ?? monthStart
+    }
+
+    static func isInMonth(_ date: Date?, monthStart: Date) -> Bool {
+        guard let date else { return false }
+        return calendar.isDate(date, equalTo: monthStart, toGranularity: .month)
+    }
+
+    static func formattedMonth(_ monthStart: Date) -> String {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "de_DE")
+        df.dateFormat = "LLLL yyyy"
+        return df.string(from: monthStart).capitalized
+    }
+
+    static func canGoForward(from monthStart: Date) -> Bool {
+        let currentStart = startOfMonth(for: Date())
+        return monthStart < currentStart
+    }
+}
+
+struct CommissionMonthFilterBar: View {
+    @Binding var selectedMonthStart: Date?
+
+    private var monthStart: Date {
+        selectedMonthStart ?? CommissionMonthFilter.startOfMonth(for: Date())
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button {
+                if selectedMonthStart == nil {
+                    selectedMonthStart = CommissionMonthFilter.previousMonth(
+                        from: CommissionMonthFilter.startOfMonth(for: Date())
+                    )
+                } else {
+                    selectedMonthStart = CommissionMonthFilter.previousMonth(from: monthStart)
+                }
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.body.weight(.semibold))
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle()
+                            .fill(Color(.tertiarySystemGroupedBackground))
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Vorheriger Monat")
+
+            VStack(spacing: 2) {
+                Text(selectedMonthStart == nil ? "Alle Monate" : CommissionMonthFilter.formattedMonth(monthStart))
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.center)
+
+                if selectedMonthStart != nil {
+                    Text("Monatsfilter aktiv")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            Button {
+                guard selectedMonthStart != nil else { return }
+                let next = CommissionMonthFilter.nextMonth(from: monthStart)
+                if CommissionMonthFilter.canGoForward(from: monthStart) {
+                    selectedMonthStart = next
+                }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.body.weight(.semibold))
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle()
+                            .fill(Color(.tertiarySystemGroupedBackground))
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(selectedMonthStart == nil || !CommissionMonthFilter.canGoForward(from: monthStart))
+            .accessibilityLabel("Nächster Monat")
+
+            Button {
+                selectedMonthStart = selectedMonthStart == nil
+                    ? CommissionMonthFilter.startOfMonth(for: Date())
+                    : nil
+            } label: {
+                Text(selectedMonthStart == nil ? "Monat" : "Alle")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color(.tertiarySystemGroupedBackground))
+                    )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+struct CommissionActiveFiltersRow: View {
+    let monthStart: Date?
+    let employeeName: String?
+    let onClearMonth: () -> Void
+    let onClearEmployee: () -> Void
+
+    var body: some View {
+        if monthStart != nil || employeeName != nil {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    if let monthStart {
+                        filterChip(
+                            title: CommissionMonthFilter.formattedMonth(monthStart),
+                            systemImage: "calendar",
+                            onRemove: onClearMonth
+                        )
+                    }
+                    if let employeeName {
+                        filterChip(
+                            title: employeeName,
+                            systemImage: "person.fill",
+                            onRemove: onClearEmployee
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func filterChip(title: String, systemImage: String, onRemove: @escaping () -> Void) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.caption2.weight(.semibold))
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+        }
+        .foregroundColor(.accentColor)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color.accentColor.opacity(0.12))
+        )
+    }
+}
+
 struct CommissionTeamInsightsSection: View {
     let stats: [CommissionCreatorStats]
     let isLoading: Bool
+    let selectedEmployeeUid: String?
+    let onSelectEmployee: (String) -> Void
+    var showsCardChrome: Bool = true
 
     var body: some View {
-        SectionCard(title: "Übersicht nach Mitarbeiter", systemImage: "person.2.fill") {
+        Group {
+            if showsCardChrome {
+                SectionCard(title: "Übersicht nach Mitarbeiter", systemImage: "person.2.fill") {
+                    content
+                }
+            } else {
+                content
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
             if isLoading {
                 HStack(spacing: 10) {
                     ProgressView()
@@ -345,24 +561,45 @@ struct CommissionTeamInsightsSection: View {
             } else {
                 VStack(spacing: 10) {
                     ForEach(stats) { row in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(row.displayName)
-                                    .font(.subheadline.weight(.semibold))
-                                Spacer()
-                                Text(formatEUR(row.totalAmount))
-                                    .font(.subheadline.weight(.semibold))
-                            }
+                        let isSelected = selectedEmployeeUid == row.userId
 
-                            HStack(spacing: 12) {
-                                Label("\(row.orderCount) Aufträge", systemImage: "doc.text")
-                                Label("\(row.openCount) offen", systemImage: "clock")
-                                Label("\(row.paidCount) ausgezahlt", systemImage: "checkmark.circle")
+                        Button {
+                            onSelectEmployee(row.userId)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(row.displayName)
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    Text(formatEUR(row.totalAmount))
+                                        .font(.subheadline.weight(.semibold))
+                                        .foregroundColor(.primary)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundColor(.secondary)
+                                }
+
+                                HStack(spacing: 12) {
+                                    Label("\(row.orderCount) Aufträge", systemImage: "doc.text")
+                                    Label("\(row.openCount) offen", systemImage: "clock")
+                                    Label("\(row.paidCount) ausgezahlt", systemImage: "checkmark.circle")
+                                }
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                             }
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(isSelected ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+                            )
                         }
-                        .padding(.vertical, 4)
+                        .buttonStyle(.plain)
 
                         if row.id != stats.last?.id {
                             Divider()
@@ -370,12 +607,13 @@ struct CommissionTeamInsightsSection: View {
                     }
                 }
 
-                Text("Nur für Admins sichtbar · bis zu 1.000 neueste Einträge")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .padding(.top, 4)
+                if showsCardChrome {
+                    Text("Antippen filtert die Liste oben · bis zu 1.000 neueste Einträge")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 4)
+                }
             }
-        }
     }
 }
 

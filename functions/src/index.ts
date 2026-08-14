@@ -13,7 +13,7 @@ import {
 } from "firebase-functions/v2/firestore";
 import nodemailer from "nodemailer";
 import PDFDocument from "pdfkit";
-import {google, drive_v3 as driveV3} from "googleapis";
+import {google, drive_v3 as driveV3, sheets_v4 as sheetsV4} from "googleapis";
 import {Readable} from "stream";
 import {
   filterTokenRefsByPreference,
@@ -1831,6 +1831,74 @@ export const pushOnTaskCompleted = onDocumentUpdated(
   }
 );
 
+export const pushOnDocumentSigningCompleted = onDocumentUpdated(
+  "documentSigningLinks/{token}",
+  async (event) => {
+    const before = event.data?.before;
+    const after = event.data?.after;
+    if (!before || !after) return;
+
+    const beforeData = (before.data() ?? {}) as Record<string, unknown>;
+    const afterData = (after.data() ?? {}) as Record<string, unknown>;
+
+    const beforeStatus = String(beforeData.status ?? "").trim().toLowerCase();
+    const afterStatus = String(afterData.status ?? "").trim().toLowerCase();
+    const wasSigned =
+      beforeStatus === "signed" || !!beforeData.signedAt;
+    const isSigned =
+      afterStatus === "signed" || !!afterData.signedAt;
+
+    if (wasSigned || !isSigned) return;
+    if (afterData.signingPushSentAt) return;
+
+    const createdByUid = String(afterData.createdByUid ?? "").trim();
+    if (!createdByUid) return;
+
+    const customerName =
+      String(afterData.customerName ?? "").trim() || "Kunde";
+    const documentTitle =
+      String(afterData.documentTitle ?? "").trim() || "Dokument";
+    const token = String(event.params.token ?? "").trim();
+
+    console.log(
+      "[push][document_signing_completed] token=",
+      token,
+      "to=",
+      createdByUid
+    );
+
+    const tokenRefs = await getUserTokenRefs(createdByUid);
+    if (tokenRefs.length === 0) {
+      console.log(
+        "[push][document_signing_completed] no user tokens for",
+        createdByUid
+      );
+      return;
+    }
+
+    await sendBadgeCountedMulticast(
+      "document_signing_completed",
+      tokenRefs,
+      {
+        title: "Unterschrift eingegangen",
+        body: customerName + " hat „" + documentTitle + "“ unterschrieben.",
+      },
+      {
+        type: "document_signing_completed",
+        signingToken: token,
+        documentId: String(afterData.documentId ?? ""),
+      }
+    );
+
+    await after.ref.set(
+      {
+        signingPushSentAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      {merge: true}
+    );
+  }
+);
+
 // ------------------------------------------------------------------
 // Make.com Webhook -> Firestore automation status
 // POST /automationStatusWebhook
@@ -2745,6 +2813,322 @@ async function performAdminResetScannerSequenceFromSheet(
   };
 }
 
+type ScannerIngressSheetEntry = {
+  rowNumber: number;
+  entry: string;
+  worker: string;
+  status: string;
+  caseNumber: number | null;
+  year2: string | null;
+};
+
+async function getGoogleSheetsClient(): Promise<sheetsV4.Sheets> {
+  const auth = new google.auth.GoogleAuth({
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  });
+  return google.sheets({version: "v4", auth});
+}
+
+async function getScannerIngressSheetTab(): Promise<{
+  sheetId: number;
+  title: string;
+}> {
+  const sheets = await getGoogleSheetsClient();
+  const response = await sheets.spreadsheets.get({
+    spreadsheetId: SCANNER_SHEET_ID,
+    fields: "sheets.properties",
+  });
+
+  const properties = response.data.sheets?.[0]?.properties;
+  const sheetId = properties?.sheetId;
+  const title = String(properties?.title ?? "").trim();
+
+  if (typeof sheetId !== "number" || !title) {
+    throw new Error("Scanner-Eingangsliste: Tab konnte nicht gelesen werden.");
+  }
+
+  return {sheetId, title};
+}
+
+function extractScannerYear2FromEntry(rawValue: unknown): string | null {
+  const text = String(rawValue ?? "").trim();
+  const match = text.match(/\/(\d{2})\b/);
+  return match ? match[1] : null;
+}
+
+function parseScannerIngressSheetRow(
+  rowNumber: number,
+  cells: unknown[]
+): ScannerIngressSheetEntry | null {
+  const entry = String(cells[0] ?? "").trim();
+  const worker = String(cells[1] ?? "").trim();
+  const status = String(cells[2] ?? "").trim();
+
+  if (!entry || entry.toLowerCase() === "eingang") {
+    return null;
+  }
+
+  return {
+    rowNumber,
+    entry,
+    worker,
+    status,
+    caseNumber: extractScannerSequenceNumber(entry),
+    year2: extractScannerYear2FromEntry(entry),
+  };
+}
+
+function gvizCellText(cell: unknown): string {
+  if (!cell || typeof cell !== "object") {
+    return "";
+  }
+  const value = (cell as {v?: unknown}).v;
+  if (value === null || value === undefined) {
+    return "";
+  }
+  return String(value).trim();
+}
+
+async function listScannerIngressSheetEntries():
+  Promise<ScannerIngressSheetEntry[]> {
+  const response = await fetch(SCANNER_SHEET_URL, {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Sheet HTTP ${response.status}`);
+  }
+
+  const rawText = await response.text();
+  const payload = parseGvizResponse(rawText);
+  const table = payload.table as {rows?: unknown[]} | undefined;
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const entries: ScannerIngressSheetEntry[] = [];
+
+  for (let index = 0; index < rows.length; index += 1) {
+    const rowNumber = index + 1;
+    const rowCells = Array.isArray((rows[index] as {c?: unknown[]})?.c) ?
+      (rows[index] as {c: unknown[]}).c :
+      [];
+    const parsed = parseScannerIngressSheetRow(rowNumber, [
+      gvizCellText(rowCells[0]),
+      gvizCellText(rowCells[1]),
+      gvizCellText(rowCells[2]),
+    ]);
+    if (parsed) {
+      entries.push(parsed);
+    }
+  }
+
+  entries.sort((left, right) => {
+    const leftNumber = left.caseNumber ?? 0;
+    const rightNumber = right.caseNumber ?? 0;
+    if (leftNumber !== rightNumber) {
+      return rightNumber - leftNumber;
+    }
+    return right.rowNumber - left.rowNumber;
+  });
+
+  return entries;
+}
+
+function isGoogleSheetsApiDisabledError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const pattern = new RegExp(
+    "sheets api has not been used|sheets.googleapis.com|" +
+    "API has not been enabled",
+    "i"
+  );
+  return pattern.test(message);
+}
+
+function scannerIngressSheetsApiEnableHint(): string {
+  const consoleUrl =
+    "https://console.cloud.google.com/apis/library/sheets.googleapis.com" +
+    "?project=svs-app-864ed";
+  return (
+    "Google Sheets API im Firebase-Projekt aktivieren: " + consoleUrl + " " +
+    "(danach Sheet mit svs-app-864ed@appspot.gserviceaccount.com " +
+    "als Bearbeiter teilen)."
+  );
+}
+
+async function loadScannerIngressAdminWebappConfig(): Promise<{
+  webappUrl: string;
+  webappSecret: string;
+} | null> {
+  const envUrl = String(process.env.SCANNER_INGRESS_ADMIN_WEBAPP_URL ?? "")
+    .trim();
+  const envSecret = String(process.env.SCANNER_INGRESS_ADMIN_WEBAPP_SECRET ?? "")
+    .trim();
+  if (envUrl && envSecret) {
+    return {webappUrl: envUrl, webappSecret: envSecret};
+  }
+
+  const snap = await admin.firestore().doc(SCANNER_META_DOC_PATH).get();
+  const data = snap.data() ?? {};
+  const webappUrl = String(data.ingressAdminWebappUrl ?? "").trim();
+  const webappSecret = String(data.ingressAdminWebappSecret ?? "").trim();
+  if (!webappUrl || !webappSecret) {
+    return null;
+  }
+  return {webappUrl, webappSecret};
+}
+
+async function deleteScannerIngressSheetRowViaAppsScript(
+  rowNumber: number,
+  config: {webappUrl: string; webappSecret: string}
+): Promise<void> {
+  const response = await fetch(config.webappUrl, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      rowNumber,
+      secret: config.webappSecret,
+    }),
+    redirect: "follow",
+  });
+
+  const rawText = await response.text();
+  let payload: {ok?: boolean; error?: string} = {};
+  try {
+    payload = JSON.parse(rawText) as {ok?: boolean; error?: string};
+  } catch {
+    throw new Error("Apps-Script-Antwort konnte nicht gelesen werden.");
+  }
+
+  if (!response.ok || payload.ok !== true) {
+    const detail = String(payload.error ?? "").trim() ||
+      `HTTP ${response.status}`;
+    throw new Error(`Apps Script: ${detail}`);
+  }
+}
+
+async function deleteScannerIngressSheetRowViaSheetsApi(
+  rowNumber: number
+): Promise<void> {
+  const sheets = await getGoogleSheetsClient();
+  const tab = await getScannerIngressSheetTab();
+  const startIndex = rowNumber - 1;
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: SCANNER_SHEET_ID,
+    requestBody: {
+      requests: [{
+        deleteDimension: {
+          range: {
+            sheetId: tab.sheetId,
+            dimension: "ROWS",
+            startIndex,
+            endIndex: startIndex + 1,
+          },
+        },
+      }],
+    },
+  });
+}
+
+function scannerIngressDeleteSetupHint(): string {
+  return (
+    "Einmalig einrichten: Google Sheets API aktivieren und das Sheet mit " +
+    "svs-app-864ed@appspot.gserviceaccount.com als Bearbeiter teilen."
+  );
+}
+
+async function deleteScannerIngressSheetRow(rowNumber: number): Promise<void> {
+  const normalizedRowNumber = Math.floor(Number(rowNumber));
+  if (!Number.isFinite(normalizedRowNumber) || normalizedRowNumber < 2) {
+    throw new Error("Ungültige Zeilennummer.");
+  }
+
+  const webappConfig = await loadScannerIngressAdminWebappConfig();
+  if (webappConfig) {
+    await deleteScannerIngressSheetRowViaAppsScript(
+      normalizedRowNumber,
+      webappConfig
+    );
+    return;
+  }
+
+  try {
+    await deleteScannerIngressSheetRowViaSheetsApi(normalizedRowNumber);
+  } catch (error: unknown) {
+    if (isGoogleSheetsApiDisabledError(error)) {
+      throw new Error(
+        "Löschen ist noch nicht eingerichtet. " + scannerIngressDeleteSetupHint()
+      );
+    }
+    throw error;
+  }
+}
+
+async function releaseScannerReservationFirestoreOnly(
+  entry: ScannerIngressSheetEntry
+): Promise<boolean> {
+  const number = entry.caseNumber;
+  if (!number) {
+    return false;
+  }
+
+  const year2 = entry.year2 ?? getCurrentScannerYear2();
+  const reservationId = `${year2}_${number}`;
+  const reservationRef = admin.firestore()
+    .collection(SCANNER_RESERVATIONS_COLLECTION)
+    .doc(reservationId);
+  const reservationSnap = await reservationRef.get();
+  if (!reservationSnap.exists) {
+    return false;
+  }
+
+  await rollbackScannerReservation(reservationId, year2, number);
+  return true;
+}
+
+async function authenticateAdminHttpRequest(
+  req: {header: (name: string) => string | undefined}
+): Promise<string> {
+  const authHeader = String(req.header("authorization") ?? "");
+  if (!authHeader.startsWith("Bearer ")) {
+    throw new HttpsError("unauthenticated", "Unauthorized");
+  }
+
+  const idToken = authHeader.slice("Bearer ".length).trim();
+  if (!idToken) {
+    throw new HttpsError("unauthenticated", "Unauthorized");
+  }
+
+  let callerUid = "";
+  try {
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    callerUid = decoded.uid;
+  } catch {
+    throw new HttpsError("unauthenticated", "Unauthorized");
+  }
+
+  await ensureCallerIsAdmin(callerUid);
+  return callerUid;
+}
+
+function scannerSheetEditUrl(): string {
+  return `https://docs.google.com/spreadsheets/d/${SCANNER_SHEET_ID}/edit`;
+}
+
+function httpStatusForAdminRequestError(error: unknown): number {
+  if (error instanceof HttpsError) {
+    if (error.code === "unauthenticated") {
+      return 401;
+    }
+    if (error.code === "permission-denied") {
+      return 403;
+    }
+    if (error.code === "invalid-argument") {
+      return 400;
+    }
+  }
+  return 500;
+}
+
 export const adminResetScannerSequenceFromSheet = onCall(async (request) => {
   const callerUid = request.auth?.uid;
   if (!callerUid) {
@@ -2806,6 +3190,103 @@ export const adminResetScannerSequenceFromSheetHttp = onRequest(
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[adminResetScannerSequenceFromSheetHttp] FAILED", e);
       res.status(500).json({ok: false, error: msg});
+    }
+  }
+);
+
+const SCANNER_ADMIN_HTTP_OPTIONS = {
+  serviceAccount: "svs-app-864ed@appspot.gserviceaccount.com",
+};
+
+export const adminListScannerSheetEntriesHttp = onRequest(
+  SCANNER_ADMIN_HTTP_OPTIONS,
+  async (req, res) => {
+    try {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST,OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+      if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+      }
+
+      if (req.method !== "POST") {
+        res.status(405).json({ok: false, error: "Method not allowed"});
+        return;
+      }
+
+      await authenticateAdminHttpRequest(req);
+      const entries = await listScannerIngressSheetEntries();
+      res.status(200).json({
+        ok: true,
+        entries,
+        sheetUrl: scannerSheetEditUrl(),
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[adminListScannerSheetEntriesHttp] FAILED", e);
+      const statusCode = httpStatusForAdminRequestError(e);
+      res.status(statusCode).json({ok: false, error: msg});
+    }
+  }
+);
+
+export const adminDeleteScannerSheetEntryHttp = onRequest(
+  SCANNER_ADMIN_HTTP_OPTIONS,
+  async (req, res) => {
+    try {
+      res.set("Access-Control-Allow-Origin", "*");
+      res.set("Access-Control-Allow-Methods", "POST,OPTIONS");
+      res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+      if (req.method === "OPTIONS") {
+        res.status(204).send("");
+        return;
+      }
+
+      if (req.method !== "POST") {
+        res.status(405).json({ok: false, error: "Method not allowed"});
+        return;
+      }
+
+      const callerUid = await authenticateAdminHttpRequest(req);
+
+      const rowNumber = Number(req.body?.rowNumber);
+      const releaseReservation = req.body?.releaseReservation !== false;
+
+      const entries = await listScannerIngressSheetEntries();
+      const target = entries.find((entry) => entry.rowNumber === rowNumber);
+      if (!target) {
+        res.status(404).json({ok: false, error: "Zeile nicht gefunden."});
+        return;
+      }
+
+      await deleteScannerIngressSheetRow(rowNumber);
+
+      let reservationReleased = false;
+      if (releaseReservation) {
+        reservationReleased = await releaseScannerReservationFirestoreOnly(
+          target
+        );
+      }
+
+      const sequence = await performAdminResetScannerSequenceFromSheet(
+        callerUid
+      );
+
+      res.status(200).json({
+        ok: true,
+        deletedRowNumber: rowNumber,
+        reservationReleased,
+        nextNumber: sequence.nextNumber,
+        year2: sequence.year2,
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[adminDeleteScannerSheetEntryHttp] FAILED", e);
+      const statusCode = httpStatusForAdminRequestError(e);
+      res.status(statusCode).json({ok: false, error: msg});
     }
   }
 );

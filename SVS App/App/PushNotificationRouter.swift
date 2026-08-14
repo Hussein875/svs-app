@@ -48,8 +48,13 @@ struct PushRoute: Equatable, Codable {
         case .commissionNew:
             self.entityId = payload.string("commissionId")
 
+        case .documentSigningCompleted:
+            self.entityId = payload.string("signingToken")
+
         case .unknown:
-            self.entityId = payload.firstStringValue(in: ["requestId", "taskId", "commissionId"])
+            self.entityId = payload.firstStringValue(
+                in: ["requestId", "taskId", "commissionId", "signingToken"]
+            )
         }
 
         self.debugDescription = payload.prettyPrintedDebug
@@ -91,7 +96,9 @@ final class PushNotificationRouter {
         // If the push doesn't even carry a type, we can still create an `.unknown` route,
         // but only if it contains at least one known id key.
         let type = NotificationType(rawValue: payload.typeRaw ?? "") ?? .unknown
-        let hasAnyId = payload.firstStringValue(in: ["requestId", "taskId", "commissionId"]) != nil
+        let hasAnyId = payload.firstStringValue(
+            in: ["requestId", "taskId", "commissionId", "signingToken"]
+        ) != nil
 
         if type == .unknown && !hasAnyId {
             return nil

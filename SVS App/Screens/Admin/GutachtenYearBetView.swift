@@ -15,6 +15,7 @@ struct GutachtenYearBetView: View {
 
     @State private var showEditor = false
     @State private var editingEntry: GutachtenYearBetEntry?
+    @State private var showFormulaExplanation = false
 
     private var projection: GutachtenYearProjection {
         GutachtenProjectionService.project(from: weeklyViewModel.weeks)
@@ -43,8 +44,8 @@ struct GutachtenYearBetView: View {
                 }
 
                 projectionCard
-                chartSection
                 leaderboardSection
+                chartSection
                 adminSection
             }
             .padding(.horizontal, 18)
@@ -136,41 +137,22 @@ struct GutachtenYearBetView: View {
                 )
             }
 
-            Text("Band \(projection.projectionRangeLabel)")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            Text("Erwarteter Bereich \(projection.projectionRangeLabel)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                detailRow(
-                    title: "Gutachten in \(GutachtenYearBetFormatters.year(betViewModel.activeYear))",
-                    value: formatGutachtenNumber(projection.producedThisYear)
-                )
-                detailRow(
-                    title: "Jahres-Ø (\(projection.completedWeeksSampled) Wochen)",
-                    value: projection.yearAverageLabel
-                )
-                detailRow(
-                    title: "Letzte \(projection.recentWeeksSampled) Wochen (gew.)",
-                    value: projection.recentPaceLabel
-                )
-                detailRow(
-                    title: "Trend",
-                    value: projection.trendDetailLabel,
-                    icon: projection.trend.systemImage
-                )
-                detailRow(
-                    title: "Noch",
-                    value: "\(projection.weeksRemaining) Wochen · \(projection.daysRemaining) Tage"
-                )
+            DisclosureGroup(isExpanded: $showFormulaExplanation) {
+                Text(projection.methodSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            } label: {
+                Label("So wird gerechnet", systemImage: "function")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-            Text(projection.methodSummary)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            .padding(.top, 2)
         }
         .padding(18)
         .background(
@@ -200,21 +182,6 @@ struct GutachtenYearBetView: View {
         case .growing: return .green
         case .shrinking: return .orange
         case .stable: return .secondary
-        }
-    }
-
-    private func detailRow(title: String, value: String, icon: String? = nil) -> some View {
-        HStack {
-            Text(title)
-            Spacer(minLength: 8)
-            if let icon {
-                Image(systemName: icon)
-            }
-            Text(value)
-                .fontWeight(.medium)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
         }
     }
 

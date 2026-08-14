@@ -26,6 +26,10 @@ struct AdminConsoleView: View {
     init(pushDestination: Binding<AdminPushDestination?> = .constant(nil)) {
         _pushDestination = pushDestination
     }
+
+    private var openOrdersCount: Int {
+        appState.tasks.filter { $0.kind == .order && $0.status == .open }.count
+    }
     
     var body: some View {
         NavigationStack {
@@ -99,6 +103,20 @@ struct AdminConsoleView: View {
                             }
 
                             NavigationLink {
+                                AdminOpenOrdersScreen(scope: .all)
+                                    .environmentObject(appState)
+                            } label: {
+                                AdminNavRow(
+                                    title: "Offene Bestellungen",
+                                    subtitle: openOrdersCount == 0
+                                        ? "Keine offenen Aufträge"
+                                        : "\(openOrdersCount) offen – jetzt bearbeiten",
+                                    systemImage: "cart.fill",
+                                    accent: appState.currentUser?.color ?? .secondary
+                                )
+                            }
+
+                            NavigationLink {
                                 AdminStatisticsScreen()
                                     .environmentObject(appState)
                             } label: {
@@ -117,6 +135,18 @@ struct AdminConsoleView: View {
                                 AdminNavRow(title: "Automatisierungen",
                                             subtitle: "Make-Status und letzte Läufe",
                                             systemImage: "bolt.badge.clock", accent: appState.currentUser?.color ?? .secondary)
+                            }
+
+                            NavigationLink {
+                                AdminScannerSheetScreen()
+                                    .environmentObject(appState)
+                            } label: {
+                                AdminNavRow(
+                                    title: "Dashboard-Verwaltung",
+                                    subtitle: "Fälle aus der Dashboard-Tabelle bearbeiten",
+                                    systemImage: "rectangle.grid.2x2",
+                                    accent: appState.currentUser?.color ?? .secondary
+                                )
                             }
 
                         }

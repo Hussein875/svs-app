@@ -211,6 +211,23 @@ struct MainView: View {
                 selectedTab = .scanner
             }
 
+        case .documentSigningCompleted:
+            if showsHomeTab {
+                selectedTab = .home
+                homePushDestination = HomePushDestination(
+                    kind: .signedDocuments,
+                    entityId: asUUID(route.entityId)
+                )
+            } else if isEmployeeRole {
+                selectedTab = .scanner
+            } else {
+                selectedTab = .home
+                homePushDestination = HomePushDestination(
+                    kind: .signedDocuments,
+                    entityId: asUUID(route.entityId)
+                )
+            }
+
         case .unknown:
             selectedTab = isEmployeeRole ? .scanner : .home
         }
@@ -260,6 +277,7 @@ struct HomePushDestination: Identifiable, Hashable {
         case myRequests
         case myOnCallSaturdays
         case dashboard
+        case signedDocuments
     }
 
     let id = UUID()

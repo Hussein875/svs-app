@@ -183,6 +183,7 @@ extension AppState {
                     a.onCallAccessEnabled != b.onCallAccessEnabled ||
                     a.ordersPlacementAccessEnabled != b.ordersPlacementAccessEnabled ||
                     a.accidentSketchAccessEnabled != b.accidentSketchAccessEnabled ||
+                    a.digitalAeAccessEnabled != b.digitalAeAccessEnabled ||
                     a.allowedLawyerPowerIds != b.allowedLawyerPowerIds ||
                     a.vermittlungMode != b.vermittlungMode {
                     same = false

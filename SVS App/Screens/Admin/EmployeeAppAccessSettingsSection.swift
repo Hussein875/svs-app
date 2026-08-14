@@ -9,6 +9,7 @@ struct EmployeeAppAccessSettingsSection: View {
     let showsEmployeeTemplatePicker: Bool
 
     @Binding var scannerOnlyMode: Bool
+    @Binding var digitalAeAccessEnabled: Bool
     @Binding var documentsAccessEnabled: Bool
     @Binding var myUploadsAccessEnabled: Bool
     @Binding var stargutachterAccessEnabled: Bool
@@ -24,17 +25,13 @@ struct EmployeeAppAccessSettingsSection: View {
     @Binding var vermittlungMode: VermittlungMode
     @Binding var selectedTemplate: EmployeeAppAccessTemplate?
 
-    private var lawyerPowerDocuments: [CompanyDocument] {
-        CompanyDocumentsCatalog.lawyerPowerItems
-    }
-
     var body: some View {
         if showsEmployeeTemplatePicker {
             Section(
                 header: Text("Vorlage"),
-                footer: Text("Neue Mitarbeiter starten standardmäßig mit „Alles aus“. Passe die Vorlage an oder stelle die Kacheln einzeln ein.")
+                footer: Text("Neue Mitarbeiter starten standardmäßig mit „Alles aus“. Für viele Personen auf einmal: Nutzerverwaltung → Berechtigungen.")
             ) {
-                Picker("App-Zugang", selection: templateBinding) {
+                Picker("Berechtigungen", selection: templateBinding) {
                     Text("Benutzerdefiniert").tag(Optional<EmployeeAppAccessTemplate>.none)
                     ForEach(EmployeeAppAccessTemplate.allCases) { template in
                         Text(template.rawValue).tag(Optional(template))
@@ -43,24 +40,23 @@ struct EmployeeAppAccessSettingsSection: View {
             }
         }
 
-        Section(
-            header: Text("Kacheln in Mein Bereich"),
-            footer: Text("Steuert, welche Bereiche der Nutzer sieht. „Offene Bestellungen“ erscheint zusätzlich für Admins und unter „Zuständig für Bestellungen“ freigeschaltete Personen.")
-        ) {
-            if showsEmployeeTemplatePicker {
-                Toggle("Nur Scanner (ohne Mein Bereich)", isOn: manualBinding($scannerOnlyMode))
+        ForEach(AppAccessBooleanFeature.groupedFeatures, id: \.group) { section in
+            Section {
+                ForEach(section.features) { feature in
+                    if shouldShow(feature) {
+                        Toggle(isOn: binding(for: feature)) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(feature.title)
+                                Text(feature.subtitle)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text(section.group.rawValue)
             }
-            Toggle("Dashboard", isOn: manualBinding($dashboardAccessEnabled))
-            Toggle("Prämie", isOn: manualBinding($commissionAccessEnabled))
-            Toggle("Dokumente", isOn: manualBinding($documentsAccessEnabled))
-            Toggle("Meine Gutachten", isOn: manualBinding($myUploadsAccessEnabled))
-            Toggle("Abwesenheiten", isOn: manualBinding($requestsAccessEnabled))
-            Toggle("Aufgaben", isOn: manualBinding($tasksAccessEnabled))
-            Toggle("Meeting", isOn: manualBinding($meetingAccessEnabled))
-            Toggle("Bereitschaft", isOn: manualBinding($onCallAccessEnabled))
-            Toggle("Bestellungen aufgeben", isOn: manualBinding($ordersPlacementAccessEnabled))
-            Toggle("Schadenhergang", isOn: manualBinding($accidentSketchAccessEnabled))
-            Toggle("Stargutachter", isOn: manualBinding($stargutachterAccessEnabled))
         }
 
         Section(
@@ -75,11 +71,11 @@ struct EmployeeAppAccessSettingsSection: View {
         }
 
         Section {
-            ForEach(lawyerPowerDocuments) { document in
-                Toggle(isOn: lawyerPowerBinding(for: document.id)) {
+            ForEach(AppAccessFeatureCatalog.lawyerPowerFeatures) { feature in
+                Toggle(isOn: lawyerPowerBinding(for: feature.document.id)) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(document.title)
-                        if let subtitle = document.subtitle {
+                        Text(feature.title)
+                        if let subtitle = feature.subtitle {
                             Text(subtitle)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
@@ -88,10 +84,20 @@ struct EmployeeAppAccessSettingsSection: View {
                 }
             }
         } header: {
-            Text("Anwaltsvollmachten")
+            Text(AppAccessFeatureGroup.lawyerPowers.rawValue)
         } footer: {
-            Text("Gilt für Kanzlei-Vollmachten und die Stargutachter-Abtretungserklärung unter Dokumente.")
+            Text("Gilt für Kanzlei-Vollmachten unter Dokumente.")
         }
+    }
+
+    private func shouldShow(_ feature: AppAccessBooleanFeature) -> Bool {
+        if feature == .homeAreaVisible {
+            return showsEmployeeTemplatePicker
+        }
+        if feature == .procurementOfficer {
+            return false
+        }
+        return true
     }
 
     private var templateBinding: Binding<EmployeeAppAccessTemplate?> {
@@ -110,6 +116,7 @@ struct EmployeeAppAccessSettingsSection: View {
     private var currentDraft: EmployeeAccessDraft {
         EmployeeAccessDraft(
             scannerOnlyMode: scannerOnlyMode,
+            digitalAeAccessEnabled: digitalAeAccessEnabled,
             documentsAccessEnabled: documentsAccessEnabled,
             myUploadsAccessEnabled: myUploadsAccessEnabled,
             stargutachterAccessEnabled: stargutachterAccessEnabled,
@@ -128,6 +135,7 @@ struct EmployeeAppAccessSettingsSection: View {
 
     private func applyDraft(_ draft: EmployeeAccessDraft) {
         scannerOnlyMode = draft.scannerOnlyMode
+        digitalAeAccessEnabled = draft.digitalAeAccessEnabled
         documentsAccessEnabled = draft.documentsAccessEnabled
         myUploadsAccessEnabled = draft.myUploadsAccessEnabled
         stargutachterAccessEnabled = draft.stargutachterAccessEnabled
@@ -143,17 +151,49 @@ struct EmployeeAppAccessSettingsSection: View {
         vermittlungMode = draft.vermittlungMode
     }
 
-    private func manualBinding(_ value: Binding<VermittlungMode>) -> Binding<VermittlungMode> {
+    private func binding(for feature: AppAccessBooleanFeature) -> Binding<Bool> {
         Binding(
-            get: { value.wrappedValue },
+            get: {
+                switch feature {
+                case .digitalAe: return digitalAeAccessEnabled
+                case .homeAreaVisible: return !scannerOnlyMode
+                case .dashboard: return dashboardAccessEnabled
+                case .commission: return commissionAccessEnabled
+                case .documents: return documentsAccessEnabled
+                case .myUploads: return myUploadsAccessEnabled
+                case .requests: return requestsAccessEnabled
+                case .tasks: return tasksAccessEnabled
+                case .meeting: return meetingAccessEnabled
+                case .onCall: return onCallAccessEnabled
+                case .ordersPlacement: return ordersPlacementAccessEnabled
+                case .accidentSketch: return accidentSketchAccessEnabled
+                case .stargutachter: return stargutachterAccessEnabled
+                case .procurementOfficer: return false
+                }
+            },
             set: { newValue in
                 selectedTemplate = nil
-                value.wrappedValue = newValue
+                switch feature {
+                case .digitalAe: digitalAeAccessEnabled = newValue
+                case .homeAreaVisible: scannerOnlyMode = !newValue
+                case .dashboard: dashboardAccessEnabled = newValue
+                case .commission: commissionAccessEnabled = newValue
+                case .documents: documentsAccessEnabled = newValue
+                case .myUploads: myUploadsAccessEnabled = newValue
+                case .requests: requestsAccessEnabled = newValue
+                case .tasks: tasksAccessEnabled = newValue
+                case .meeting: meetingAccessEnabled = newValue
+                case .onCall: onCallAccessEnabled = newValue
+                case .ordersPlacement: ordersPlacementAccessEnabled = newValue
+                case .accidentSketch: accidentSketchAccessEnabled = newValue
+                case .stargutachter: stargutachterAccessEnabled = newValue
+                case .procurementOfficer: break
+                }
             }
         )
     }
 
-    private func manualBinding(_ value: Binding<Bool>) -> Binding<Bool> {
+    private func manualBinding(_ value: Binding<VermittlungMode>) -> Binding<VermittlungMode> {
         Binding(
             get: { value.wrappedValue },
             set: { newValue in
@@ -184,6 +224,7 @@ struct EmployeeAppAccessSettingsSection: View {
 private extension EmployeeAccessDraft {
     init(
         scannerOnlyMode: Bool,
+        digitalAeAccessEnabled: Bool,
         documentsAccessEnabled: Bool,
         myUploadsAccessEnabled: Bool,
         stargutachterAccessEnabled: Bool,
@@ -199,6 +240,7 @@ private extension EmployeeAccessDraft {
         vermittlungMode: VermittlungMode
     ) {
         self.scannerOnlyMode = scannerOnlyMode
+        self.digitalAeAccessEnabled = digitalAeAccessEnabled
         self.documentsAccessEnabled = documentsAccessEnabled
         self.myUploadsAccessEnabled = myUploadsAccessEnabled
         self.stargutachterAccessEnabled = stargutachterAccessEnabled

@@ -34,6 +34,9 @@ enum NotificationType: String, Codable, CaseIterable {
     /// A new commission entry was created (admin payout needed).
     case commissionNew = "commission_new"
 
+    /// A customer completed a remote document signing link.
+    case documentSigningCompleted = "document_signing_completed"
+
     /// Catch-all for any type we don't explicitly support yet.
     case unknown = "unknown"
 }

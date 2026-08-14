@@ -4,6 +4,18 @@ import FirebaseFirestore
 import FirebaseFunctions
 
 extension AppState {
+    private func dashboardDeleteSuccessMessage(
+        for entry: ScannerSheetEntry,
+        response: [String: Any]
+    ) -> String {
+        if let nextNumber = response["nextNumber"] as? Int,
+           let year2 = response["year2"] as? String,
+           !year2.isEmpty {
+            return "\(entry.entry) entfernt. Nächste Gutachten-Nr.: \(nextNumber)/\(year2)"
+        }
+        return "\(entry.entry) aus der Dashboard-Tabelle entfernt."
+    }
+
     private func birthdayDateString(from date: Date) -> String {
         let comps = Calendar.current.dateComponents([.year, .month, .day], from: date)
         let year = comps.year ?? 2000
@@ -94,6 +106,131 @@ extension AppState {
             showToast(.error, msg)
             return false
         }
+    }
+
+    @MainActor
+    func adminFetchScannerSheetEntries() async -> [ScannerSheetEntry] {
+        guard currentUser?.role == .admin else {
+            showToast(.error, "Nur Admins dürfen die Dashboard-Verwaltung nutzen.")
+            return []
+        }
+
+        do {
+            let dataDict = try await performAdminScannerSheetHttpRequest(
+                endpointPath: "adminListScannerSheetEntriesHttp"
+            )
+            guard let rawEntries = dataDict["entries"] as? [[String: Any]] else {
+                throw NSError(
+                    domain: "AdminScannerSheet",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "Dashboard-Tabelle konnte nicht gelesen werden."]
+                )
+            }
+
+            let entries = rawEntries.compactMap(ScannerSheetEntry.init(dictionary:))
+            uiErrorMessage = nil
+            return entries
+        } catch {
+            let msg = "Dashboard konnte nicht geladen werden: \(error.localizedDescription)"
+            uiErrorMessage = msg
+            showToast(.error, msg)
+            return []
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    func adminDeleteScannerSheetEntry(_ entry: ScannerSheetEntry) async -> String? {
+        guard currentUser?.role == .admin else {
+            let msg = "Nur Admins dürfen Einträge löschen."
+            showToast(.error, msg)
+            return msg
+        }
+
+        do {
+            let dataDict = try await performAdminScannerSheetHttpRequest(
+                endpointPath: "adminDeleteScannerSheetEntryHttp",
+                body: [
+                    "rowNumber": entry.rowNumber
+                ]
+            )
+
+            if let ok = dataDict["ok"] as? Bool, !ok {
+                let msg = String(dataDict["error"] as? String ?? "Eintrag konnte nicht gelöscht werden.")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                throw NSError(
+                    domain: "AdminScannerSheet",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: msg.isEmpty ? "Eintrag konnte nicht gelöscht werden." : msg]
+                )
+            }
+
+            showToast(.success, dashboardDeleteSuccessMessage(for: entry, response: dataDict))
+            uiErrorMessage = nil
+            return nil
+        } catch {
+            let msg = error.localizedDescription
+            uiErrorMessage = msg
+            return msg
+        }
+    }
+
+    @MainActor
+    private func performAdminScannerSheetHttpRequest(
+        endpointPath: String,
+        body: [String: Any] = [:]
+    ) async throws -> [String: Any] {
+        guard let user = Auth.auth().currentUser else {
+            throw NSError(
+                domain: "AdminScannerSheet",
+                code: 401,
+                userInfo: [NSLocalizedDescriptionKey: "Nicht angemeldet."]
+            )
+        }
+
+        guard let endpoint = URL(
+            string: "https://us-central1-svs-app-864ed.cloudfunctions.net/\(endpointPath)"
+        ) else {
+            throw NSError(
+                domain: "AdminScannerSheet",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Server-URL ist ungültig."]
+            )
+        }
+
+        let idToken = try await user.getIDToken()
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let http = response as? HTTPURLResponse
+        let status = http?.statusCode ?? -1
+        let rawText = String(data: data, encoding: .utf8) ?? ""
+
+        let jsonObject = try JSONSerialization.jsonObject(with: data)
+        guard let dataDict = jsonObject as? [String: Any] else {
+            let prefix = rawText.prefix(500)
+            throw NSError(
+                domain: "AdminScannerSheet",
+                code: status,
+                userInfo: [NSLocalizedDescriptionKey: "Unerwartete Server-Antwort (HTTP \(status)): \(prefix)"]
+            )
+        }
+
+        if let ok = dataDict["ok"] as? Bool, !ok {
+            let msg = String(dataDict["error"] as? String ?? "Anfrage fehlgeschlagen.")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NSError(
+                domain: "AdminScannerSheet",
+                code: status,
+                userInfo: [NSLocalizedDescriptionKey: msg.isEmpty ? "Anfrage fehlgeschlagen." : msg]
+            )
+        }
+
+        return dataDict
     }
 
     @MainActor

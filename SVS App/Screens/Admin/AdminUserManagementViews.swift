@@ -74,6 +74,18 @@ struct AdminUsersScreen: View {
                             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                         }
                     }
+
+                    Section {
+                        NavigationLink {
+                            AdminAppAccessHubView()
+                                .environmentObject(appState)
+                        } label: {
+                            Label("Berechtigungen", systemImage: "lock.shield")
+                                .font(.subheadline)
+                        }
+                    } footer: {
+                        Text("Funktionen pro Person oder für viele auf einmal aktivieren.")
+                    }
                 }
                 .listStyle(.insetGrouped)
                 .scrollContentBackground(.hidden)
@@ -238,6 +250,7 @@ struct EditUserView: View {
         let onCallAccessEnabled: Bool
         let ordersPlacementAccessEnabled: Bool
         let accidentSketchAccessEnabled: Bool
+        let digitalAeAccessEnabled: Bool
         let isProcurementOfficer: Bool
         let allowedLawyerPowerIds: [String]
         let vermittlungMode: VermittlungMode
@@ -268,6 +281,7 @@ struct EditUserView: View {
             onCallAccessEnabled: user.onCallAccessEnabled,
             ordersPlacementAccessEnabled: user.ordersPlacementAccessEnabled,
             accidentSketchAccessEnabled: user.accidentSketchAccessEnabled,
+            digitalAeAccessEnabled: user.digitalAeAccessEnabled,
             isProcurementOfficer: user.isProcurementOfficer,
             allowedLawyerPowerIds: user.allowedLawyerPowerIds,
             vermittlungMode: user.vermittlungMode
@@ -351,7 +365,7 @@ struct EditUserView: View {
             if user.role != .employee {
                 Section(header: Text("Bestellungen")) {
                     Toggle("Zuständig für Bestellungen", isOn: binding(for: \.isProcurementOfficer))
-                    Text("Erhält Bestellanfragen von Mitarbeitern und sieht „Offene Bestellungen“ in Mein Bereich — z. B. Yasmin.")
+                    Text("Erhält Bestellanfragen von Mitarbeitern und sieht „Offene Bestellungen“ unter Aufgaben bzw. Bestellungen — z. B. Yasmin.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -360,6 +374,7 @@ struct EditUserView: View {
             EmployeeAppAccessSettingsSection(
                 showsEmployeeTemplatePicker: user.role == .employee,
                 scannerOnlyMode: binding(for: \.scannerOnlyMode),
+                digitalAeAccessEnabled: binding(for: \.digitalAeAccessEnabled),
                 documentsAccessEnabled: binding(for: \.documentsAccessEnabled),
                 myUploadsAccessEnabled: binding(for: \.myUploadsAccessEnabled),
                 stargutachterAccessEnabled: binding(for: \.stargutachterAccessEnabled),
@@ -407,6 +422,7 @@ struct EditUserView: View {
                         onCallAccessEnabled: user.onCallAccessEnabled,
                         ordersPlacementAccessEnabled: user.ordersPlacementAccessEnabled,
                         accidentSketchAccessEnabled: user.accidentSketchAccessEnabled,
+                        digitalAeAccessEnabled: user.digitalAeAccessEnabled,
                         isProcurementOfficer: user.isProcurementOfficer,
                         allowedLawyerPowerIds: user.allowedLawyerPowerIds,
                         vermittlungMode: user.vermittlungMode
@@ -508,6 +524,7 @@ struct EditUserView: View {
                     onCallAccessEnabled: user.onCallAccessEnabled,
                     ordersPlacementAccessEnabled: user.ordersPlacementAccessEnabled,
                     accidentSketchAccessEnabled: user.accidentSketchAccessEnabled,
+                    digitalAeAccessEnabled: user.digitalAeAccessEnabled,
                     isProcurementOfficer: user.isProcurementOfficer,
                     allowedLawyerPowerIds: user.allowedLawyerPowerIds,
                     vermittlungMode: user.vermittlungMode
@@ -644,6 +661,7 @@ struct AddUserView: View {
             EmployeeAppAccessSettingsSection(
                 showsEmployeeTemplatePicker: role == .employee,
                 scannerOnlyMode: $employeeAccess.scannerOnlyMode,
+                digitalAeAccessEnabled: $employeeAccess.digitalAeAccessEnabled,
                 documentsAccessEnabled: $employeeAccess.documentsAccessEnabled,
                 myUploadsAccessEnabled: $employeeAccess.myUploadsAccessEnabled,
                 stargutachterAccessEnabled: $employeeAccess.stargutachterAccessEnabled,

@@ -66,6 +66,7 @@ service cloud.firestore {
         "onCallAccessEnabled",
         "ordersPlacementAccessEnabled",
         "accidentSketchAccessEnabled",
+        "digitalAeAccessEnabled",
         "isProcurementOfficer",
         "scannerOnlyMode",
         "allowedLawyerPowerIds",
@@ -92,6 +93,7 @@ service cloud.firestore {
       (!("onCallAccessEnabled" in data) || data.onCallAccessEnabled is bool) &&
       (!("ordersPlacementAccessEnabled" in data) || data.ordersPlacementAccessEnabled is bool) &&
       (!("accidentSketchAccessEnabled" in data) || data.accidentSketchAccessEnabled is bool) &&
+      (!("digitalAeAccessEnabled" in data) || data.digitalAeAccessEnabled is bool) &&
       (!("isProcurementOfficer" in data) || data.isProcurementOfficer is bool) &&
       (!("scannerOnlyMode" in data) || data.scannerOnlyMode is bool) &&
       (!("allowedLawyerPowerIds" in data) || data.allowedLawyerPowerIds is list) &&

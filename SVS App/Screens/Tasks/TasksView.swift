@@ -18,10 +18,8 @@ struct TasksView: View {
     let isPresentedModally: Bool
 
     init(isPresentedModally: Bool = false,
-         startInAssignedByMe: Bool = false,
          startInDoneFilter: Bool = false) {
         self.isPresentedModally = isPresentedModally
-        _scope = State(initialValue: startInAssignedByMe ? .assignedByMe : .assignedToMe)
         _statusFilter = State(initialValue: startInDoneFilter ? .done : .open)
     }
 
@@ -33,18 +31,43 @@ struct TasksView: View {
         appState.currentUser?.role == .employee
     }
 
-    private enum TaskScope: String, CaseIterable {
-        case assignedToMe = "Für mich"
-        case assignedByMe = "Von mir"
-    }
-
     private enum TaskStatusFilter: String, CaseIterable {
         case open = "Offen"
         case done = "Erledigt"
     }
 
-    @State private var scope: TaskScope
     @State private var statusFilter: TaskStatusFilter
+
+    private var accent: Color {
+        appState.currentUser?.color ?? Color(red: 0.09, green: 0.40, blue: 0.75)
+    }
+
+    private var visibleOrders: [Task] {
+        visibleTasks.filter { $0.kind == .order }
+    }
+
+    private var visibleGeneralTasks: [Task] {
+        visibleTasks.filter { $0.kind == .general }
+    }
+
+    private var showsOrderQuickAction: Bool {
+        statusFilter == .open
+    }
+
+    private var showsProcurementInbox: Bool {
+        guard let user = appState.currentUser else { return false }
+        return user.isProcurementOfficer && user.role != .admin
+    }
+
+    private var openProcurementInboxCount: Int {
+        guard let uid = appState.currentUser?.id else { return 0 }
+        let normalizedUid = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        return appState.tasks.filter {
+            $0.kind == .order
+                && $0.status == .open
+                && $0.assignedUserId.trimmingCharacters(in: .whitespacesAndNewlines) == normalizedUid
+        }.count
+    }
 
 
     private var currentUser: User? { appState.currentUser }
@@ -98,32 +121,164 @@ struct TasksView: View {
     }
 
     private var visibleTasks: [Task] {
-        let base: [Task] = (scope == .assignedToMe) ? assignedToMe : assignedByMeToOthers
+        guard !currentIdentitySet.isEmpty else { return [] }
+
+        let relevant = (assignedToMe + assignedByMeToOthers)
+            .reduce(into: [UUID: Task]()) { partial, task in
+                partial[task.id] = task
+            }
+            .values
+            .sorted { $0.createdAt > $1.createdAt }
+
         switch statusFilter {
-        case .open: return base.filter { $0.status == .open }
-        case .done: return base.filter { $0.status == .done }
+        case .open: return relevant.filter { $0.status == .open }
+        case .done: return relevant.filter { $0.status == .done }
         }
     }
 
-    private var segmentTitle: String {
-        switch scope {
-        case .assignedToMe: return "Für mich"
-        case .assignedByMe: return "Von mir"
+    private var orderQuickActionCard: some View {
+        Button {
+            newTaskKind = .order
+            showNewTaskNav = true
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "cart.badge.plus")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle()
+                            .fill(Color.orange.opacity(0.14))
+                    )
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Bestellung aufgeben")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("Büromaterial, Visitenkarten, Drucksachen …")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.orange.opacity(0.22), lineWidth: 1)
+            )
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Bestellung aufgeben")
+    }
+
+    private var procurementInboxCard: some View {
+        NavigationLink {
+            AdminOpenOrdersScreen(scope: .assignedToCurrentUser)
+                .environmentObject(appState)
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "tray.full.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        Circle()
+                            .fill(accent.opacity(0.14))
+                    )
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Offene Bestellungen")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(openProcurementInboxCount == 0
+                         ? "Keine offenen Aufträge"
+                         : "\(openProcurementInboxCount) offen – jetzt bearbeiten")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(accent.opacity(0.22), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Offene Bestellungen")
+    }
+
+    private func ordersSectionHeader(count: Int) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "cart.fill")
+            Text("Bestellungen")
+            Text("(\(count))")
+                .foregroundStyle(.secondary)
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.orange)
+        .textCase(nil)
+    }
+
+    private func tasksSectionHeader(count: Int) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checklist")
+            Text("Aufgaben")
+            Text("(\(count))")
+                .foregroundStyle(.secondary)
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(accent)
+        .textCase(nil)
+    }
+
+    @ViewBuilder
+    private func taskRow(for task: Task) -> some View {
+        TaskRow(
+            task: task,
+            assignedUserName: appState.userName(for: task.assignedUserId),
+            creatorName: appState.userName(for: task.creatorUserId),
+            onEdit: { editingTask = task },
+            onToggleStatus: { appState.toggleTaskStatus(for: task) },
+            onDelete: { appState.deleteTask(task) }
+        )
+        .environmentObject(appState)
+        .listRowSeparator(.hidden)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(spacing: 10) {
-                Picker("Scope", selection: $scope) {
-                    ForEach(TaskScope.allCases, id: \.self) { s in
-                        Text(s.rawValue).tag(s)
-                    }
-                }
-                .pickerStyle(.segmented)
+            if showsProcurementInbox && statusFilter == .open {
+                procurementInboxCard
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 8)
+
+            if showsOrderQuickAction {
+                orderQuickActionCard
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+            }
 
             if visibleTasks.isEmpty {
                 ScrollView {
@@ -134,8 +289,8 @@ struct TasksView: View {
 
                         Text(statusFilter == .open
                              ? (isEmployee
-                                ? "Erstelle eine Bestellung mit dem Plus-Button oben rechts – z. B. Visitenkarten oder Büromaterial."
-                                : "Erstelle eine Aufgabe oder Bestellung mit dem Plus-Button oben rechts.")
+                                ? "Tippe oben auf „Bestellung aufgeben“ – z. B. für Visitenkarten oder Büromaterial."
+                                : "Lege oben eine Bestellung an oder eine Aufgabe mit dem Plus-Button.")
                              : "Es gibt aktuell keine erledigten Einträge in diesem Bereich.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
@@ -143,7 +298,7 @@ struct TasksView: View {
                             .padding(.horizontal)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 80)
+                    .padding(.top, 40)
                 }
                 .refreshable {
                     await appState.refreshTasksFromServer()
@@ -151,18 +306,19 @@ struct TasksView: View {
                 .background(Color(.systemGroupedBackground))
             } else {
                 List {
-                    Section(header: Text("\(segmentTitle) – \(statusFilter.rawValue) (\(visibleTasks.count))").textCase(nil)) {
-                        ForEach(visibleTasks) { task in
-                            TaskRow(
-                                task: task,
-                                assignedUserName: appState.userName(for: task.assignedUserId),
-                                creatorName: appState.userName(for: task.creatorUserId),
-                                onEdit: { editingTask = task },
-                                onToggleStatus: { appState.toggleTaskStatus(for: task) },
-                                onDelete: { appState.deleteTask(task) }
-                            )
-                            .environmentObject(appState)
-                            .listRowSeparator(.hidden)
+                    if !visibleOrders.isEmpty {
+                        Section(header: ordersSectionHeader(count: visibleOrders.count)) {
+                            ForEach(visibleOrders) { task in
+                                taskRow(for: task)
+                            }
+                        }
+                    }
+
+                    if !visibleGeneralTasks.isEmpty {
+                        Section(header: tasksSectionHeader(count: visibleGeneralTasks.count)) {
+                            ForEach(visibleGeneralTasks) { task in
+                                taskRow(for: task)
+                            }
                         }
                     }
                 }
@@ -175,25 +331,6 @@ struct TasksView: View {
                 }
             }
         }
-        .gesture(
-            DragGesture(minimumDistance: 20, coordinateSpace: .local)
-                .onEnded { value in
-                    // Horizontal swipe detection
-                    if abs(value.translation.width) > abs(value.translation.height) {
-                        if value.translation.width < 0 {
-                            // Swipe left
-                            if scope == .assignedToMe {
-                                scope = .assignedByMe
-                            }
-                        } else {
-                            // Swipe right
-                            if scope == .assignedByMe {
-                                scope = .assignedToMe
-                            }
-                        }
-                    }
-                }
-        )
         .background(Color(.systemGroupedBackground))
         .navigationDestination(isPresented: $showNewTaskNav) {
             NewTaskView(mode: .new, task: nil, kind: newTaskKind)
