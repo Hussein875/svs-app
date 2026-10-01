@@ -1,0 +1,69 @@
+---
+description: Besichtigung in UltraExpert — Adresse des Auftraggebers und Sachverständiger aus dem Drive-Ordner
+alwaysApply: true
+---
+
+# Besichtigung in UltraExpert
+
+- Besichtigungsadresse ist die Adresse des Auftraggebers (Kunde), nicht die der Werkstatt. Ort/Firma bleibt leer, der Name gehört nur zu den Teilnehmern.
+- Den Sachverständigen vor Ort aus der Klammer im Drive-Ordnernamen nehmen und im Feld Sachverständiger eintragen.
+- Bekannte Kürzel: `(HU)` Hussein Souleiman, `(H)` oder `(HJ)` Hussein Jaber, `(B)` Hussein Selman.
+- Beispiel: Ordner `2037/26 Unfallgutachten Mahn (HU)` → Sachverständiger Hussein Souleiman, Adresse Beim Rumpsfelde 2, 28844 Weyhe.
+- Nächste HU aus der BD unten links übernehmen. Steht dort ein anderes Datum als im Fahrzeugschein, gilt die BD. Beispiel 2037/26: Schein 10/2025, BD 10/2027 → Oktober 2027.
+- Das Fahrzeug immer über die Fahrzeugidentifikationsnummer identifizieren, nicht über HSN/TSN. Die FIN-Abfrage öffnet die Modellauswahl. Dort die Variante wählen, die zur FIN, zur Erstzulassung und zum Getriebe passt. Nur diese Abfrage füllt im Reiter Ausstattung die Ausstattung.
+
+# Beteiligte
+
+- Beim Anwalt und bei der Versicherung immer die Anrede „Firma“ auswählen. Der Auftraggeber bleibt „Herr“ oder „Frau“.
+
+# Bereifung
+
+- Eintragen: Profiltiefe, Hersteller, Dimension, Felgen.
+- Felgen von der BD: oberes Kreuz Stahl, unteres Kreuz Aluminium. Steht es nicht eindeutig auf der BD, aus der Abtretungserklärung oder den Bildern nehmen.
+- Reifentyp, Modell und Bemerkung leer lassen.
+
+# Begutachtung, Reiter Vor Ort
+
+- Besichtigungsbedingungen: ausreichend. Hebebühne leer.
+- Besichtigungszustand: unrepariert. Identifizierung: FZ-Schein / Zul.-Besch. Teil 1.
+- Scheckheftgepflegt nur ausfüllen, wenn auf der BD das Kreuz gesetzt ist, dann Fachwerkstatt. Sonst leer.
+- Probelauf Antrieb: durchgeführt. Probefahrt, Fehlerspeicher, EDR und Hilfsmittel leer lassen.
+- Allgemeinzustand: gepflegt, normale Gebrauchsspuren, danach den Sprung, der Karosserie-, Lack- und Innenraumzustand mit übernimmt. Zustandsbeschreibung leer.
+- Schilderung aus der BD. Geparktes Fahrzeug: Parkplatzunfall, ohne weitere Auswahl.
+- Unfallprotokoll nur, wenn auf der BD Polizei angekreuzt ist. Sonst leer.
+- Plausibilität: plausibel. Kompatibilität und detaillierte Schilderung leer.
+
+# Vorschäden
+
+- Häkchen „Keine“ nur dort entfernen, wo die BD einen Vorschaden nennt. Unfachgerecht bleibt „Keine“, solange die BD das nicht hergibt.
+- Repariert, außerhalb des Schadenbereichs: Variante „A - Standard“, Aufzählungspunkt statt Platzhalter. Beispiel SFH: Stoßfänger hinten erneuert.
+- Vor einer Aufzählung keinen Doppelpunkt stehen lassen. „festgestellt:“ und „Im Schadenbereich:“ werden zu „festgestellt“ und „Im Schadenbereich“.
+- Nicht repariert und im Schadenbereich: Variante „A - Abzug Vorschäden - WV Erneuerung“. Vorlage lesen und Bauteile löschen, die nicht zu diesem Schaden gehören.
+- Liegen Vorschäden sowohl im Schadenbereich als auch außerhalb, dieselbe erste Variante A nehmen. Unter „Nicht im Schadenbereich“ nur die Bauteile außerhalb, unter „Im Schadenbereich“ nur die Bauteile im aktuellen Schaden. Den Text zur Wertverbesserung stehen lassen. Beispiel 2083/26, aktueller Schaden vorne links: Nicht im Schadenbereich Stoßfänger hinten beschädigt, im Schadenbereich Stoßfänger vorne beschädigt.
+- Ein Stoßfänger, der links und rechts beschädigt ist, wird einmal zusammengefasst: Stoßfänger hinten beschädigt.
+- Liegt der nicht reparierte Vorschaden nicht im Schadenbereich, Variante „C - Abzug - Vorschaden NICHT im Schadenbereich“.
+
+# Begutachtung, Reiter Schadenfeststellung
+
+- Fahrbereitschaft nur aus drei Optionen: verkehrssicher, nicht verkehrssicher, nicht fahrbereit. Kreuz auf der BD oben rechts übernehmen. „nicht verkehrssicher“ bleibt „nicht verkehrssicher“, auch wenn der Wagen fahrfähig ist.
+- Airbag ausgelöst nur „Ja“, wenn die BD oder die Bilder einen ausgelösten Airbag zeigen. Sonst „Nein“.
+- Schadenbeschreibung: Variante „Schadenfall“, immer als Aufzählung. Einleitung: „Im Zusammenhang mit dem Schadenfall wurden am Fahrzeug folgende Beschädigungen festgestellt:“ Danach ein Punkt pro beschädigtem Bauteil, Reparaturweg aus dem Puzzle, zum Beispiel „Der Kotflügel vorne links ist beschädigt und muss erneuert werden“. Unbeschädigte Bauteile nicht nennen. Letzter Punkt: „Diverse Anbauteile sowie Komponenten im Schadenbereich sind beschädigt und müssen erneuert werden (vgl. Ersatzteile in der Kalkulation).“ Danach der Schluss: „Zum Schadenumfang wird neben der Schadenbeschreibung auf die beigefügten Lichtbilder verwiesen. Eine detaillierte Aufstellung des Schadenumfangs wird aus der Kalkulation ersichtlich.“
+- Auf der Skizze die auf der BD markierten Schadenregionen anklicken. Beispiel vorne rechts: ein bis zwei Kacheln vorne rechts.
+
+# Dokumente
+
+- Abtretungserklärung aus dem Drive-Ordner über Importieren, Unterschrift, Abtretungserklärung.
+- Vollmacht des Anwalts über Importieren, Unterschrift, Vollmacht Anwalt.
+- Liegt eine Verkehrsunfallanzeige in den Fotos, als Unfallbericht importieren.
+
+# Lichtbilder
+
+- Erst die vier Übersichten: vorne links, vorne rechts, hinten rechts, hinten links.
+- Danach die Übersicht mit Maßstab. Titel: Schadenbereich und die Seite, zum Beispiel Schadenbereich vorne links.
+- Pro Bauteil erst eine Übersicht, danach die weiteren Aufnahmen. Stoßfänger vor den Kotflügel. Beim Stoßfänger eine Übersicht und zwei weitere Bilder, danach der Kotflügel mit eigenen weiteren Bildern.
+- Die erste Aufnahme eines Bauteils heißt zum Beispiel Stoßfänger vorne links beschädigt, Kotflügel vorne links beschädigt, Rad vorne links beschädigt, Spiegel links beschädigt. Jede weitere Aufnahme desselben Bauteils heißt nur Weitere Übersicht.
+- Spiegel ein bis zwei Bilder. Das Bild mit Maßstab nur, wenn der Schaden dort zu sehen ist.
+- Danach Kilometerstand, Fahrzeugidentifikationsnummer, Fahrzeugschein.
+- Zum Schluss die Vorschäden in der Reihenfolge aus dem Gutachten, Titel mit Bindestrich: Vorschaden - Stoßfänger hinten, Vorschaden - Stoßfänger vorne. Aktuellen Schaden und Vorschaden nicht vertauschen.
+- Sobald die Lichtbilder fertig sind: die Besichtigungsbilder auswählen, über Zuordnen dem Gutachten zuordnen und speichern. Die Bilder bleiben im Ordner Original und liegen zusätzlich im Gutachten, in derselben Reihenfolge.
+- Fotos aus dem Drive-Ordner Fotos 2 gehören in den Ordner Kundenbilder. Den Ordner über das Plus neben Original anlegen. Diese Bilder nicht dem Gutachten zuordnen.
