@@ -3,6 +3,10 @@ description: Besichtigung in UltraExpert — Adresse des Auftraggebers und Sachv
 alwaysApply: true
 ---
 
+# Abschluss
+
+- Nach jeder fertigen Akte einen kurzen Report schreiben: was aus der BD übernommen wurde, was offen blieb, und konkrete Fragen zum Fall. Den Report als Google Doc in den Drive-Ordner der Akte legen, Name „Aktennummer Report“, zum Beispiel „2083/26 Report“.
+
 # Besichtigung in UltraExpert
 
 - Besichtigungsadresse ist die Adresse des Auftraggebers (Kunde), nicht die der Werkstatt. Ort/Firma bleibt leer, der Name gehört nur zu den Teilnehmern.
